@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HDon>
+  <DLHDon>
+    <TTChung>
+      <KHHDon>1C26TRK</KHHDon>
+      <SHDon>0008899</SHDon>
+      <NLap>2026-06-30</NLap>
+      <DVTTe>VND</DVTTe>
+    </TTChung>
+    <NDHDon>
+      <NBan>
+        <Ten>CÔNG TY CP RIKKEISOFT</Ten>
+        <MST>0105847055</MST>
+        <DChi>Toà nhà Handico, Mễ Trì, Quận Nam Từ Liêm, Hà Nội, Việt Nam</DChi>
+      </NBan>
+      <NMua>
+        <Ten>NGÂN HÀNG MIZUHO - HANOI BRANCH</Ten>
+        <MST>0100234567</MST>
+        <DChi>16 Phan Chu Trinh, Hoàn Kiếm, Hà Nội</DChi>
+        <HVTNMHang>Ngân hàng Mizuho</HVTNMHang>
+      </NMua>
+      <TToan>
+        <TgTCThue>120000000</TgTCThue>
+        <TgTThue>12000000</TgTThue>
+        <TTCKTMai>0</TTCKTMai>
+        <TgTTTBSo>132000000</TgTTTBSo>
+        <THTTLTSuat>
+          <LTSuat>
+            <TSuat>10%</TSuat>
+            <ThTien>120000000</ThTien>
+            <TThue>12000000</TThue>
+          </LTSuat>
+        </THTTLTSuat>
+      </TToan>
+    </NDHDon>
+  </DLHDon>
+</HDon>

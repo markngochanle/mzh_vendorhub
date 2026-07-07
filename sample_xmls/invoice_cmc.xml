@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HDon>
+  <DLHDon>
+    <TTChung>
+      <KHHDon>1C26TVY</KHHDon>
+      <SHDon>0000567</SHDon>
+      <NLap>2026-06-15</NLap>
+      <DVTTe>VND</DVTTe>
+    </TTChung>
+    <NDHDon>
+      <NBan>
+        <Ten>TỔNG CÔNG TY CÔNG NGHỆ VÀ GIẢI PHÁP CMC - CÔNG TY CỔ PHẦN</Ten>
+        <MST>0102715694</MST>
+        <DChi>Tầng 11, Tòa nhà CMC, Phố Duy Tân, Phường Dịch Vọng Hậu, Quận Cầu Giấy, Hà Nội, Việt Nam</DChi>
+      </NBan>
+      <NMua>
+        <Ten>CÔNG TY TNHH NGÂN HÀNG MIZUHO - CHI NHÁNH HÀ NỘI</Ten>
+        <MST>0100234567</MST>
+        <DChi>Tầng 4, Tòa nhà CornerStone, 16 Phan Chu Trinh, Quận Hoàn Kiếm, Hà Nội, Việt Nam</DChi>
+        <HVTNMHang>Ngân hàng Mizuho</HVTNMHang>
+      </NMua>
+      <TToan>
+        <TgTCThue>70000000</TgTCThue>
+        <TgTThue>7000000</TgTThue>
+        <TTCKTMai>0</TTCKTMai>
+        <TgTTTBSo>77000000</TgTTTBSo>
+        <THTTLTSuat>
+          <LTSuat>
+            <TSuat>10%</TSuat>
+            <ThTien>70000000</ThTien>
+            <TThue>7000000</TThue>
+          </LTSuat>
+        </THTTLTSuat>
+      </TToan>
+    </NDHDon>
+  </DLHDon>
+</HDon>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HDon>
+  <DLHDon>
+    <TTChung>
+      <KHHDon>1C26TUU</KHHDon>
+      <SHDon>0001234</SHDon>
+      <NLap>2026-05-31</NLap>
+      <DVTTe>VND</DVTTe>
+    </TTChung>
+    <NDHDon>
+      <NBan>
+        <Ten>CÔNG TY TNHH PHẦN MỀM FPT</Ten>
+        <MST>0102135934</MST>
+        <DChi>Tòa nhà FPT, Phố Duy Tân, Phường Dịch Vọng Hậu, Quận Cầu Giấy, Hà Nội, Việt Nam</DChi>
+      </NBan>
+      <NMua>
+        <Ten>CÔNG TY TNHH NGÂN HÀNG MIZUHO - CHI NHÁNH HÀ NỘI</Ten>
+        <MST>0100234567</MST>
+        <DChi>Tầng 4, Tòa nhà CornerStone, 16 Phan Chu Trinh, Quận Hoàn Kiếm, Hà Nội, Việt Nam</DChi>
+        <HVTNMHang>Ngân hàng Mizuho</HVTNMHang>
+      </NMua>
+      <TToan>
+        <TgTCThue>45000000</TgTCThue>
+        <TgTThue>3600000</TgTThue>
+        <TTCKTMai>0</TTCKTMai>
+        <TgTTTBSo>48600000</TgTTTBSo>
+        <THTTLTSuat>
+          <LTSuat>
+            <TSuat>8%</TSuat>
+            <ThTien>45000000</ThTien>
+            <TThue>3600000</TThue>
+          </LTSuat>
+        </THTTLTSuat>
+      </TToan>
+    </NDHDon>
+  </DLHDon>
+</HDon>
