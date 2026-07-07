@@ -313,28 +313,70 @@ def get_mgs_data_dict(conn, inv) -> dict:
     buyer_id = None
     seller_id = None
     
+    resolved_framework_no = ""
+    resolved_annex_name = ""
+    
     if contract_no:
         c_row = conn.execute("""
-            SELECT id, buyer_vendor_id, seller_vendor_id FROM contracts 
+            SELECT id, framework_no, buyer_vendor_id, seller_vendor_id FROM contracts 
             WHERE LOWER(TRIM(framework_no)) = ? AND is_active = 1
         """, (contract_no.lower(),)).fetchone()
         
         if c_row:
             buyer_id = c_row["buyer_vendor_id"]
             seller_id = c_row["seller_vendor_id"]
+            resolved_framework_no = c_row["framework_no"]
+            
+            # Check if there is an annex for this month from contract_references
+            if year is not None and month is not None:
+                month_str = f"{year:04d}-{month:02d}"
+                ref_row = conn.execute("""
+                    SELECT annex_id FROM contract_references
+                    WHERE contract_id = ? AND month = ? AND annex_id > 0
+                    LIMIT 1
+                """, (c_row["id"], month_str)).fetchone()
+                if ref_row:
+                    annex_row = conn.execute("SELECT annex_name FROM contract_annexes WHERE id = ?", (ref_row["annex_id"],)).fetchone()
+                    if annex_row:
+                        resolved_annex_name = annex_row["annex_name"]
+            
+            # Fallback if no reference record: check date ranges of active annexes
+            if not resolved_annex_name and year is not None and month is not None:
+                annexes = conn.execute("SELECT id, annex_name, start_date, end_date FROM contract_annexes WHERE contract_id = ? AND is_active = 1", (c_row["id"],)).fetchall()
+                target_date = date(year, month, 15) # middle of the month
+                for annex in annexes:
+                    try:
+                        s_dt = datetime.strptime(annex["start_date"], "%Y-%m-%d").date() if annex["start_date"] else None
+                        e_dt = datetime.strptime(annex["end_date"], "%Y-%m-%d").date() if annex["end_date"] else None
+                        if s_dt and e_dt:
+                            if s_dt <= target_date <= e_dt:
+                                resolved_annex_name = annex["annex_name"]
+                                break
+                        elif s_dt and not e_dt:
+                            if s_dt <= target_date:
+                                resolved_annex_name = annex["annex_name"]
+                                break
+                    except Exception:
+                        pass
         else:
             a_row = conn.execute("""
-                SELECT contract_id FROM contract_annexes
+                SELECT id, contract_id, annex_name FROM contract_annexes
                 WHERE LOWER(TRIM(annex_name)) = ? AND is_active = 1
             """, (contract_no.lower(),)).fetchone()
             if a_row:
+                resolved_annex_name = a_row["annex_name"]
                 c_row2 = conn.execute("""
-                    SELECT buyer_vendor_id, seller_vendor_id FROM contracts 
+                    SELECT framework_no, buyer_vendor_id, seller_vendor_id FROM contracts 
                     WHERE id = ?
                 """, (a_row["contract_id"],)).fetchone()
                 if c_row2:
                     buyer_id = c_row2["buyer_vendor_id"]
                     seller_id = c_row2["seller_vendor_id"]
+                    resolved_framework_no = c_row2["framework_no"]
+                    
+    # Fallback if both are empty but contract_no is present
+    if contract_no and not resolved_framework_no and not resolved_annex_name:
+        resolved_framework_no = contract_no
 
     seller_mst = (inv["seller_mst"] or "").strip()
     if not seller_id and seller_mst:
@@ -417,15 +459,28 @@ def get_mgs_data_dict(conn, inv) -> dict:
     if vat_amt_str == "-":
         vat_rate_str = "-"
 
+    # Format the contract and annex text for PDF
+    contract_display = ""
+    if resolved_framework_no and resolved_annex_name:
+        contract_display = f"{resolved_framework_no} and {resolved_annex_name}"
+    elif resolved_framework_no:
+        contract_display = resolved_framework_no
+    elif resolved_annex_name:
+        contract_display = resolved_annex_name
+
+    content_of_work = "Software development service"
+    if contract_display:
+        content_of_work = f"Software development service (According to Contract Number: {contract_display})"
+
     return {
         "id": inv["id"],
         "sent_to_mgs": int(inv["sent_to_mgs"] or 0),
         "vendor": vendor_details,
         "buyer": buyer_details,
-        "contract_no": contract_no,
+        "contract_no": contract_display,
         "ref_num": ref_num,
         "service_period": service_period,
-        "content_of_work": f"Software development service (According to Contract Number: {contract_no})" if contract_no else "Software development service",
+        "content_of_work": content_of_work,
         "currency": currency,
         "invoice_no": inv_no,
         "invoice_date": invoice_date_formatted,
