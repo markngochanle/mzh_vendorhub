@@ -45,10 +45,11 @@ def load_contracts(conn):
 
 def load_annexes(conn):
     return conn.execute("""
-        SELECT id, contract_id, annex_name, start_date, end_date
-        FROM contract_annexes
-        WHERE is_active=1
-        ORDER BY contract_id DESC, id DESC
+        SELECT a.id, a.contract_id, a.annex_name, a.start_date, a.end_date, c.seller_vendor_id
+        FROM contract_annexes a
+        JOIN contracts c ON c.id = a.contract_id
+        WHERE a.is_active=1 AND a.deleted_at IS NULL
+        ORDER BY a.contract_id DESC, a.id DESC
     """).fetchall()
 
 
@@ -60,10 +61,7 @@ def vendor_label(r):
 
 def contract_label(r):
     no = (r["framework_no"] or "").strip()
-    nm = (r["framework_name"] or "").strip()
     label = no if no else f"Contract#{r['id']}"
-    if nm:
-        label += f" | {nm}"
     return label
 
 
@@ -116,10 +114,11 @@ def check_no_overlap(conn, staff_id_exclude, vendor_id: int, full_name_vi: str,
     return True, None
 
 
-def page_staff_list(q: str, vendor_id: str, contract_id: str, status: str, *, return_to: str):
+def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = "", status: str = "active", *, return_to: str):
     q = (q or "").strip()
     vendor_id = (vendor_id or "").strip()
     contract_id = (contract_id or "").strip()
+    annex_id = (annex_id or "").strip()
     status = (status or "active").strip().lower()  # active|inactive|all
     if status not in ("active", "inactive", "all"):
         status = "active"
@@ -134,6 +133,10 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, status: str, *, re
     if contract_id.isdigit():
         where.append("s.contract_id = ?")
         params.append(int(contract_id))
+
+    if annex_id.isdigit():
+        where.append("s.annex_id = ?")
+        params.append(int(annex_id))
 
     if status == "active":
         where.append("(s.status IS NULL OR TRIM(s.status) = '')")
@@ -151,6 +154,7 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, status: str, *, re
     try:
         vendors = load_vendors_for_staff(conn)
         contracts = load_contracts(conn)
+        annexes = load_annexes(conn)
 
         rows = conn.execute(f"""
             SELECT
@@ -180,6 +184,11 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, status: str, *, re
         sel = "selected" if contract_id.isdigit() and int(contract_id) == c["id"] else ""
         contract_opts.append(f'<option value="{c["id"]}" data-vendor-id="{c["seller_vendor_id"]}" {sel}>{escape(contract_label(c))}</option>')
 
+    annex_opts = ['<option value="">-- all annexes --</option>']
+    for a in annexes:
+        sel = "selected" if annex_id.isdigit() and int(annex_id) == a["id"] else ""
+        annex_opts.append(f'<option value="{a["id"]}" data-contract-id="{a["contract_id"]}" data-vendor-id="{a["seller_vendor_id"]}" {sel}>{escape(a["annex_name"])}</option>')
+
     body = f"""
     <div class="card">
       <form class="filters" method="GET" action="/staff">
@@ -199,6 +208,13 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, status: str, *, re
           <div class="label">Framework Contract</div>
           <select id="contract_id" name="contract_id" style="width:100%;">
             {''.join(contract_opts)}
+          </select>
+        </div>
+
+        <div style="min-width:280px;">
+          <div class="label">Annex (filtered by Framework)</div>
+          <select id="annex_id" name="annex_id" style="width:100%;">
+            {''.join(annex_opts)}
           </select>
         </div>
 
@@ -224,39 +240,74 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, status: str, *, re
       (function() {{
         const vendorSel = document.getElementById('vendor_id');
         const contractSel = document.getElementById('contract_id');
-        if (vendorSel && contractSel) {{
-          function filterContract() {{
-            const vId = vendorSel.value;
-            const opts = contractSel.querySelectorAll('option');
-            let hasSelectedVisible = false;
+        const annexSel = document.getElementById('annex_id');
 
-            opts.forEach((opt) => {{
-              const optVendor = opt.getAttribute('data-vendor-id');
-              if (!optVendor) {{
-                opt.hidden = false; // -- all contracts --
-                return;
-              }}
-              opt.hidden = (vId && optVendor !== vId);
-              if (!opt.hidden && opt.selected) {{
-                hasSelectedVisible = true;
-              }}
-            }});
+        function filterContract() {{
+          const vId = vendorSel.value;
+          const opts = contractSel.querySelectorAll('option');
+          let hasSelectedVisible = false;
 
-            if (!hasSelectedVisible) {{
-              contractSel.value = "";
+          opts.forEach((opt) => {{
+            const optVendor = opt.getAttribute('data-vendor-id');
+            if (!optVendor) {{
+              opt.hidden = false; // -- all contracts --
+              return;
             }}
-          }}
+            opt.hidden = (vId && optVendor !== vId);
+            if (!opt.hidden && opt.selected) {{
+              hasSelectedVisible = true;
+            }}
+          }});
 
-          vendorSel.addEventListener('change', filterContract);
-          filterContract();
+          if (!hasSelectedVisible) {{
+            contractSel.value = "";
+          }}
+          filterAnnex();
         }}
+
+        function filterAnnex() {{
+          const vId = vendorSel.value;
+          const cId = contractSel.value;
+          const opts = annexSel.querySelectorAll('option');
+          let hasSelectedVisible = false;
+
+          opts.forEach((opt) => {{
+            const optContract = opt.getAttribute('data-contract-id');
+            const optVendor = opt.getAttribute('data-vendor-id');
+            if (!optContract && !optVendor) {{
+              opt.hidden = false; // -- all annexes --
+              return;
+            }}
+
+            let show = true;
+            if (vId && optVendor && optVendor !== vId) {{
+              show = false;
+            }}
+            if (cId && optContract && optContract !== cId) {{
+              show = false;
+            }}
+
+            opt.hidden = !show;
+            if (show && opt.selected) {{
+              hasSelectedVisible = true;
+            }}
+          }});
+
+          if (!hasSelectedVisible) {{
+            annexSel.value = "";
+          }}
+        }}
+
+        if (vendorSel) vendorSel.addEventListener('change', filterContract);
+        if (contractSel) contractSel.addEventListener('change', filterAnnex);
+        filterContract();
       }})();
     </script>
 
     <table>
       <thead>
         <tr>
-          <th>ID</th>
+          <th>No.</th>
           <th>Name (VI)</th>
           <th>Vendor</th>
           <th>Project</th>
@@ -274,13 +325,13 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, status: str, *, re
       </thead>
       <tbody>
     """
-    for r in rows:
+    for idx, r in enumerate(rows, 1):
         ot = "Yes" if int(r["ot"] or 0) == 1 else "No"
         st = (r["status"] or "").strip()
 
         body += f"""
         <tr>
-          <td>{r["id"]}</td>
+          <td>{idx}</td>
           <td><a href="/staff/edit?id={r["id"]}">{escape(r["full_name_vi"] or "")}</a></td>
           <td>{escape(r["vendor_name"] or "")}<div class="muted">{escape(r["vendor_tax"] or "")}</div></td>
           <td>{escape(r["project_name"] or "")}</td>
@@ -800,7 +851,7 @@ def page_staff_shifts():
         conn.close()
 
     trs = []
-    for r in rows:
+    for idx, r in enumerate(rows, 1):
         ot_label = '<b style="color: green;">Yes (1)</b>' if r["ot"] == 1 else 'No (0)'
         
         shift_val = r["work_shift"] or ""
@@ -819,7 +870,7 @@ def page_staff_shifts():
 
         trs.append(f"""
         <tr>
-          <td>{r["id"]}</td>
+          <td>{idx}</td>
           <td><b>{escape(r["full_name_vi"])}</b></td>
           <td>{escape(r["vendor_name"] or "")}</td>
           <td>{escape(r["project_name"] or "")} <div class="muted">{escape(r["position"] or "")}</div></td>
@@ -848,7 +899,7 @@ def page_staff_shifts():
       <table>
         <thead>
           <tr>
-            <th>ID</th>
+            <th>No.</th>
             <th>Full Name</th>
             <th>Vendor</th>
             <th>Project / Position</th>

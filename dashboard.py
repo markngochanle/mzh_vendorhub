@@ -57,22 +57,28 @@ def page_dashboard(handler):
                 monthly_trend[month_key] = monthly_trend.get(month_key, 0) + val_amt
 
         # 2. Staff metrics
+        today_str = date.today().strftime("%Y-%m-%d")
         vendor_staff_rows = conn.execute("""
-            SELECT v.short_name, COUNT(s.id) as staff_count
+            SELECT v.short_name, COUNT(DISTINCT s.full_name_vi) as staff_count
             FROM vendors v
-            LEFT JOIN contract_staff s ON v.id = s.vendor_id AND (s.status IS NULL OR s.status != 'inactive')
+            LEFT JOIN contract_staff s ON v.id = s.vendor_id 
+                AND (s.status IS NULL OR s.status != 'inactive')
+                AND (s.joining_date IS NULL OR s.joining_date <= ?)
+                AND (s.tentative_leaving_date IS NULL OR s.tentative_leaving_date >= ?)
             WHERE v.purchasing = 0 AND v.is_active = 1
             GROUP BY v.id
             ORDER BY staff_count DESC
-        """).fetchall()
+        """, (today_str, today_str)).fetchall()
         
         vendor_staff_labels = [r["short_name"] or "Unknown" for r in vendor_staff_rows]
         vendor_staff_data = [r["staff_count"] for r in vendor_staff_rows]
         total_active_staff = sum(vendor_staff_data)
         
-        # 3. Expirations within 30 days
+        # 3. Expirations within 30 days (1 month)
         today = date.today()
         expiring_contracts = []
+        
+        # Load active contracts expiring within 30 days
         all_contracts = conn.execute("SELECT id, framework_no, framework_name, end_date FROM contracts WHERE is_active = 1").fetchall()
         for c in all_contracts:
             if c["end_date"]:
@@ -85,16 +91,60 @@ def page_dashboard(handler):
                             "framework_no": c["framework_no"],
                             "framework_name": c["framework_name"],
                             "end_date": c["end_date"],
-                            "days_left": delta
+                            "days_left": delta,
+                            "display_no": c["framework_no"],
+                            "display_name": c["framework_name"] or "Framework Contract",
+                            "type": "contract"
                         })
                 except Exception:
                     pass
 
-        # Sort expiring contracts
+        # Load active annexes expiring within 30 days
+        all_annexes = conn.execute("""
+            SELECT ca.id, ca.contract_id, ca.annex_name, ca.end_date, c.framework_no, c.framework_name
+            FROM contract_annexes ca
+            JOIN contracts c ON c.id = ca.contract_id
+            WHERE ca.is_active = 1
+        """).fetchall()
+        for a in all_annexes:
+            if a["end_date"]:
+                try:
+                    ed = datetime.strptime(a["end_date"].strip(), "%Y-%m-%d").date()
+                    delta = (ed - today).days
+                    if delta <= 30:
+                        expiring_contracts.append({
+                            "id": a["contract_id"],
+                            "framework_no": a["framework_no"],
+                            "framework_name": a["framework_name"],
+                            "annex_name": a["annex_name"],
+                            "end_date": a["end_date"],
+                            "days_left": delta,
+                            "display_no": f"{a['framework_no']} - {a['annex_name']}",
+                            "display_name": "Contract Annex",
+                            "type": "annex"
+                        })
+                except Exception:
+                    pass
+
+        # Sort expiring contracts/annexes by days_left
         expiring_contracts.sort(key=lambda x: x["days_left"])
 
     finally:
         conn.close()
+
+    # Construct hover tooltip text listing all expiring contracts/annexes
+    tooltip_lines = []
+    if expiring_contracts:
+        for ec in expiring_contracts:
+            status_desc = f"Expired {abs(ec['days_left'])} days ago" if ec["days_left"] < 0 else f"{ec['days_left']} days left"
+            if ec["type"] == "annex":
+                line = f"- Phụ lục: {ec['framework_no']} - {ec['framework_name'] or 'Framework Contract'} ({ec['annex_name']}) [End: {ec['end_date']}, {status_desc}]"
+            else:
+                line = f"- Hợp đồng khung: {ec['framework_no']} - {ec['framework_name'] or 'Framework Contract'} [End: {ec['end_date']}, {status_desc}]"
+            tooltip_lines.append(line)
+    else:
+        tooltip_lines.append("No expiring contracts or annexes in the next 30 days.")
+    tooltip_text = "\n".join(tooltip_lines)
 
     # Formatted KPI text
     kpi_invoices = f"{len(invoices_rows)} Invoices"
@@ -132,8 +182,8 @@ def page_dashboard(handler):
             exp_rows_html.append(f"""
             <div style="padding:10px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; font-size:13px;">
               <div>
-                <a href="/contract/edit?id={ec['id']}"><strong>{escape(ec['framework_no'])}</strong></a>
-                <div class="muted" style="font-size:11px;">{escape(ec['framework_name'] or "")}</div>
+                <a href="/contract/edit?id={ec['id']}"><strong>{escape(ec['display_no'])}</strong></a>
+                <div class="muted" style="font-size:11px;">{escape(ec['display_name'])}</div>
               </div>
               <div style="text-align:right;">
                 <div style="font-size:11px; color:var(--text-muted);">End: {escape(ec['end_date'])}</div>
@@ -182,10 +232,10 @@ def page_dashboard(handler):
         </div>
       </div>
 
-      <div class="card" style="margin:0; padding:18px; border-left:4px solid {'#ef4444' if expiring_contracts else '#f59e0b'}; display:flex; align-items:center; gap:16px;">
+      <div class="card" title="{escape(tooltip_text)}" style="margin:0; padding:18px; border-left:4px solid {'#ef4444' if expiring_contracts else '#f59e0b'}; display:flex; align-items:center; gap:16px; cursor:help;">
         <div style="font-size:32px; background:var(--bg-main); padding:8px; border-radius:8px;">⚠️</div>
         <div>
-          <div style="font-size:12px; color:var(--text-muted); font-weight:600; text-transform:uppercase; margin-bottom:4px;">Contract Alerts</div>
+          <div style="font-size:12px; color:var(--text-muted); font-weight:600; text-transform:uppercase; margin-bottom:4px;">Contract/Annex alert</div>
           <div style="font-size:20px; font-weight:700; color:{'#ef4444' if expiring_contracts else 'var(--text-primary)'};">{kpi_expirations}</div>
         </div>
       </div>
@@ -234,7 +284,7 @@ def page_dashboard(handler):
 
       <!-- Right: Expirations -->
       <div class="card" style="margin:0; display:flex; flex-direction:column; padding:18px;">
-        <h3 style="margin:0 0 10px 0; font-size:15px; border-bottom:1px solid var(--border); padding-bottom:8px;">Upcoming Contract Expirations</h3>
+        <h3 style="margin:0 0 10px 0; font-size:15px; border-bottom:1px solid var(--border); padding-bottom:8px;">Upcoming Contract/Annex Expirations</h3>
         <div style="flex:1; overflow-y:auto; max-height:230px;">
           {''.join(exp_rows_html)}
         </div>

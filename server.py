@@ -92,8 +92,6 @@ from attendance import (
     handle_attendance_monthly_unlock_get,
     handle_attendance_save_cell_post,
     handle_attendance_monthly_export_get,
-    page_attendance_import_bulk,
-    handle_attendance_import_bulk_post,
 )
 
 
@@ -262,8 +260,9 @@ class Handler(BaseHTTPRequestHandler):
                 q = qs.get("q", [""])[0]
                 vendor_id = qs.get("vendor_id", [""])[0]
                 contract_id = qs.get("contract_id", [""])[0]
+                annex_id = qs.get("annex_id", [""])[0]
                 status = qs.get("status", ["active"])[0]
-                send_html(self, page_staff_list(q=q, vendor_id=vendor_id, contract_id=contract_id, status=status, return_to=self.path))
+                send_html(self, page_staff_list(q=q, vendor_id=vendor_id, contract_id=contract_id, annex_id=annex_id, status=status, return_to=self.path))
                 return
 
             if path == "/staff/shifts":
@@ -275,14 +274,13 @@ class Handler(BaseHTTPRequestHandler):
                     "month": qs.get("month", [""])[0],
                     "vendor_id": qs.get("vendor_id", [""])[0],
                     "contract_id": qs.get("contract_id", [""])[0],
+                    "annex_id": qs.get("annex_id", [""])[0],
                     "q": qs.get("q", [""])[0],
                 }
                 send_html(self, page_attendance(filters))
                 return
 
-            if path == "/attendance/import-bulk":
-                send_html(self, page_attendance_import_bulk(self))
-                return
+
 
             if path == "/attendance/lock":
                 handle_attendance_lock_get(self)
@@ -301,6 +299,7 @@ class Handler(BaseHTTPRequestHandler):
                     "month": qs.get("month", [""])[0],
                     "vendor_id": qs.get("vendor_id", [""])[0],
                     "contract_id": qs.get("contract_id", [""])[0],
+                    "annex_id": qs.get("annex_id", [""])[0],
                     "q": qs.get("q", [""])[0],
                 }
                 send_html(self, page_monthly_attendance(filters))
@@ -461,9 +460,7 @@ class Handler(BaseHTTPRequestHandler):
                 handle_attendance_import_post(self)
                 return
 
-            if path == "/attendance/import-bulk":
-                handle_attendance_import_bulk_post(self)
-                return
+
 
             if path == "/attendance/save":
                 handle_attendance_save_post(self)

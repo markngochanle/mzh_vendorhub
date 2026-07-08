@@ -856,32 +856,7 @@ class TestAttendance(BaseTestCase):
             # Restore original function
             attendance.parse_multipart_attendance = orig
 
-    def test_attendance_import_bulk(self):
-        orig = attendance.parse_multipart_attendance
-        attendance.parse_multipart_attendance = lambda h: {
-            "month": ["2026-06"],
-            "files": [{"filename": "face_log.csv", "content": b"""Date,Door,Device ID,Device,User Group,User,Event
-2026-06-01 17:36:26,,538218377,MAIN DOOR,OSMale,378(Nguyen Van An),Face Succeed
-2026-06-01 08:26:00,,538218382,MAIN DOOR,OSMale,378(Nguyen Van An),Face Succeed
-2026-06-02 17:30:00,,538218377,MAIN DOOR,OSMale,111(Nonexistent User),Face Succeed
-"""}]
-        }
-        try:
-            # 1. Test GET page
-            handler_get = MockHandler()
-            html_get = attendance.page_attendance_import_bulk(handler_get)
-            self.assertIn("Import dữ liệu chấm công từ Thư mục", html_get)
 
-            # 2. Test POST upload
-            handler_post = MockHandler()
-            attendance.handle_attendance_import_bulk_post(handler_post)
-            self.assertEqual(handler_post.response_status, 200)
-            output = handler_post.get_output_text()
-            self.assertIn("Đã hoàn thành xử lý file nhận diện khuôn mặt hàng loạt", output)
-            self.assertIn("Nguyễn Văn An", output)
-            self.assertIn("Nonexistent User", output)
-        finally:
-            attendance.parse_multipart_attendance = orig
     def test_attendance_clear(self):
         # Insert a daily attendance record first
         conn = attendance.db_connect()
@@ -929,6 +904,37 @@ class TestAttendance(BaseTestCase):
             self.assertEqual(row["manual_ot_hours"], 10.0)
             self.assertEqual(row["actual_days"], 164.0 / 8.0)
             self.assertEqual(row["ot_converted_hours"], 15.0)
+
+            # 1. Lock daily attendance so it appears in monthly page
+            cur = conn.cursor()
+            cur.execute("INSERT OR REPLACE INTO attendance_locks (staff_id, month, locked) VALUES (?, '2026-06', 1)", (self.staff_id,))
+            conn.commit()
+
+            # 2. Verify display in monthly page
+            html = attendance.page_monthly_attendance({"month": "2026-06"})
+            self.assertIn("Work: 164.00h", html)
+            self.assertIn("OT: 10.00h", html)
+
+            # 3. Verify CSV Export contains overridden values and modified headers
+            class StubHandler:
+                def __init__(self, path, method="GET"):
+                    self.path = path
+                    self.method = method
+                    self.response_headers = {}
+                    self.response_status = 200
+                    self.wfile = io.BytesIO()
+                def send_response(self, status):
+                    self.response_status = status
+                def send_header(self, name, value):
+                    self.response_headers[name.lower()] = value
+                def end_headers(self):
+                    pass
+
+            csv_handler = StubHandler("/attendance/monthly/export?month=2026-06", "GET")
+            attendance.handle_attendance_monthly_export_get(csv_handler)
+            csv_text = csv_handler.wfile.getvalue().decode("utf-8")
+            self.assertIn("Work Hours,OT Hours", csv_text)
+            self.assertIn("164.00,10.00", csv_text)
         finally:
             conn.close()
 
@@ -944,7 +950,6 @@ class TestServerRoutes(BaseTestCase):
             ("/staff", "Contract Staff (HR)"),
             ("/staff/shifts", "Staff Work Shifts Settings"),
             ("/attendance", "Time Attendance"),
-            ("/attendance/import-bulk", "Import dữ liệu chấm công từ Thư mục"),
             ("/invoice/new", "Import New Invoice"),
             ("/vendor/new", "Add Vendor"),
             (f"/vendor/edit?id={self.seller_id}", "Edit Vendor"),
@@ -1167,6 +1172,161 @@ class TestDashboard(BaseTestCase):
         self.assertIn("4,500.00 USD", output) # USD formatted
         self.assertIn("Active Staff", output)
         self.assertIn("MHB/EXPIRING/2026", output)
+
+
+# ==================== 11. Test Annex Filters ====================
+class TestAnnexFilters(BaseTestCase):
+    def test_annex_filter_handling(self):
+        # 1. Test GET /staff with annex_id
+        handler = StubHandler(f"/staff?annex_id={self.annex_id}", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+        self.assertIn("Contract Staff (HR)", output)
+        self.assertIn("Nguyễn Văn An", output)
+
+        # Test GET /staff with non-matching annex_id
+        handler = StubHandler("/staff?annex_id=999", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+        self.assertNotIn("Nguyễn Văn An", output)
+
+        # 2. Test GET /attendance with annex_id
+        handler = StubHandler(f"/attendance?month=2026-06&annex_id={self.annex_id}", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+        self.assertIn("Nguyễn Văn An", output)
+
+        # Test GET /attendance with non-matching annex_id
+        handler = StubHandler("/attendance?month=2026-06&annex_id=999", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+        self.assertNotIn("Nguyễn Văn An", output)
+
+        # 3. Test GET /attendance/monthly with annex_id
+        # First lock daily attendance so staff appears in monthly summary
+        cur = self.conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO attendance_locks (staff_id, month, locked) VALUES (?, '2026-06', 1)", (self.staff_id,))
+        self.conn.commit()
+
+        handler = StubHandler(f"/attendance/monthly?month=2026-06&annex_id={self.annex_id}", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+        self.assertIn("Nguyễn Văn An", output)
+
+        # Test GET /attendance/monthly with non-matching annex_id
+        handler = StubHandler("/attendance/monthly?month=2026-06&annex_id=999", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+        self.assertNotIn("Nguyễn Văn An", output)
+
+
+# ==================== 12. Test Improvements ====================
+class TestDashboardAndReferencesImprovements(BaseTestCase):
+    def test_dashboard_active_staff_filtering(self):
+        from datetime import timedelta, date
+        today = date.today()
+        past_join = (today - timedelta(days=10)).strftime("%Y-%m-%d")
+        future_join = (today + timedelta(days=10)).strftime("%Y-%m-%d")
+        past_leave = (today - timedelta(days=5)).strftime("%Y-%m-%d")
+        future_leave = (today + timedelta(days=10)).strftime("%Y-%m-%d")
+
+        cur = self.conn.cursor()
+        # Clean current staff to have a clean count
+        cur.execute("DELETE FROM contract_staff")
+        
+        # 1. Active staff (valid today)
+        cur.execute("""
+            INSERT INTO contract_staff (full_name_vi, vendor_id, contract_id, joining_date, tentative_leaving_date, ot, status)
+            VALUES ('Staff Active 1', ?, ?, ?, ?, 1, 'active')
+        """, (self.seller_id, self.contract_id, past_join, future_leave))
+        
+        # 2. Staff active but joining date in the future
+        cur.execute("""
+            INSERT INTO contract_staff (full_name_vi, vendor_id, contract_id, joining_date, tentative_leaving_date, ot, status)
+            VALUES ('Staff Future', ?, ?, ?, ?, 1, 'active')
+        """, (self.seller_id, self.contract_id, future_join, future_leave))
+        
+        # 3. Staff active but leaving date in the past
+        cur.execute("""
+            INSERT INTO contract_staff (full_name_vi, vendor_id, contract_id, joining_date, tentative_leaving_date, ot, status)
+            VALUES ('Staff Past Leaving', ?, ?, ?, ?, 1, 'active')
+        """, (self.seller_id, self.contract_id, past_join, past_leave))
+        
+        # 4. Duplicate staff name (Staff Active 1) with another contract
+        cur.execute("""
+            INSERT INTO contracts (buyer_vendor_id, seller_vendor_id, framework_no, framework_name, start_date, end_date, is_active)
+            VALUES (?, ?, 'MHB/FPT/2026/002', 'Contract 2', '2026-01-01', '2026-12-31', 1)
+        """, (self.buyer_id, self.seller_id))
+        c2_id = cur.lastrowid
+        cur.execute("""
+            INSERT INTO contract_staff (full_name_vi, vendor_id, contract_id, joining_date, tentative_leaving_date, ot, status)
+            VALUES ('Staff Active 1', ?, ?, ?, ?, 1, 'active')
+        """, (self.seller_id, c2_id, past_join, future_leave))
+        
+        self.conn.commit()
+        
+        # Run dashboard via StubHandler
+        handler = StubHandler("/dashboard", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+        
+        # Assertions: Count must be exactly 1 unique active staff
+        self.assertIn("1 Active Staff", output)
+
+    def test_reference_numbers_highlight_sent_mgs(self):
+        cur = self.conn.cursor()
+        # Insert a contract with a known framework_no
+        cur.execute("""
+            INSERT INTO contracts (buyer_vendor_id, seller_vendor_id, framework_no, framework_name, start_date, end_date, is_active)
+            VALUES (?, ?, 'MHB/TEST/REF/001', 'Test Ref Contract', '2026-06-01', '2026-06-30', 1)
+        """, (self.buyer_id, self.seller_id))
+        c_id = cur.lastrowid
+        
+        # Insert an invoice for that contract and month (June 2026) that is sent to MGS
+        cur.execute("""
+            INSERT INTO invoices (
+                service_year, service_month, service_day, contract_no,
+                shdon, nlap, dvtte, seller_name, seller_mst, buyer_name, buyer_mst,
+                tg_tttbso, sent_to_mgs
+            ) VALUES (2026, 6, 15, 'MHB/TEST/REF/001', '0000001', '2026-06-15', 'VND',
+                      'Seller', '12345678', 'Buyer', '87654321', 1000.0, 1)
+        """)
+        self.conn.commit()
+        
+        # View page references
+        html = contracts.page_contract_references()
+        
+        # Verify the month 06/2026 has the "(Sent MGS)" badge and the correct styling
+        self.assertIn("(Sent MGS)", html)
+        self.assertIn("border: 1px solid #10b981; background: #ecfdf5;", html)
+
+    def test_dashboard_annex_alert(self):
+        cur = self.conn.cursor()
+        
+        # Create an annex expiring in 10 days
+        import datetime
+        future_date = (datetime.date.today() + datetime.timedelta(days=10)).strftime("%Y-%m-%d")
+        
+        cur.execute("""
+            INSERT INTO contracts (buyer_vendor_id, seller_vendor_id, framework_no, framework_name, start_date, end_date, is_active)
+            VALUES (?, ?, 'MHB/TEST/ALERT/001', 'Test Alert Contract', '2026-01-01', '2026-12-31', 1)
+        """, (self.buyer_id, self.seller_id))
+        c_id = cur.lastrowid
+        
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active)
+            VALUES (?, 'Annex Expiring Soon', '2026-01-01', ?, 1)
+        """, (c_id, future_date))
+        self.conn.commit()
+        
+        # Run dashboard
+        handler = StubHandler("/dashboard", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+        
+        # Assertions
+        self.assertIn("MHB/TEST/ALERT/001 - Annex Expiring Soon", output)
+        self.assertIn("Contract/Annex alert", output)
 
 
 if __name__ == "__main__":

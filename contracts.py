@@ -94,7 +94,7 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
     """
 
     trs = []
-    for r in rows:
+    for idx, r in enumerate(rows, 1):
         tag = ""
         if int(r["is_active"]) == 0:
             tag = '<span class="tag tag-deactive">Deleted</span>'
@@ -135,7 +135,7 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
 
         trs.append(f"""
         <tr>
-          <td>{r["id"]}</td>
+          <td>{idx}</td>
           <td>
             <a href="/contract/edit?id={r["id"]}"><b>{escape(r["framework_no"] or "")}</b></a> {tag}
             <div class="muted">{escape(r["framework_name"] or "")}</div>
@@ -166,7 +166,7 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
     <table>
       <thead>
         <tr>
-          <th>ID</th>
+          <th>No.</th>
           <th>Framework Contract</th>
           <th>Purchasing (Buyer)</th>
           <th>Vendor (Seller)</th>
@@ -226,7 +226,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
     annex_html = ""
     if mode == "edit":
         annex_trs = []
-        for a in annex_rows:
+        for idx, a in enumerate(annex_rows, 1):
             tag = "" if int(a["is_active"]) == 1 else '<span class="tag tag-deactive">Deleted</span>'
             actions = f'<a href="/annex/edit?id={a["id"]}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>'
             if int(a["is_active"]) == 1:
@@ -253,7 +253,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
             val_display = f"{int(round(a['value'])):,}" if a["value"] is not None else '<span class="muted">Not set</span>'
             annex_trs.append(f"""
               <tr>
-                <td>{a["id"]}</td>
+                <td>{idx}</td>
                 <td>{escape(a["annex_name"] or "")} {tag}</td>
                 <td>{escape(a["start_date"] or "")} → {escape(a["end_date"] or "")}</td>
                 <td style="text-align:right; font-family:monospace;">{val_display}</td>
@@ -274,7 +274,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
             </a>
           </div>
           <table>
-            <thead><tr><th>ID</th><th>Annex Name</th><th>Period</th><th style="text-align:right;">Value (VND)</th><th>Actions</th></tr></thead>
+            <thead><tr><th>No.</th><th>Annex Name</th><th>Period</th><th style="text-align:right;">Value (VND)</th><th>Actions</th></tr></thead>
             <tbody>
               {''.join(annex_trs) if annex_trs else '<tr><td colspan="5" class="muted">No annexes</td></tr>'}
             </tbody>
@@ -791,6 +791,19 @@ def page_contract_references():
             key = (r["contract_id"], r["annex_id"], r["month"])
             refs_map[key] = (r["reference_number"] or "", int(r["locked"] or 0))
 
+        # Load sent MGS invoices
+        sent_invoices = conn.execute("""
+            SELECT LOWER(TRIM(contract_no)) AS c_no, service_year, service_month
+            FROM invoices
+            WHERE sent_to_mgs = 1
+        """).fetchall()
+        
+        sent_set = set()
+        for row in sent_invoices:
+            if row["service_year"] is not None and row["service_month"] is not None:
+                m_str = f"{row['service_year']:04d}-{row['service_month']:02d}"
+                sent_set.add((row["c_no"], m_str))
+
     finally:
         conn.close()
 
@@ -810,21 +823,29 @@ def page_contract_references():
                 m_parts = m.split("-")
                 m_display = f"{m_parts[1]}/{m_parts[0]}"
                 
+                is_sent = c["framework_no"] and (c["framework_no"].lower().strip(), m) in sent_set
+                
                 lock_icon = "🔒" if is_locked == 1 else "🔓"
                 lock_title = "Locked. Click to Unlock" if is_locked == 1 else "Unlocked. Click to Lock"
                 input_attrs = "disabled" if is_locked == 1 else ""
-                input_bg = "background: #f1f5f9; color: #64748b;" if is_locked == 1 else ""
+                
+                if is_sent:
+                    input_style = "border: 1px solid #10b981; background: #ecfdf5; color: #065f46;"
+                elif is_locked == 1:
+                    input_style = "border: 1px solid var(--border); background: #f1f5f9; color: #64748b;"
+                else:
+                    input_style = "border: 1px solid var(--border);"
                 
                 inputs.append(f"""
                 <div class="ref-input-group" id="ref-group-{cid}-0-{m}" style="display: inline-block; margin: 8px; width: 140px; vertical-align: top;">
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-                    <div class="label" style="font-size: 11px; color: var(--text-secondary);">{m_display}</div>
+                    <div class="label" style="font-size: 11px; color: var(--text-secondary);">{m_display} {f'<span style="color:#10b981; font-weight:bold; font-size:9px;">(Sent MGS)</span>' if is_sent else ''}</div>
                     <button type="button" class="lock-toggle-btn" data-contract-id="{cid}" data-annex-id="0" data-month="{m}" data-locked="{is_locked}" title="{lock_title}" style="background:none; border:none; cursor:pointer; padding:0; font-size:12px; line-height:1;">
                       {lock_icon}
                     </button>
                   </div>
                   <input type="text" class="ref-input" id="ref-input-{cid}-0-{m}" data-contract-id="{cid}" data-annex-id="0" data-month="{m}" value="{escape(val)}" {input_attrs}
-                         placeholder="Nhập Ref No..." style="width: 100%; padding: 6px 10px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; {input_bg}">
+                         placeholder="Nhập Ref No..." style="width: 100%; padding: 6px 10px; font-size: 12px; border-radius: 6px; {input_style}">
                 </div>
                 """)
 
@@ -859,21 +880,29 @@ def page_contract_references():
                     m_parts = m.split("-")
                     m_display = f"{m_parts[1]}/{m_parts[0]}"
                     
+                    is_sent = a["annex_name"] and (a["annex_name"].lower().strip(), m) in sent_set
+                    
                     lock_icon = "🔒" if is_locked == 1 else "🔓"
                     lock_title = "Locked. Click to Unlock" if is_locked == 1 else "Unlocked. Click to Lock"
                     input_attrs = "disabled" if is_locked == 1 else ""
-                    input_bg = "background: #f1f5f9; color: #64748b;" if is_locked == 1 else ""
+                    
+                    if is_sent:
+                        input_style = "border: 1px solid #10b981; background: #ecfdf5; color: #065f46;"
+                    elif is_locked == 1:
+                        input_style = "border: 1px solid var(--border); background: #f1f5f9; color: #64748b;"
+                    else:
+                        input_style = "border: 1px solid var(--border);"
                     
                     inputs.append(f"""
                     <div class="ref-input-group" id="ref-group-{cid}-{annex_id}-{m}" style="display: inline-block; margin: 8px; width: 140px; vertical-align: top;">
                       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
-                        <div class="label" style="font-size: 11px; color: var(--text-secondary);">{m_display}</div>
+                        <div class="label" style="font-size: 11px; color: var(--text-secondary);">{m_display} {f'<span style="color:#10b981; font-weight:bold; font-size:9px;">(Sent MGS)</span>' if is_sent else ''}</div>
                         <button type="button" class="lock-toggle-btn" data-contract-id="{cid}" data-annex-id="{annex_id}" data-month="{m}" data-locked="{is_locked}" title="{lock_title}" style="background:none; border:none; cursor:pointer; padding:0; font-size:12px; line-height:1;">
                           {lock_icon}
                         </button>
                       </div>
                       <input type="text" class="ref-input" id="ref-input-{cid}-{annex_id}-{m}" data-contract-id="{cid}" data-annex-id="{annex_id}" data-month="{m}" value="{escape(val)}" {input_attrs}
-                             placeholder="Nhập Ref No..." style="width: 100%; padding: 6px 10px; font-size: 12px; border: 1px solid var(--border); border-radius: 6px; {input_bg}">
+                             placeholder="Nhập Ref No..." style="width: 100%; padding: 6px 10px; font-size: 12px; border-radius: 6px; {input_style}">
                     </div>
                     """)
 

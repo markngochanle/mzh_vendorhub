@@ -249,6 +249,7 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
     # Filter params
     vendor_filter = parse_int_or_none(filters.get("vendor_id"))
     contract_filter = parse_int_or_none(filters.get("contract_id"))
+    annex_filter = parse_int_or_none(filters.get("annex_id"))
     q_filter = (filters.get("q") or "").strip()
 
     conn = db_connect()
@@ -258,6 +259,11 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
             if not c_row:
                 contract_filter = None
 
+        if contract_filter is not None and annex_filter is not None:
+            a_row = conn.execute("SELECT 1 FROM contract_annexes WHERE id=? AND contract_id=?", (annex_filter, contract_filter)).fetchone()
+            if not a_row:
+                annex_filter = None
+
         # Load vendors (purchasing=0)
         vendors = conn.execute("SELECT id, COALESCE(company_name, company_name_vi) AS company_name, tax_id FROM vendors WHERE is_active=1 AND purchasing=0").fetchall()
         
@@ -266,6 +272,9 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
             contracts = conn.execute("SELECT id, framework_no, framework_name FROM contracts WHERE is_active=1 AND seller_vendor_id=?", (vendor_filter,)).fetchall()
         else:
             contracts = conn.execute("SELECT id, framework_no, framework_name FROM contracts WHERE is_active=1").fetchall()
+
+        # Load annexes
+        annexes = conn.execute("SELECT a.id, a.contract_id, a.annex_name, c.seller_vendor_id FROM contract_annexes a JOIN contracts c ON c.id = a.contract_id WHERE a.is_active=1 AND a.deleted_at IS NULL").fetchall()
 
         # Build SQL where
         where = ["(s.status IS NULL OR s.status <> 'inactive')"]
@@ -277,6 +286,9 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         if contract_filter is not None:
             where.append("s.contract_id = ?")
             params.append(contract_filter)
+        if annex_filter is not None:
+            where.append("s.annex_id = ?")
+            params.append(annex_filter)
         if q_filter:
             where.append("s.full_name_vi LIKE ?")
             params.append(f"%{q_filter}%")
@@ -287,10 +299,12 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         staff_list = conn.execute(f"""
             SELECT s.id, s.full_name_vi, s.ot, s.work_shift,
                    COALESCE(v.company_name, v.company_name_vi) AS vendor_name,
-                   c.framework_no AS contract_no
+                   c.framework_no AS contract_no,
+                   an.annex_name
             FROM contract_staff s
             JOIN vendors v ON v.id=s.vendor_id
             JOIN contracts c ON c.id=s.contract_id
+            LEFT JOIN contract_annexes an ON an.id=s.annex_id
             {where_sql}
             ORDER BY s.full_name_vi ASC
         """, params).fetchall()
@@ -299,15 +313,22 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         month_start_date = f"{year:04d}-{month:02d}-01"
         month_end_date = f"{year:04d}-{month:02d}-{num_days:02d}"
         
-        import_staff_list = conn.execute("""
+        import_where = list(where)
+        import_params = list(params)
+        import_where.append("(s.joining_date IS NULL OR s.joining_date <= ?)")
+        import_params.append(month_end_date)
+        import_where.append("(s.tentative_leaving_date IS NULL OR s.tentative_leaving_date >= ?)")
+        import_params.append(month_start_date)
+        
+        import_where_sql = "WHERE " + " AND ".join(import_where)
+        
+        import_staff_list = conn.execute(f"""
             SELECT s.id, s.full_name_vi, s.work_shift, s.ot, COALESCE(v.company_name, v.company_name_vi) AS company_name
             FROM contract_staff s
             JOIN vendors v ON v.id = s.vendor_id
-            WHERE (s.status IS NULL OR s.status <> 'inactive')
-              AND (s.joining_date IS NULL OR s.joining_date <= ?)
-              AND (s.tentative_leaving_date IS NULL OR s.tentative_leaving_date >= ?)
+            {import_where_sql}
             ORDER BY s.full_name_vi ASC
-        """, (month_end_date, month_start_date)).fetchall()
+        """, import_params).fetchall()
 
         # Load locks for this month
         locks_rows = conn.execute("SELECT staff_id FROM attendance_locks WHERE month=? AND locked=1", (month_val,)).fetchall()
@@ -355,8 +376,6 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
     for c in contracts:
         sel = "selected" if contract_filter == c["id"] else ""
         label = c["framework_no"] or f"Contract#{c['id']}"
-        if c["framework_name"]:
-            label += f" | {c['framework_name']}"
         contract_opts.append(f'<option value="{c["id"]}" {sel}>{escape(label)}</option>')
 
     # Render table headers
@@ -391,14 +410,14 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
 
     # Render rows
     trs = []
-    for s in staff_list:
+    for idx, s in enumerate(staff_list, 1):
         sid = s["id"]
         
         is_locked = sid in locked_staff_ids
         disabled_attr = "disabled" if is_locked else ""
         
         # Lock/unlock URL parameters
-        act_qs = f"staff_id={sid}&month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&q={urllib.parse.quote(q_filter)}"
+        act_qs = f"staff_id={sid}&month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={urllib.parse.quote(q_filter)}"
         
         if is_locked:
             if sid in monthly_locked_staff_ids:
@@ -474,10 +493,10 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
 
         trs.append(f"""
         <tr>
-          <td class="sticky-col1" style="font-size: 11px; text-align: center;">{sid}</td>
+          <td class="sticky-col1" style="font-size: 11px; text-align: center;">{idx}</td>
           <td class="sticky-col2" style="font-size: 12px;">
             <b>{escape(s["full_name_vi"])}</b>
-            <div class="muted" style="font-size: 9px;">{escape(s["contract_no"])}</div>
+            <div class="muted" style="font-size: 9px;">{escape(s["contract_no"])}{f' - {escape(s["annex_name"])}' if s["annex_name"] else ''}</div>
             {lock_action_html}
           </td>
           <td style="font-size: 11px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -564,11 +583,15 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
 
     sub_nav = f"""
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
-      <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📅 Daily Attendance</a>
-      <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll & Payment</a>
-      <a href="/attendance/import-bulk" style="font-weight: bold; color:#666; text-decoration:none;">📤 Bulk Import Face Logs</a>
+      <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📅 Daily Attendance</a>
+      <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll & Payment</a>
     </div>
     """
+
+    annex_opts = ['<option value="">-- All Annexes --</option>']
+    for a in annexes:
+        sel = "selected" if annex_filter == a["id"] else ""
+        annex_opts.append(f'<option value="{a["id"]}" data-contract-id="{a["contract_id"]}" data-vendor-id="{a["seller_vendor_id"]}" {sel}>{escape(a["annex_name"])}</option>')
 
     body = f"""
     {extra_styles}
@@ -585,14 +608,20 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         </div>
         <div>
           <div class="label">Vendor</div>
-          <select name="vendor_id" onchange="this.form.submit()">
+          <select id="vendor_id" name="vendor_id" onchange="this.form.submit()">
             {''.join(vendor_opts)}
           </select>
         </div>
         <div>
           <div class="label">Framework Contract</div>
-          <select name="contract_id" onchange="this.form.submit()">
+          <select id="contract_id" name="contract_id" onchange="this.form.submit()">
             {''.join(contract_opts)}
+          </select>
+        </div>
+        <div>
+          <div class="label">Annex (filtered by Framework)</div>
+          <select id="annex_id" name="annex_id" onchange="this.form.submit()">
+            {''.join(annex_opts)}
           </select>
         </div>
         <div>
@@ -617,13 +646,14 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         <input type="hidden" name="month" value="{month_val}">
         <input type="hidden" name="vendor_id" value="{vendor_filter or ''}">
         <input type="hidden" name="contract_id" value="{contract_filter or ''}">
+        <input type="hidden" name="annex_id" value="{annex_filter or ''}">
         <input type="hidden" name="q" value="{escape(q_filter)}">
         
         <div style="max-height: 250px; overflow-y: auto; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 12px; background: #fff; box-shadow: var(--shadow-sm);">
           <table style="width: 100%; border: none; margin: 0; border-collapse: collapse;">
             <thead>
               <tr style="background: #f1f5f9;">
-                <th style="padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border); border-right: none;">ID</th>
+                <th style="padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border); border-right: none;">No.</th>
                 <th style="padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border); border-right: none;">Staff Name</th>
                 <th style="padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border); border-right: none;">Vendor</th>
                 <th style="padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border); border-right: none;">Work Shift</th>
@@ -634,7 +664,7 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
             <tbody>
               {"".join([f'''
               <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 8px 12px; font-size: 12px; color: var(--text-muted); border-right: none;">{st["id"]}</td>
+                <td style="padding: 8px 12px; font-size: 12px; color: var(--text-muted); border-right: none;">{idx}</td>
                 <td style="padding: 8px 12px; font-size: 13px; border-right: none;"><b>{escape(st["full_name_vi"])}</b></td>
                 <td style="padding: 8px 12px; font-size: 12px; color: var(--text-secondary); border-right: none;">{escape(st["company_name"] or "")}</td>
                 <td style="padding: 8px 12px; font-size: 12px; color: var(--text-secondary); border-right: none;">{escape(st["work_shift"] or "Not set")}</td>
@@ -646,12 +676,12 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
                 </td>
                 <td style="padding: 6px 12px; border-right: none;">
                   {("" if (st["id"] in locked_staff_ids or st["id"] in monthly_locked_staff_ids)
-                    else (f'<a href="/attendance/clear?staff_id={st["id"]}&month={month_val}&vendor_id={vendor_filter or ""}&contract_id={contract_filter or ""}&q={urllib.parse.quote(q_filter)}" class="btn btn-danger" style="font-size: 11px; padding: 4px 8px; line-height: 1;" onclick="return confirm(\'Xóa toàn bộ dữ liệu chấm công tháng {month_val} của {escape(st["full_name_vi"])}?\')">🗑️ Xóa công</a>'
+                    else (f'<a href="/attendance/clear?staff_id={st["id"]}&month={month_val}&vendor_id={vendor_filter or ""}&contract_id={contract_filter or ""}&annex_id={annex_filter or ""}&q={urllib.parse.quote(q_filter)}" class="btn btn-danger" style="font-size: 11px; padding: 4px 8px; line-height: 1;" onclick="return confirm(\'Xóa toàn bộ dữ liệu chấm công tháng {month_val} của {escape(st["full_name_vi"])}?\')">🗑️ Xóa công</a>'
                           if st["id"] in att_map else '<span class="muted" style="font-size:11px;">Chưa có công</span>')
                    )}
                 </td>
               </tr>
-              ''' for st in import_staff_list]) if import_staff_list else '<tr><td colspan="6" class="muted" style="padding:15px; text-align:center;">No active staff with valid contract in this month</td></tr>'}
+              ''' for idx, st in enumerate(import_staff_list, 1)]) if import_staff_list else '<tr><td colspan="6" class="muted" style="padding:15px; text-align:center;">No active staff with valid contract in this month</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -666,13 +696,14 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
       <input type="hidden" name="month" value="{month_val}">
       <input type="hidden" name="vendor_id" value="{vendor_filter or ''}">
       <input type="hidden" name="contract_id" value="{contract_filter or ''}">
+      <input type="hidden" name="annex_id" value="{annex_filter or ''}">
       <input type="hidden" name="q" value="{escape(q_filter)}">
 
       <div class="spreadsheet-container">
         <table>
           <thead>
             <tr>
-              <th rowspan="2" class="sticky-col1" style="text-align: center; vertical-align: middle;">ID</th>
+              <th rowspan="2" class="sticky-col1" style="text-align: center; vertical-align: middle;">No.</th>
               <th rowspan="2" class="sticky-col2" style="text-align: left; vertical-align: middle;">Full Name</th>
               <th rowspan="2" style="text-align: left; vertical-align: middle; min-width: 120px;">Vendor</th>
               <th rowspan="2" style="text-align: center; vertical-align: middle; min-width: 65px;">OT / Shift</th>
@@ -779,6 +810,48 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
             this.style.background = '#f5f3ff';
           }});
         }});
+
+        // Dynamic filtering of Annexes based on Vendor and Contract
+        const vendorSel = document.getElementById('vendor_id');
+        const contractSel = document.getElementById('contract_id');
+        const annexSel = document.getElementById('annex_id');
+
+        function filterAnnex() {{
+          if (!vendorSel || !contractSel || !annexSel) return;
+          const vId = vendorSel.value;
+          const cId = contractSel.value;
+          const opts = annexSel.querySelectorAll('option');
+          let hasSelectedVisible = false;
+
+          opts.forEach((opt) => {{
+            const optContract = opt.getAttribute('data-contract-id');
+            const optVendor = opt.getAttribute('data-vendor-id');
+            if (!optContract && !optVendor) {{
+              opt.hidden = false;
+              return;
+            }}
+
+            let show = true;
+            if (vId && optVendor && optVendor !== vId) {{
+              show = false;
+            }}
+            if (cId && optContract && optContract !== cId) {{
+              show = false;
+            }}
+
+            opt.hidden = !show;
+            if (show && opt.selected) {{
+              hasSelectedVisible = true;
+            }}
+          }});
+
+          if (!hasSelectedVisible) {{
+            annexSel.value = "";
+          }}
+        }}
+
+        if (contractSel) contractSel.addEventListener('change', filterAnnex);
+        filterAnnex();
       }})();
     </script>
     """
@@ -793,9 +866,10 @@ def handle_attendance_import_post(handler):
     month_val = form.get("month", [""])[0].strip()
     vendor_id = form.get("vendor_id", [""])[0].strip()
     contract_id = form.get("contract_id", [""])[0].strip()
+    annex_id = form.get("annex_id", [""])[0].strip()
     q = form.get("q", [""])[0].strip()
     
-    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&q={q}"
+    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&annex_id={annex_id}&q={q}"
 
     conn = db_connect()
     try:
@@ -945,9 +1019,10 @@ def handle_attendance_save_post(handler):
     month_val = form.get("month", [""])[0].strip()
     vendor_id = form.get("vendor_id", [""])[0].strip()
     contract_id = form.get("contract_id", [""])[0].strip()
+    annex_id = form.get("annex_id", [""])[0].strip()
     q = form.get("q", [""])[0].strip()
     
-    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&q={q}"
+    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&annex_id={annex_id}&q={q}"
 
     conn = db_connect()
     try:
@@ -1120,9 +1195,10 @@ def handle_attendance_lock_get(handler):
     
     vendor_id = qs.get("vendor_id", [""])[0].strip()
     contract_id = qs.get("contract_id", [""])[0].strip()
+    annex_id = qs.get("annex_id", [""])[0].strip()
     q = qs.get("q", [""])[0].strip()
     
-    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&q={q}"
+    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&annex_id={annex_id}&q={q}"
 
     if sid and month_val:
         conn = db_connect()
@@ -1148,9 +1224,10 @@ def handle_attendance_unlock_get(handler):
     
     vendor_id = qs.get("vendor_id", [""])[0].strip()
     contract_id = qs.get("contract_id", [""])[0].strip()
+    annex_id = qs.get("annex_id", [""])[0].strip()
     q = qs.get("q", [""])[0].strip()
     
-    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&q={q}"
+    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&annex_id={annex_id}&q={q}"
 
     if sid and month_val:
         conn = db_connect()
@@ -1162,7 +1239,7 @@ def handle_attendance_unlock_get(handler):
             """, (sid, month_val)).fetchone()
             if monthly_locked:
                 send_html(handler, page_attendance(
-                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "q": q},
+                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "annex_id": parse_int_or_none(annex_id), "q": q},
                     error_msg="Cannot unlock daily attendance because monthly payroll is locked."
                 ))
                 return
@@ -1188,9 +1265,10 @@ def handle_attendance_clear_get(handler):
     
     vendor_id = qs.get("vendor_id", [""])[0].strip()
     contract_id = qs.get("contract_id", [""])[0].strip()
+    annex_id = qs.get("annex_id", [""])[0].strip()
     q = qs.get("q", [""])[0].strip()
     
-    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&q={q}"
+    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&annex_id={annex_id}&q={q}"
 
     if sid and month_val:
         conn = db_connect()
@@ -1202,7 +1280,7 @@ def handle_attendance_clear_get(handler):
             """, (sid, month_val)).fetchone()
             if locked_daily:
                 send_html(handler, page_attendance(
-                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "q": q},
+                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "annex_id": parse_int_or_none(annex_id), "q": q},
                     error_msg="Cannot clear attendance data because it is locked."
                 ))
                 return
@@ -1214,7 +1292,7 @@ def handle_attendance_clear_get(handler):
             """, (sid, month_val)).fetchone()
             if locked_monthly:
                 send_html(handler, page_attendance(
-                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "q": q},
+                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "annex_id": parse_int_or_none(annex_id), "q": q},
                     error_msg="Cannot clear attendance data because monthly payroll is locked."
                 ))
                 return
@@ -1227,7 +1305,7 @@ def handle_attendance_clear_get(handler):
                 month_end_date = f"{year:04d}-{month:02d}-{num_days:02d}"
             except Exception:
                 send_html(handler, page_attendance(
-                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "q": q},
+                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "annex_id": parse_int_or_none(annex_id), "q": q},
                     error_msg="Invalid month format."
                 ))
                 return
@@ -1254,7 +1332,7 @@ def handle_attendance_clear_get(handler):
             conn.commit()
             
             send_html(handler, page_attendance(
-                {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "q": q},
+                {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "annex_id": parse_int_or_none(annex_id), "q": q},
                 success_msg="Successfully cleared attendance data."
             ))
             return
@@ -1324,6 +1402,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
 
     vendor_filter = parse_int_or_none(filters.get("vendor_id"))
     contract_filter = parse_int_or_none(filters.get("contract_id"))
+    annex_filter = parse_int_or_none(filters.get("annex_id"))
     q_filter = (filters.get("q") or "").strip()
 
     conn = db_connect()
@@ -1333,12 +1412,18 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
             if not c_row:
                 contract_filter = None
 
+        if contract_filter is not None and annex_filter is not None:
+            a_row = conn.execute("SELECT 1 FROM contract_annexes WHERE id=? AND contract_id=?", (annex_filter, contract_filter)).fetchone()
+            if not a_row:
+                annex_filter = None
+
         # Load vendors and contracts for dropdowns
         vendors = conn.execute("SELECT id, COALESCE(company_name, company_name_vi) AS company_name FROM vendors WHERE is_active=1 AND purchasing=0").fetchall()
         if vendor_filter is not None:
             contracts = conn.execute("SELECT id, framework_no FROM contracts WHERE is_active=1 AND seller_vendor_id=?", (vendor_filter,)).fetchall()
         else:
             contracts = conn.execute("SELECT id, framework_no FROM contracts WHERE is_active=1").fetchall()
+        annexes = conn.execute("SELECT a.id, a.contract_id, a.annex_name, c.seller_vendor_id FROM contract_annexes a JOIN contracts c ON c.id = a.contract_id WHERE a.is_active=1 AND a.deleted_at IS NULL").fetchall()
 
         # Build SQL to load staff WHOSE ATTENDANCE IS LOCKED for this month
         where = ["(s.status IS NULL OR s.status <> 'inactive')", "l.month = ?", "l.locked = 1"]
@@ -1350,6 +1435,9 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
         if contract_filter is not None:
             where.append("s.contract_id = ?")
             params.append(contract_filter)
+        if annex_filter is not None:
+            where.append("s.annex_id = ?")
+            params.append(annex_filter)
         if q_filter:
             where.append("s.full_name_vi LIKE ?")
             params.append(f"%{q_filter}%")
@@ -1360,11 +1448,13 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
             SELECT s.id, s.full_name_vi, s.ot, s.work_shift, s.monthly_rate, s.manday_rate,
                    s.paid_leave_total_hours, s.paid_leave_used_hours,
                    COALESCE(v.company_name, v.company_name_vi) AS vendor_name,
-                   c.framework_no AS contract_no
+                   c.framework_no AS contract_no,
+                   an.annex_name
             FROM contract_staff s
             JOIN vendors v ON v.id=s.vendor_id
             JOIN contracts c ON c.id=s.contract_id
             JOIN attendance_locks l ON l.staff_id=s.id
+            LEFT JOIN contract_annexes an ON an.id=s.annex_id
             {where_sql}
             ORDER BY s.full_name_vi ASC
         """, params).fetchall()
@@ -1496,7 +1586,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
     trs = []
     total_billing_all = 0.0
 
-    for s in locked_staff:
+    for idx, s in enumerate(locked_staff, 1):
         sid = s["id"]
         sum_data = summaries[sid]
         
@@ -1504,7 +1594,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
         disabled_attr = "disabled" if is_m_locked else ""
         
         # Lock/unlock URL parameters
-        act_qs = f"staff_id={sid}&month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&q={urllib.parse.quote(q_filter)}"
+        act_qs = f"staff_id={sid}&month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={urllib.parse.quote(q_filter)}"
         
         if is_m_locked:
             m_lock_label = '🔒 <b style="color:#b00020;">Locked</b>'
@@ -1544,6 +1634,16 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
         # Get raw hours for display
         raw_w, raw_ot = raw_hours_map.get(sid, (0.0, 0.0))
 
+        # Check for manual overrides to display
+        manual_w = sum_data.get("manual_work_hours")
+        manual_ot = sum_data.get("manual_ot_hours")
+        
+        display_w = manual_w if manual_w is not None else raw_w
+        display_ot = manual_ot if manual_ot is not None else raw_ot
+        
+        w_style = "color:#0369a1; font-weight:bold; background:#e0f2fe; padding:1px 3px; border-radius:3px; display:inline-block;" if manual_w is not None else "color:inherit;"
+        ot_style = "color:#b45309; font-weight:bold; background:#fef3c7; padding:1px 3px; border-radius:3px; display:inline-block;" if manual_ot is not None else "color:#666;"
+
         work_pay = round((act + pl) * daily_rate)
         ot_pay = round(ot_hours * (daily_rate / 8.0))
         total_pay = sum_data["total_amount"]
@@ -1552,10 +1652,10 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
 
         trs.append(f"""
         <tr>
-          <td>{sid}</td>
+          <td>{idx}</td>
           <td>
             <b>{escape(s["full_name_vi"])}</b>
-            <div class="muted" style="font-size:9px;">{escape(s["contract_no"])}</div>
+            <div class="muted" style="font-size:9px;">{escape(s["contract_no"])}{f' - {escape(s["annex_name"])}' if s["annex_name"] else ''}</div>
             {m_lock_action_html}
           </td>
           <td>
@@ -1586,10 +1686,14 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
             <input type="number" step="0.01" name="ot_{sid}" value="{sum_data['ot_converted_hours']:.2f}" {disabled_attr}
                    style="width: 65px; padding: 4px; font-size:12px; text-align:center;">
           </td>
-          <!-- Hours Worked (Raw Hours) -->
+          <!-- Hours Worked (Work / OT) -->
           <td style="text-align:center; font-size:11px; font-family:monospace; line-height:1.3; vertical-align:middle;">
-            <div>Work: {raw_w:.2f}h</div>
-            <div style="color:#666;">OT: {raw_ot:.2f}h</div>
+            <div style="margin-bottom: 2px;">
+              <span style="{w_style}" title="{f'Raw log: {raw_w:.2f}h' if manual_w is not None else ''}">Work: {display_w:.2f}h{f' *' if manual_w is not None else ''}</span>
+            </div>
+            <div>
+              <span style="{ot_style}" title="{f'Raw log: {raw_ot:.2f}h' if manual_ot is not None else ''}">OT: {display_ot:.2f}h{f' *' if manual_ot is not None else ''}</span>
+            </div>
           </td>
           <!-- Daily rate (display) -->
           <td style="text-align:right; font-family:monospace;">
@@ -1611,11 +1715,15 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
 
     sub_nav = f"""
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
-      <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
-      <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💵 Monthly Payroll & Payment</a>
-      <a href="/attendance/import-bulk" style="font-weight: bold; color:#666; text-decoration:none;">📤 Bulk Import Face Logs</a>
+      <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
+      <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💵 Monthly Payroll & Payment</a>
     </div>
     """
+
+    annex_opts = ['<option value="">-- All Annexes --</option>']
+    for a in annexes:
+        sel = "selected" if annex_filter == a["id"] else ""
+        annex_opts.append(f'<option value="{a["id"]}" data-contract-id="{a["contract_id"]}" data-vendor-id="{a["seller_vendor_id"]}" {sel}>{escape(a["annex_name"])}</option>')
 
     body = f"""
     {sub_nav}
@@ -1631,14 +1739,20 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
         </div>
         <div>
           <div class="label">Vendor</div>
-          <select name="vendor_id" onchange="this.form.submit()">
+          <select id="vendor_id" name="vendor_id" onchange="this.form.submit()">
             {''.join(vendor_opts)}
           </select>
         </div>
         <div>
           <div class="label">Framework Contract</div>
-          <select name="contract_id" onchange="this.form.submit()">
+          <select id="contract_id" name="contract_id" onchange="this.form.submit()">
             {''.join(contract_opts)}
+          </select>
+        </div>
+        <div>
+          <div class="label">Annex (filtered by Framework)</div>
+          <select id="annex_id" name="annex_id" onchange="this.form.submit()">
+            {''.join(annex_opts)}
           </select>
         </div>
         <div>
@@ -1657,13 +1771,14 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
       <input type="hidden" name="month" value="{month_val}">
       <input type="hidden" name="vendor_id" value="{vendor_filter or ''}">
       <input type="hidden" name="contract_id" value="{contract_filter or ''}">
+      <input type="hidden" name="annex_id" value="{annex_filter or ''}">
       <input type="hidden" name="q" value="{escape(q_filter)}">
 
       <div class="card" style="padding:0; overflow-x:auto;">
         <table style="margin:0;">
           <thead>
             <tr>
-              <th>ID</th>
+              <th>No.</th>
               <th>Full Name</th>
               <th>Vendor</th>
               <th>Shift / Baseline Rate</th>
@@ -1671,7 +1786,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
               <th style="width:75px; text-align:center;">Actual Days</th>
               <th style="width:75px; text-align:center;">Paid Leave</th>
               <th style="width:75px; text-align:center;">Converted OT Hours (x1.5)</th>
-              <th style="text-align:center;">Hours Worked<br><span style="font-weight:normal; font-size:9px; color:#666;">(Work / Raw OT)</span></th>
+              <th style="text-align:center;">Hours Worked<br><span style="font-weight:normal; font-size:9px; color:#666;">(Work / OT)</span></th>
               <th style="text-align:right;">Daily Rate</th>
               <th style="text-align:right;">Monthly Wages</th>
             </tr>
@@ -1686,7 +1801,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">
         <div class="actions">
           <button type="submit" style="background:#0b57d0; color:#fff; border-color:#0b57d0; font-weight:600; padding:10px 24px;">Save Calculations</button>
-          <a href="/attendance/monthly/export?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&q={escape(q_filter)}" class="btn btn-secondary" style="padding:10px 20px;">Export to Excel (CSV)</a>
+          <a href="/attendance/monthly/export?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" class="btn btn-secondary" style="padding:10px 20px;">Export to Excel (CSV)</a>
         </div>
         <div style="font-size:18px; font-weight:bold; color:#111;">
           Total Monthly Payment: <span style="color:#0b57d0; font-size:20px;">{int(round(total_billing_all)):,} VND</span>
@@ -1694,6 +1809,51 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
       </div>
       ''' if trs else ''}
     </form>
+
+    <script>
+      (function() {{
+        const vendorSel = document.getElementById('vendor_id');
+        const contractSel = document.getElementById('contract_id');
+        const annexSel = document.getElementById('annex_id');
+
+        function filterAnnex() {{
+          if (!vendorSel || !contractSel || !annexSel) return;
+          const vId = vendorSel.value;
+          const cId = contractSel.value;
+          const opts = annexSel.querySelectorAll('option');
+          let hasSelectedVisible = false;
+
+          opts.forEach((opt) => {{
+            const optContract = opt.getAttribute('data-contract-id');
+            const optVendor = opt.getAttribute('data-vendor-id');
+            if (!optContract && !optVendor) {{
+              opt.hidden = false;
+              return;
+            }}
+
+            let show = true;
+            if (vId && optVendor && optVendor !== vId) {{
+              show = false;
+            }}
+            if (cId && optContract && optContract !== cId) {{
+              show = false;
+            }}
+
+            opt.hidden = !show;
+            if (show && opt.selected) {{
+              hasSelectedVisible = true;
+            }}
+          }});
+
+          if (!hasSelectedVisible) {{
+            annexSel.value = "";
+          }}
+        }}
+
+        if (contractSel) contractSel.addEventListener('change', filterAnnex);
+        filterAnnex();
+      }})();
+    </script>
     """
     
     return layout(f"Monthly Payroll - Month {month:02d}/{year:04d}", body)
@@ -1708,9 +1868,10 @@ def handle_attendance_monthly_save_post(handler):
     month_val = form.get("month", [""])[0].strip()
     vendor_id = form.get("vendor_id", [""])[0].strip()
     contract_id = form.get("contract_id", [""])[0].strip()
+    annex_id = form.get("annex_id", [""])[0].strip()
     q = form.get("q", [""])[0].strip()
     
-    redirect_url = f"/attendance/monthly?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&q={q}"
+    redirect_url = f"/attendance/monthly?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&annex_id={annex_id}&q={q}"
 
     updates = {} # sid -> {"std": val, "pl": val, "ot": val}
     for key, vals in form.items():
@@ -1758,7 +1919,7 @@ def handle_attendance_monthly_save_post(handler):
                 rem_days = rem_pl_hours / 8.0
                 err_msg = f"Paid leave days ({pl_days:.1f} days) for employee '{s['full_name_vi']}' exceeds remaining balance (only {rem_days:.2f} days remaining)."
                 send_html(handler, page_monthly_attendance(
-                    {"month": month_val, "vendor_id": vendor_id, "contract_id": contract_id, "q": q},
+                    {"month": month_val, "vendor_id": vendor_id, "contract_id": contract_id, "annex_id": annex_id, "q": q},
                     error_msg=err_msg
                 ))
                 return
@@ -1823,9 +1984,10 @@ def handle_attendance_monthly_lock_get(handler):
     
     vendor_id = qs.get("vendor_id", [""])[0].strip()
     contract_id = qs.get("contract_id", [""])[0].strip()
+    annex_id = qs.get("annex_id", [""])[0].strip()
     q = qs.get("q", [""])[0].strip()
     
-    redirect_url = f"/attendance/monthly?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&q={q}"
+    redirect_url = f"/attendance/monthly?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&annex_id={annex_id}&q={q}"
 
     if sid and month_val:
         conn = db_connect()
@@ -1837,7 +1999,7 @@ def handle_attendance_monthly_lock_get(handler):
             """, (sid, month_val)).fetchone()
             if not daily_locked:
                 send_html(handler, page_monthly_attendance(
-                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "q": q},
+                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "annex_id": parse_int_or_none(annex_id), "q": q},
                     error_msg="Cannot lock monthly payroll because daily attendance is not locked."
                 ))
                 return
@@ -1863,9 +2025,10 @@ def handle_attendance_monthly_unlock_get(handler):
     
     vendor_id = qs.get("vendor_id", [""])[0].strip()
     contract_id = qs.get("contract_id", [""])[0].strip()
+    annex_id = qs.get("annex_id", [""])[0].strip()
     q = qs.get("q", [""])[0].strip()
     
-    redirect_url = f"/attendance/monthly?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&q={q}"
+    redirect_url = f"/attendance/monthly?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&annex_id={annex_id}&q={q}"
 
     if sid and month_val:
         conn = db_connect()
@@ -1990,6 +2153,7 @@ def handle_attendance_monthly_export_get(handler):
 
     vendor_filter = parse_int_or_none(qs.get("vendor_id", [""])[0])
     contract_filter = parse_int_or_none(qs.get("contract_id", [""])[0])
+    annex_filter = parse_int_or_none(qs.get("annex_id", [""])[0])
     q_filter = qs.get("q", [""])[0].strip()
 
     conn = db_connect()
@@ -2004,6 +2168,9 @@ def handle_attendance_monthly_export_get(handler):
         if contract_filter is not None:
             where.append("s.contract_id = ?")
             params.append(contract_filter)
+        if annex_filter is not None:
+            where.append("s.annex_id = ?")
+            params.append(annex_filter)
         if q_filter:
             where.append("s.full_name_vi LIKE ?")
             params.append(f"%{q_filter}%")
@@ -2027,7 +2194,7 @@ def handle_attendance_monthly_export_get(handler):
         for s in locked_staff:
             sid = s["id"]
             row = conn.execute("""
-                SELECT standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked
+                SELECT standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked, manual_work_hours, manual_ot_hours
                 FROM monthly_attendance_summary
                 WHERE staff_id=? AND month=?
             """, (sid, month_val)).fetchone()
@@ -2060,7 +2227,7 @@ def handle_attendance_monthly_export_get(handler):
     writer.writerow([
         "Staff ID", "Full Name", "Vendor", "Contract No", "Shift", "OT (Yes/No)",
         "Standard Days", "Actual Days", "Paid Leave Days", "Converted OT Hours (x1.5)",
-        "Raw Work Hours", "Raw OT Hours", "Daily Rate (VND)", "Work Wage (VND)",
+        "Work Hours", "OT Hours", "Daily Rate (VND)", "Work Wage (VND)",
         "OT Wage (VND)", "Total Wage (VND)", "Status"
     ])
     
@@ -2078,6 +2245,13 @@ def handle_attendance_monthly_export_get(handler):
         is_locked = "Locked" if sum_data["locked"] == 1 else "Unlocked"
         
         raw_w, raw_ot = raw_hours_map.get(sid, (0.0, 0.0))
+        
+        # Check for manual overrides
+        manual_w = sum_data.get("manual_work_hours")
+        manual_ot = sum_data.get("manual_ot_hours")
+        w_hours = manual_w if manual_w is not None else raw_w
+        ot_hours_raw = manual_ot if manual_ot is not None else raw_ot
+
         work_pay = round((act + pl) * daily_rate)
         ot_pay = round(ot_hours * (daily_rate / 8.0))
         
@@ -2092,8 +2266,8 @@ def handle_attendance_monthly_export_get(handler):
             f"{act:.2f}",
             f"{pl:.1f}",
             f"{ot_hours:.2f}",
-            f"{raw_w:.2f}",
-            f"{raw_ot:.2f}",
+            f"{w_hours:.2f}",
+            f"{ot_hours_raw:.2f}",
             f"{int(round(daily_rate))}",
             f"{work_pay}",
             f"{ot_pay}",
@@ -2109,280 +2283,4 @@ def handle_attendance_monthly_export_get(handler):
     handler.send_header("Content-Disposition", f'attachment; filename="Monthly_Payroll_{month_val}.csv"')
     handler.end_headers()
     handler.wfile.write(csv_bytes)
-
-
-def page_attendance_import_bulk(handler, error_msg=None, success_msg=None, unmatched_names=None, locked_names=None, imported_names=None):
-    today = date.today()
-    month_val = today.strftime("%Y-%m")
-    
-    error_html = f"<div class='card danger'><b>Error:</b> {escape(error_msg)}</div>" if error_msg else ""
-    success_html = f"<div class='card success' style='border-color:#b4e3be; background:#f4fbf6; color:#137333; padding:12px; border-radius:8px; margin-bottom:16px;'><b>Success:</b> {escape(success_msg)}</div>" if success_msg else ""
-    
-    unmatched_html = ""
-    if unmatched_names:
-        unmatched_html = f"""
-        <div class="card warning" style="border-left: 4px solid var(--warning); padding: 15px; margin-top: 15px;">
-          <h4 style="margin: 0 0 8px 0; color: var(--warning);">⚠️ Skip: Không tìm thấy nhân sự trong DB ({len(unmatched_names)})</h4>
-          <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: var(--text-secondary); max-height: 200px; overflow-y: auto;">
-            {"".join([f"<li>{escape(name)}</li>" for name in unmatched_names])}
-          </ul>
-        </div>
-        """
-        
-    locked_html = ""
-    if locked_names:
-        locked_html = f"""
-        <div class="card danger" style="border-left: 4px solid var(--danger); padding: 15px; margin-top: 15px;">
-          <h4 style="margin: 0 0 8px 0; color: var(--danger);">🔒 Skip: Nhân sự đã bị khóa bảng công trong tháng ({len(locked_names)})</h4>
-          <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: var(--text-secondary); max-height: 200px; overflow-y: auto;">
-            {"".join([f"<li>{escape(name)}</li>" for name in locked_names])}
-          </ul>
-        </div>
-        """
-        
-    imported_html = ""
-    if imported_names:
-        imported_html = f"""
-        <div class="card success" style="border-left: 4px solid var(--success); padding: 15px; margin-top: 15px;">
-          <h4 style="margin: 0 0 8px 0; color: var(--success);">✓ Đã import thành công ({len(imported_names)})</h4>
-          <ul style="margin: 0; padding-left: 20px; font-size: 13px; color: var(--text-secondary); max-height: 200px; overflow-y: auto;">
-            {"".join([f"<li>{escape(name)}</li>" for name in imported_names])}
-          </ul>
-        </div>
-        """
-    
-    sub_nav = f"""
-    <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
-      <a href="/attendance?month={month_val}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
-      <a href="/attendance/monthly?month={month_val}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll & Payment</a>
-      <a href="/attendance/import-bulk" style="font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📤 Bulk Import Face Logs</a>
-    </div>
-    """
-    
-    body = f"""
-    {sub_nav}
-    {error_html}
-    {success_html}
-    {imported_html}
-    {locked_html}
-    {unmatched_html}
-
-    <div class="card" style="margin-top: 15px;">
-      <h3 style="margin-top: 0;">Import dữ liệu chấm công từ Thư mục</h3>
-      <p class="muted" style="margin-bottom: 20px;">
-        Hệ thống sẽ tự động quét tất cả tệp <code>.csv</code> trong thư mục được chọn hoặc nhập, bóc tách tên nhân viên từ cột <code>User</code> (ví dụ: <code>378(Can Duy Hung)</code>) và đối khớp với cơ sở dữ liệu.
-      </p>
-
-      <form method="POST" action="/attendance/import-bulk" enctype="multipart/form-data">
-        <div style="margin-bottom: 16px; max-width: 320px;">
-          <div class="label">Chọn Tháng Đối Soát Chấm Công</div>
-          <input type="month" name="month" value="{month_val}" required style="width: 100%;">
-        </div>
-
-        <div style="margin-bottom: 20px; padding: 16px; border: 1px dashed var(--border); border-radius: 8px; background: #fafafa;">
-          <h4 style="margin:0 0 12px 0;">Cách 1: Chọn thư mục trực tiếp từ trình duyệt (Upload Folder)</h4>
-          <input type="file" name="files" webkitdirectory directory multiple style="width: 100%; padding: 6px; border: 1px solid var(--border); border-radius: 6px; background: #fff;">
-          <div class="muted" style="margin-top: 6px;">Trình duyệt sẽ tự động upload toàn bộ các file CSV chấm công trong thư mục bạn chọn.</div>
-        </div>
-
-        <div style="margin-bottom: 24px; padding: 16px; border: 1px dashed var(--border); border-radius: 8px; background: #fafafa;">
-          <h4 style="margin:0 0 12px 0;">Cách 2: Nhập đường dẫn thư mục tuyệt đối trên Server</h4>
-          <input type="text" name="local_path" placeholder="Ví dụ: /Users/username/data/attendance_logs" style="width: 100%;">
-          <div class="muted" style="margin-top: 6px;">Dùng khi file chấm công đã có sẵn trên máy chủ chạy phần mềm.</div>
-        </div>
-
-        <div>
-          <button type="submit" style="background:#0b57d0; color:#fff; border-color:#0b57d0; font-weight:600; padding: 10px 24px;">Bắt đầu Import thư mục</button>
-        </div>
-      </form>
-    </div>
-    """
-    return layout("Bulk Import Attendance", body)
-
-
-def handle_attendance_import_bulk_post(handler):
-    form = parse_multipart_attendance(handler)
-    month_val = form.get("month", [""])[0].strip()
-    
-    if not month_val:
-        send_html(handler, page_attendance_import_bulk(handler, error_msg="Vui lòng chọn tháng đối soát."))
-        return
-        
-    raw_records = []
-    
-    # 1. Option 1: Browser folder upload
-    file_list = form.get("files", [])
-    valid_files = [f for f in file_list if isinstance(f, dict) and f.get("filename") and f["filename"].lower().endswith(".csv") and len(f.get("content", b"")) > 0]
-    
-    if valid_files:
-        for f_info in valid_files:
-            records = parse_attendance_csv(f_info["content"])
-            raw_records.extend(records)
-    else:
-        # Option 2: Server local path
-        local_path_raw = form.get("local_path", [""])[0].strip()
-        if local_path_raw:
-            p_obj = Path(local_path_raw)
-            if not p_obj.exists() or not p_obj.is_dir():
-                send_html(handler, page_attendance_import_bulk(handler, error_msg=f"Đường dẫn thư mục không tồn tại hoặc không phải thư mục: {local_path_raw}"))
-                return
-            csv_files = list(p_obj.glob("*.csv"))
-            if not csv_files:
-                send_html(handler, page_attendance_import_bulk(handler, error_msg=f"Không tìm thấy file .csv nào trong thư mục: {local_path_raw}"))
-                return
-            for path in csv_files:
-                try:
-                    content = path.read_bytes()
-                    records = parse_attendance_csv(content)
-                    raw_records.extend(records)
-                except Exception:
-                    pass
-                    
-    if not raw_records:
-        send_html(handler, page_attendance_import_bulk(handler, error_msg="Vui lòng chọn thư mục upload từ trình duyệt hoặc nhập đường dẫn thư mục tuyệt đối trên Server chứa file CSV hợp lệ."))
-        return
-        
-    # Group timestamps by (cleaned_name, date_str)
-    user_date_timestamps = {}
-    for name, ts_str in raw_records:
-        dt = parse_dt(ts_str)
-        if not dt:
-            continue
-        # Only process logs that fall within the selected month!
-        ts_month = dt.strftime("%Y-%m")
-        if ts_month != month_val:
-            continue
-            
-        d_str = dt.strftime("%Y-%m-%d")
-        user_date_timestamps.setdefault(name, {}).setdefault(d_str, []).append(dt)
-        
-    if not user_date_timestamps:
-        send_html(handler, page_attendance_import_bulk(handler, error_msg=f"Không tìm thấy log chấm công nào thuộc tháng đã chọn ({month_val}) trong các file CSV."))
-        return
-
-    # 2. Fetch all active staff
-    conn = db_connect()
-    try:
-        staff_rows = conn.execute("""
-            SELECT id, full_name_vi, ot, work_shift
-            FROM contract_staff
-            WHERE status IS NULL OR status <> 'inactive'
-        """).fetchall()
-        
-        # Build normalized name mapping: norm_name -> staff_row
-        staff_map = {}
-        for s in staff_rows:
-            norm = remove_accents(s["full_name_vi"])
-            staff_map[norm] = s
-            
-        # Load existing locked staff for this month
-        locks_rows = conn.execute("SELECT staff_id FROM attendance_locks WHERE month=? AND locked=1", (month_val,)).fetchall()
-        locked_staff_ids = {r["staff_id"] for r in locks_rows}
-        
-        # Results reports
-        imported_names = []
-        locked_names = []
-        unmatched_names = set()
-        
-        ok_count = 0
-        cur = conn.cursor()
-        
-        # 3. Process logs
-        for raw_name, date_map in user_date_timestamps.items():
-            # Match name
-            norm_raw_name = remove_accents(raw_name)
-            if norm_raw_name not in staff_map:
-                unmatched_names.add(raw_name)
-                continue
-                
-            s = staff_map[norm_raw_name]
-            sid = s["id"]
-            full_name = s["full_name_vi"]
-            
-            # Check lock
-            if sid in locked_staff_ids:
-                locked_names.append(f"{full_name} (ID: {sid})")
-                continue
-                
-            # Process daily entries
-            staff_ok_count = 0
-            for d_str, dts in date_map.items():
-                if not dts:
-                    continue
-                dts.sort()
-                
-                check_in_dt = dts[0]
-                check_out_dt = dts[-1]
-                
-                check_in_str = check_in_dt.strftime("%H:%M")
-                check_out_str = check_out_dt.strftime("%H:%M")
-                
-                # Duration
-                dur_hours = (check_out_dt - check_in_dt).total_seconds() / 3600.0
-                
-                # Check lunch break (12:00 -> 13:00)
-                if check_in_dt.hour < 12 and check_out_dt.hour >= 13:
-                    net_hours = dur_hours - 1.0
-                elif dur_hours > 4.0:
-                    net_hours = dur_hours - 1.0
-                else:
-                    net_hours = dur_hours
-                    
-                net_hours = max(0.0, net_hours)
-                
-                std_limit = 8.0
-                work_hours = min(std_limit, net_hours)
-                ot_hours = 0.0
-                
-                # OT Calculation
-                if s["ot"] == 1:
-                    shift_out_hour = 17.0
-                    shift_str = s["work_shift"] or ""
-                    if " - " in shift_str:
-                        try:
-                            out_part = shift_str.split(" - ")[1]
-                            h_part, m_part = map(int, out_part.split(":"))
-                            shift_out_hour = h_part + (m_part / 60.0)
-                        except Exception:
-                            pass
-                            
-                    check_out_hour = check_out_dt.hour + (check_out_dt.minute / 60.0)
-                    if check_out_hour > shift_out_hour:
-                        ot_hours = check_out_hour - shift_out_hour
-                        ot_hours = round(ot_hours, 1)
-                        ot_hours = max(0.0, ot_hours)
-                        
-                work_hours = round(work_hours, 1)
-                
-                # Save to database
-                cur.execute("""
-                    INSERT INTO attendance (staff_id, date, check_in, check_out, work_hours, ot_hours, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, datetime('now'))
-                    ON CONFLICT(staff_id, date) DO UPDATE SET
-                        check_in=excluded.check_in,
-                        check_out=excluded.check_out,
-                        work_hours=excluded.work_hours,
-                        ot_hours=excluded.ot_hours,
-                        updated_at=datetime('now')
-                """, (sid, d_str, check_in_str, check_out_str, work_hours, ot_hours))
-                
-                staff_ok_count += 1
-                
-            if staff_ok_count > 0:
-                ok_count += staff_ok_count
-                imported_names.append(f"{full_name} (ID: {sid}) - {staff_ok_count} ngày công")
-                
-        conn.commit()
-    finally:
-        conn.close()
-        
-    success_msg = f"Đã hoàn thành xử lý file nhận diện khuôn mặt hàng loạt. Tổng cộng import thành công {ok_count} dòng ghi nhận công."
-    send_html(handler, page_attendance_import_bulk(
-        handler, 
-        success_msg=success_msg,
-        imported_names=imported_names,
-        locked_names=locked_names,
-        unmatched_names=sorted(list(unmatched_names))
-    ))
-
 

@@ -562,7 +562,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
 
         # Build list rows with reconciliation status
         trs = []
-        for r in rows:
+        for idx, r in enumerate(rows, 1):
             svc = f"{val(r['service_year'])}-{val(r['service_month'])}-{val(r['service_day'])}".strip("-")
             if svc in ("", "--"):
                 svc = ""
@@ -655,7 +655,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
 
             trs.append(f"""
             <tr>
-              <td>{r["id"]}</td>
+              <td>{idx}</td>
               <td>
                 <a href="/invoice?id={r["id"]}">
                   {escape(r["khhdon"] or "")} / {escape(r["shdon"] or "")}
@@ -738,7 +738,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
       <table>
         <thead>
           <tr>
-            <th>ID</th>
+            <th>No.</th>
             <th>Series / Invoice No</th>
             <th>Service Date</th>
             <th>Contract No</th>

@@ -103,7 +103,7 @@ def page_vendors_list(q: str, status: str, *, return_to: str):
     """
 
     trs = []
-    for r in rows:
+    for idx, r in enumerate(rows, 1):
         tag = ""
         if int(r["is_active"]) == 0:
             tag = ' <span class="tag tag-deactive">Deactive</span>'
@@ -146,7 +146,7 @@ def page_vendors_list(q: str, status: str, *, return_to: str):
 
         trs.append(f"""
         <tr>
-          <td>{r["id"]}</td>
+          <td>{idx}</td>
           <td>
             <a href="/vendor/edit?id={r["id"]}">{escape(display_name)}</a>{tag}
             <div class="muted">{escape(display_addr)}</div>
@@ -176,7 +176,7 @@ def page_vendors_list(q: str, status: str, *, return_to: str):
     <table>
       <thead>
         <tr>
-          <th>ID</th>
+          <th>No.</th>
           <th>Vendor</th>
           <th>Short Name</th>
           <th>TEL</th>
