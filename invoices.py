@@ -14,7 +14,7 @@ import calendar
 
 from common import (
     db_connect, layout, parse_int_or_none, fmt_money,
-    LIST_LIMIT, read_post_form, send_html, redirect, safe_return_to
+    LIST_LIMIT, read_post_form, send_html, redirect, safe_return_to, now_iso
 )
 
 
@@ -550,7 +550,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
               seller_name, seller_mst, seller_address,
               buyer_name, buyer_mst, buyer_address,
               tg_tcthue, tg_tthue, tg_tttbso,
-              sent_to_mgs
+              sent_to_mgs, force_match
             FROM invoices
             {where_sql}
             ORDER BY nlap DESC, id DESC
@@ -591,8 +591,14 @@ def page_invoices_list(filters: dict, *, return_to: str):
                 conn, r["contract_no"], r["service_year"], r["service_month"], r["tg_tttbso"]
             )
 
+            is_force_match = int(r["force_match"] or 0) == 1
+            is_matched_natural = (recon_status == 'ok') and buyer_ok and seller_ok
+            is_matched = is_force_match or is_matched_natural
+
             recon_badge_html = ""
-            if recon_status == 'ok':
+            if is_force_match:
+                recon_badge_html = f'<div class="tag" style="background:#f3e8ff; border-color:#d8b4fe; color:#6b21a8; margin-left:0; margin-top:4px; display:block; width:fit-content; font-size:10px;" title="Forced matched by user">✓ Force Matched</div>'
+            elif recon_status == 'ok':
                 recon_badge_html = f'<div class="tag" style="background:#e6f4ea; border-color:#b4e3be; color:#137333; margin-left:0; margin-top:4px; display:block; width:fit-content; font-size:10px;" title="{escape(recon_msg)}">✓ Match</div>'
             elif recon_status == 'mismatch':
                 recon_badge_html = f'<div class="tag tag-deactive" style="margin-left:0; margin-top:4px; display:block; width:fit-content; font-size:10px;" title="{escape(recon_msg)}">⚠️ Mismatch ({fmt_money(locked_sum)})</div>'
@@ -606,7 +612,6 @@ def page_invoices_list(filters: dict, *, return_to: str):
             # MGS Details
             mgs_data = get_mgs_data_dict(conn, r)
             mgs_json = json.dumps(mgs_data)
-            is_matched = (recon_status == 'ok') and buyer_ok and seller_ok
             is_sent = int(r["sent_to_mgs"] or 0) == 1
             
             disabled_attr = "disabled" if (not is_matched or is_sent) else ""
@@ -626,6 +631,27 @@ def page_invoices_list(filters: dict, *, return_to: str):
                 <button class="btn-danger" type="submit" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Delete</button>
               </form>
             """
+
+            force_btn = ""
+            if not is_sent:
+                if is_force_match:
+                    force_btn = f"""
+                      <form class="inline" method="POST" action="/invoice/force-match" style="margin:0; display:inline-block;">
+                        <input type="hidden" name="id" value="{r["id"]}">
+                        <input type="hidden" name="value" value="0">
+                        <input type="hidden" name="return_to" value="{escape(return_to)}">
+                        <button class="btn-secondary" type="submit" style="font-size:11px; padding: 4px 8px; margin-top:2px; background:#fff; color:#6b21a8; border-color:#d8b4fe;">Unforce</button>
+                      </form>
+                    """
+                elif not is_matched_natural:
+                    force_btn = f"""
+                      <form class="inline" method="POST" action="/invoice/force-match" style="margin:0; display:inline-block;">
+                        <input type="hidden" name="id" value="{r["id"]}">
+                        <input type="hidden" name="value" value="1">
+                        <input type="hidden" name="return_to" value="{escape(return_to)}">
+                        <button class="btn-secondary" type="submit" style="font-size:11px; padding: 4px 8px; margin-top:2px; background:#f3e8ff; color:#6b21a8; border-color:#d8b4fe;">Force Match</button>
+                      </form>
+                    """
 
             trs.append(f"""
             <tr>
@@ -658,6 +684,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
                 <div class="actions" style="gap:6px; flex-wrap:nowrap; display:flex; align-items:center;">
                   <a href="/edit-invoice?id={r["id"]}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>
                   {delete_form}
+                  {force_btn}
                   {mgs_btn}
                 </div>
               </td>
@@ -754,7 +781,9 @@ def page_invoice_detail(invoice_id: int):
 
     buyer_ok, _ = match_party(inv["buyer_name"], inv["buyer_mst"], inv["buyer_address"], buyer_vendor_set)
     seller_ok, _ = match_party(inv["seller_name"], inv["seller_mst"], inv["seller_address"], seller_vendor_set)
-    is_matched = (recon_status == 'ok') and buyer_ok and seller_ok
+    is_force_match = int(inv["force_match"] or 0) == 1
+    is_matched_natural = (recon_status == 'ok') and buyer_ok and seller_ok
+    is_matched = is_force_match or is_matched_natural
     is_sent = int(inv["sent_to_mgs"] or 0) == 1
     
     disabled_attr = "disabled" if (not is_matched or is_sent) else ""
@@ -793,7 +822,10 @@ def page_invoice_detail(invoice_id: int):
     """
 
     recon_style = ""
-    if recon_status == 'ok':
+    if is_force_match:
+        recon_style = "border-left: 4px solid #8b5cf6; background: #faf5ff; color: #5b21b6; border-color: #e9d5ff;"
+        recon_title = "✓ Force Matched by User"
+    elif recon_status == 'ok':
         recon_style = "border-left: 4px solid #10b981; background: #f0fdf4; color: #166534; border-color: #bbf7d0;"
         recon_title = "✓ Monthly Payroll Reconciled"
     elif recon_status == 'mismatch':
@@ -819,12 +851,34 @@ def page_invoice_detail(invoice_id: int):
     </div>
     """
 
+    force_btn = ""
+    if not is_sent:
+        if is_force_match:
+            force_btn = f"""
+              <form class="inline" method="POST" action="/invoice/force-match" style="margin:0; display:inline-block;">
+                <input type="hidden" name="id" value="{invoice_id}">
+                <input type="hidden" name="value" value="0">
+                <input type="hidden" name="return_to" value="/invoice?id={invoice_id}">
+                <button class="btn" type="submit" style="background:#fff; color:#6b21a8; border-color:#d8b4fe;">Unforce Match</button>
+              </form>
+            """
+        elif not is_matched_natural:
+            force_btn = f"""
+              <form class="inline" method="POST" action="/invoice/force-match" style="margin:0; display:inline-block;">
+                <input type="hidden" name="id" value="{invoice_id}">
+                <input type="hidden" name="value" value="1">
+                <input type="hidden" name="return_to" value="/invoice?id={invoice_id}">
+                <button class="btn" type="submit" style="background:#f3e8ff; color:#6b21a8; border-color:#d8b4fe;">Force Match</button>
+              </form>
+            """
+
     body = f"""
     <div class="actions" style="margin-bottom:14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
       <a href="/">← Invoices List</a>
       <a href="/edit-invoice?id={invoice_id}" class="btn">Edit Data</a>
       <a href="/raw?id={invoice_id}" class="btn">View Raw XML</a>
       {delete_form}
+      {force_btn}
       {mgs_btn}
     </div>
 
@@ -1570,3 +1624,27 @@ def handle_toggle_mgs_sent_ajax(handler):
         send_html(handler, json.dumps({"status": "error", "message": str(e)}), status=500)
     finally:
         conn.close()
+
+
+def handle_force_match_post(handler):
+    form = read_post_form(handler)
+    invoice_id_raw = (form.get("id", [""])[0] or "").strip()
+    val_raw = (form.get("value", [""])[0] or "").strip()
+    return_to = safe_return_to((form.get("return_to", [""])[0] or "").strip())
+
+    if not invoice_id_raw.isdigit() or not val_raw.isdigit():
+        send_html(handler, layout("Error", "<div class='card danger'>Missing or invalid parameters</div>"), status=400)
+        return
+
+    invoice_id = int(invoice_id_raw)
+    val = int(val_raw)
+
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE invoices SET force_match=?, updated_at=? WHERE id=?", (val, now_iso(), invoice_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+    redirect(handler, return_to)

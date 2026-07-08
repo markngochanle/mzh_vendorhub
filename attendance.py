@@ -253,6 +253,11 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
 
     conn = db_connect()
     try:
+        if vendor_filter is not None and contract_filter is not None:
+            c_row = conn.execute("SELECT 1 FROM contracts WHERE id=? AND seller_vendor_id=?", (contract_filter, vendor_filter)).fetchone()
+            if not c_row:
+                contract_filter = None
+
         # Load vendors (purchasing=0)
         vendors = conn.execute("SELECT id, COALESCE(company_name, company_name_vi) AS company_name, tax_id FROM vendors WHERE is_active=1 AND purchasing=0").fetchall()
         
@@ -308,9 +313,10 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         locks_rows = conn.execute("SELECT staff_id FROM attendance_locks WHERE month=? AND locked=1", (month_val,)).fetchall()
         locked_staff_ids = {r["staff_id"] for r in locks_rows}
 
-        # Load monthly summary locks for this month
-        m_locks_rows = conn.execute("SELECT staff_id FROM monthly_attendance_summary WHERE month=? AND locked=1", (month_val,)).fetchall()
-        monthly_locked_staff_ids = {r["staff_id"] for r in m_locks_rows}
+        # Load monthly summary locks and manual totals for this month
+        m_locks_rows = conn.execute("SELECT staff_id, locked, manual_work_hours, manual_ot_hours FROM monthly_attendance_summary WHERE month=?", (month_val,)).fetchall()
+        monthly_locked_staff_ids = {r["staff_id"] for r in m_locks_rows if r["locked"] == 1}
+        manual_totals_map = {r["staff_id"]: (r["manual_work_hours"], r["manual_ot_hours"]) for r in m_locks_rows}
 
         # Load existing attendance for this month
         month_start_date = f"{year:04d}-{month:02d}-01"
@@ -432,8 +438,8 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
             
             if sid in att_map and d in att_map[sid]:
                 w, ot, ci, co = att_map[sid][d]
-                work_val = f"{w:.1f}" if w > 0 else ""
-                ot_val = f"{ot:.1f}" if ot > 0 else ""
+                work_val = f"{w:.2f}" if w > 0 else ""
+                ot_val = f"{ot:.2f}" if ot > 0 else ""
                 total_work += w if w > 0 else 0.0
                 total_ot += ot if ot > 0 else 0.0
                 if ci or co:
@@ -441,15 +447,31 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
             
             cells.append(f"""
               <td style="padding: 2px; text-align: center; {cell_bg}">
-                <input type="number" name="w_{sid}_{d_str}" data-staff-id="{sid}" data-date="{d_str}" data-type="w" class="att-input" min="0" max="24" step="0.1" value="{work_val}" {tooltip_title} {disabled_attr}
-                       placeholder="-" style="width: 26px; font-size: 10px; padding: 2px 0; text-align: center; border: 1px solid #ddd; border-radius: 4px; background: transparent;">
+                <input type="number" name="w_{sid}_{d_str}" data-staff-id="{sid}" data-date="{d_str}" data-type="w" class="att-input" min="0" max="24" step="0.01" value="{work_val}" {tooltip_title} {disabled_attr}
+                       placeholder="-" style="width: 36px; font-size: 10px; padding: 2px 0; text-align: center; border: 1px solid #ddd; border-radius: 4px; background: transparent;">
               </td>
               <td style="padding: 2px; text-align: center; {cell_bg}">
-                <input type="number" name="ot_{sid}_{d_str}" data-staff-id="{sid}" data-date="{d_str}" data-type="ot" class="att-input" min="0" max="24" step="0.1" value="{ot_val}" {tooltip_title} {disabled_attr}
-                       placeholder="-" style="width: 26px; font-size: 10px; padding: 2px 0; text-align: center; border: 1px solid #ddd; border-radius: 4px; background: transparent;">
+                <input type="number" name="ot_{sid}_{d_str}" data-staff-id="{sid}" data-date="{d_str}" data-type="ot" class="att-input" min="0" max="24" step="0.01" value="{ot_val}" {tooltip_title} {disabled_attr}
+                       placeholder="-" style="width: 36px; font-size: 10px; padding: 2px 0; text-align: center; border: 1px solid #ddd; border-radius: 4px; background: transparent;">
               </td>
             """)
             
+        # Determine totals to display (check for manual overrides)
+        manual_w, manual_ot = manual_totals_map.get(sid, (None, None))
+        display_total_work = manual_w if manual_w is not None else total_work
+        display_total_ot = manual_ot if manual_ot is not None else total_ot
+
+        if is_locked:
+            total_work_html = f"{display_total_work:.2f}"
+            total_ot_html = f"{display_total_ot:.2f}"
+        else:
+            w_style = "border: 1px solid #0369a1; background: #e0f2fe; color: #0369a1;" if manual_w is not None else "border: 1px solid #cbd5e1; background: transparent; color: #0369a1;"
+            ot_style = "border: 1px solid #b45309; background: #fef3c7; color: #b45309;" if manual_ot is not None else "border: 1px solid #cbd5e1; background: transparent; color: #b45309;"
+            manual_w_attr = 'data-manual="true"' if manual_w is not None else ''
+            manual_ot_attr = 'data-manual="true"' if manual_ot is not None else ''
+            total_work_html = f'<input type="number" step="0.01" name="total_work_{sid}" value="{display_total_work:.2f}" style="width: 48px; font-size: 11px; font-weight: bold; text-align: center; border-radius: 4px; {w_style}" {manual_w_attr}>'
+            total_ot_html = f'<input type="number" step="0.01" name="total_ot_{sid}" value="{display_total_ot:.2f}" style="width: 48px; font-size: 11px; font-weight: bold; text-align: center; border-radius: 4px; {ot_style}" {manual_ot_attr}>'
+
         trs.append(f"""
         <tr>
           <td class="sticky-col1" style="font-size: 11px; text-align: center;">{sid}</td>
@@ -466,11 +488,11 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
             <div class="muted" style="font-size: 9px;">{escape(s["work_shift"] or "Not set")}</div>
             <div style="margin-top:2px;">{lock_label}</div>
           </td>
-          <td style="font-size: 11px; text-align: center; font-weight: bold; background: #f0f9ff; color: #0369a1;">
-            {total_work:.1f}
+          <td style="font-size: 11px; text-align: center; font-weight: bold; background: #f0f9ff; color: #0369a1; padding: 2px;">
+            {total_work_html}
           </td>
-          <td style="font-size: 11px; text-align: center; font-weight: bold; background: #fffbeb; color: #b45309;">
-            {total_ot:.1f}
+          <td style="font-size: 11px; text-align: center; font-weight: bold; background: #fffbeb; color: #b45309; padding: 2px;">
+            {total_ot_html}
           </td>
           {''.join(cells)}
         </tr>
@@ -606,6 +628,7 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
                 <th style="padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border); border-right: none;">Vendor</th>
                 <th style="padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border); border-right: none;">Work Shift</th>
                 <th style="padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border); border-right: none; width: 320px;">Upload CSV File</th>
+                <th style="padding: 8px 12px; text-align: left; font-size: 11px; text-transform: uppercase; border-bottom: 1px solid var(--border); border-right: none; width: 100px;">Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -621,8 +644,14 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
                    else f'<input type="file" name="file_{st["id"]}" accept=".csv" style="font-size: 11px; padding: 4px; border: 1px solid var(--border); border-radius: 4px; background: #fff; width: 100%;">'
                   }
                 </td>
+                <td style="padding: 6px 12px; border-right: none;">
+                  {("" if (st["id"] in locked_staff_ids or st["id"] in monthly_locked_staff_ids)
+                    else (f'<a href="/attendance/clear?staff_id={st["id"]}&month={month_val}&vendor_id={vendor_filter or ""}&contract_id={contract_filter or ""}&q={urllib.parse.quote(q_filter)}" class="btn btn-danger" style="font-size: 11px; padding: 4px 8px; line-height: 1;" onclick="return confirm(\'Xóa toàn bộ dữ liệu chấm công tháng {month_val} của {escape(st["full_name_vi"])}?\')">🗑️ Xóa công</a>'
+                          if st["id"] in att_map else '<span class="muted" style="font-size:11px;">Chưa có công</span>')
+                   )}
+                </td>
               </tr>
-              ''' for st in import_staff_list]) if import_staff_list else '<tr><td colspan="5" class="muted" style="padding:15px; text-align:center;">No active staff with valid contract in this month</td></tr>'}
+              ''' for st in import_staff_list]) if import_staff_list else '<tr><td colspan="6" class="muted" style="padding:15px; text-align:center;">No active staff with valid contract in this month</td></tr>'}
             </tbody>
           </table>
         </div>
@@ -711,6 +740,19 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
                   targetCell.style.borderColor = '#ddd';
                   targetCell.style.background = 'transparent';
                 }}, 1000);
+
+                // Dynamically update the totals input if not manually overridden
+                const totalInput = document.querySelector('input[name="total_' + (type === 'w' ? 'work' : 'ot') + '_' + staffId + '"]');
+                if (totalInput && totalInput.dataset.manual !== 'true') {{
+                  let sum = 0.0;
+                  document.querySelectorAll('input[data-staff-id="' + staffId + '"][data-type="' + type + '"]').forEach(cell => {{
+                    const val = parseFloat(cell.value);
+                    if (!isNaN(val)) {{
+                      sum += val;
+                    }}
+                  }});
+                  totalInput.value = sum.toFixed(2);
+                }}
               }} else {{
                 throw new Error(data.message || 'Error saving cell');
               }}
@@ -726,6 +768,15 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
                 targetCell.style.background = 'transparent';
               }}, 1500);
             }});
+          }});
+        }});
+
+        // Add manual flag when total inputs are changed
+        document.querySelectorAll('input[name^="total_work_"], input[name^="total_ot_"]').forEach(totalInput => {{
+          totalInput.addEventListener('change', function() {{
+            this.dataset.manual = 'true';
+            this.style.borderColor = '#4f46e5';
+            this.style.background = '#f5f3ff';
           }});
         }});
       }})();
@@ -909,6 +960,7 @@ def handle_attendance_save_post(handler):
         # We need to find all keys in form: w_{sid}_{date} and ot_{sid}_{date}
         # Gather updates
         updates = {} # (sid, date) -> {"w": val, "ot": val}
+        manual_totals = {} # sid -> {"work": val, "ot": val}
         
         for key, vals in form.items():
             if key.startswith("w_"):
@@ -925,6 +977,14 @@ def handle_attendance_save_post(handler):
                     d_str = "_".join(parts[2:])
                     val = to_xml_float(vals[0]) or 0.0
                     updates.setdefault((sid, d_str), {})["ot"] = val
+            elif key.startswith("total_work_"):
+                sid = int(key.split("_")[2])
+                val = to_xml_float(vals[0])
+                manual_totals.setdefault(sid, {})["work"] = val
+            elif key.startswith("total_ot_"):
+                sid = int(key.split("_")[2])
+                val = to_xml_float(vals[0])
+                manual_totals.setdefault(sid, {})["ot"] = val
         
         # Perform updates
         for (sid, d_str), vals in updates.items():
@@ -943,7 +1003,107 @@ def handle_attendance_save_post(handler):
                     updated_at=datetime('now')
             """, (sid, d_str, w, ot))
             
+        # Update monthly summary for modified staff
+        if month_val:
+            try:
+                year = int(month_val.split("-")[0])
+                month = int(month_val.split("-")[1])
+                import calendar
+                num_days = calendar.monthrange(year, month)[1]
+                month_start_date = f"{year:04d}-{month:02d}-01"
+                month_end_date = f"{year:04d}-{month:02d}-{num_days:02d}"
+                std_days_default = get_standard_working_days(year, month)
+            except Exception:
+                month_start_date = ""
+                month_end_date = ""
+                std_days_default = 22.0
+
+            if month_start_date:
+                # Load staff rates
+                staff_data = {}
+                staff_rows = conn.execute("""
+                    SELECT id, monthly_rate, manday_rate FROM contract_staff
+                """).fetchall()
+                for s in staff_rows:
+                    staff_data[s["id"]] = s
+
+                for sid in manual_totals.keys():
+                    if sid in locked_staff_ids:
+                        continue
+                        
+                    # Calculate default/calculated sums from daily cells in DB
+                    row_sum = conn.execute("""
+                        SELECT SUM(work_hours) AS sum_w, SUM(ot_hours) AS sum_ot
+                        FROM attendance
+                        WHERE staff_id = ? AND date >= ? AND date <= ?
+                    """, (sid, month_start_date, month_end_date)).fetchone()
+                    
+                    calc_w = row_sum["sum_w"] or 0.0
+                    calc_ot = row_sum["sum_ot"] or 0.0
+                    
+                    sub_w = manual_totals[sid].get("work")
+                    sub_ot = manual_totals[sid].get("ot")
+                    
+                    # Check override
+                    manual_w = None
+                    if sub_w is not None and abs(sub_w - calc_w) > 0.001:
+                        manual_w = sub_w
+                        
+                    manual_ot = None
+                    if sub_ot is not None and abs(sub_ot - calc_ot) > 0.001:
+                        manual_ot = sub_ot
+                        
+                    # Fetch existing monthly summary values
+                    summary_row = conn.execute("""
+                        SELECT standard_days, paid_leave_days, locked FROM monthly_attendance_summary
+                        WHERE staff_id = ? AND month = ?
+                    """, (sid, month_val)).fetchone()
+                    
+                    std = std_days_default
+                    pl = 0.0
+                    if summary_row:
+                        if summary_row["locked"] == 1:
+                            continue
+                        std = summary_row["standard_days"]
+                        pl = summary_row["paid_leave_days"]
+                        
+                    actual_days = (manual_w if manual_w is not None else calc_w) / 8.0
+                    ot_converted = (manual_ot if manual_ot is not None else calc_ot) * 1.5
+                    
+                    s = staff_data.get(sid)
+                    daily_rate = 0.0
+                    if s:
+                        if s["manday_rate"] is not None and s["manday_rate"] > 0:
+                            daily_rate = s["manday_rate"]
+                        elif s["monthly_rate"] is not None and s["monthly_rate"] > 0:
+                            daily_rate = s["monthly_rate"] / std if std > 0 else 0.0
+                            
+                    total_days = actual_days + pl
+                    work_amt = round(total_days * daily_rate)
+                    ot_rate = daily_rate / 8.0
+                    ot_amt = round(ot_converted * ot_rate)
+                    total_amount = work_amt + ot_amt
+                    
+                    conn.execute("""
+                        INSERT INTO monthly_attendance_summary (
+                            staff_id, month, standard_days, actual_days, paid_leave_days,
+                            ot_converted_hours, daily_rate, total_amount, locked, 
+                            manual_work_hours, manual_ot_hours, created_at, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, datetime('now'), datetime('now'))
+                        ON CONFLICT(staff_id, month) DO UPDATE SET
+                            actual_days = excluded.actual_days,
+                            ot_converted_hours = excluded.ot_converted_hours,
+                            daily_rate = excluded.daily_rate,
+                            total_amount = excluded.total_amount,
+                            manual_work_hours = excluded.manual_work_hours,
+                            manual_ot_hours = excluded.manual_ot_hours,
+                            updated_at = datetime('now')
+                        """, (sid, month_val, std, actual_days, pl, ot_converted, daily_rate, total_amount, manual_w, manual_ot))
+
         conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise e
     finally:
         conn.close()
 
@@ -1019,6 +1179,91 @@ def handle_attendance_unlock_get(handler):
     redirect(handler, redirect_url)
 
 
+def handle_attendance_clear_get(handler):
+    parsed = urllib.parse.urlparse(handler.path)
+    qs = urllib.parse.parse_qs(parsed.query)
+
+    sid = parse_int_or_none(qs.get("staff_id", [""])[0])
+    month_val = (qs.get("month", [""])[0] or "").strip()
+    
+    vendor_id = qs.get("vendor_id", [""])[0].strip()
+    contract_id = qs.get("contract_id", [""])[0].strip()
+    q = qs.get("q", [""])[0].strip()
+    
+    redirect_url = f"/attendance?month={month_val}&vendor_id={vendor_id}&contract_id={contract_id}&q={q}"
+
+    if sid and month_val:
+        conn = db_connect()
+        try:
+            # Check daily lock
+            locked_daily = conn.execute("""
+                SELECT 1 FROM attendance_locks
+                WHERE staff_id=? AND month=? AND locked=1
+            """, (sid, month_val)).fetchone()
+            if locked_daily:
+                send_html(handler, page_attendance(
+                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "q": q},
+                    error_msg="Cannot clear attendance data because it is locked."
+                ))
+                return
+
+            # Check monthly lock
+            locked_monthly = conn.execute("""
+                SELECT 1 FROM monthly_attendance_summary
+                WHERE staff_id=? AND month=? AND locked=1
+            """, (sid, month_val)).fetchone()
+            if locked_monthly:
+                send_html(handler, page_attendance(
+                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "q": q},
+                    error_msg="Cannot clear attendance data because monthly payroll is locked."
+                ))
+                return
+
+            try:
+                year = int(month_val.split("-")[0])
+                month = int(month_val.split("-")[1])
+                num_days = calendar.monthrange(year, month)[1]
+                month_start_date = f"{year:04d}-{month:02d}-01"
+                month_end_date = f"{year:04d}-{month:02d}-{num_days:02d}"
+            except Exception:
+                send_html(handler, page_attendance(
+                    {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "q": q},
+                    error_msg="Invalid month format."
+                ))
+                return
+
+            cur = conn.cursor()
+            # Delete from attendance table
+            cur.execute("""
+                DELETE FROM attendance
+                WHERE staff_id = ? AND date >= ? AND date <= ?
+            """, (sid, month_start_date, month_end_date))
+
+            # Reset manual columns and total amount in monthly_attendance_summary if it exists
+            cur.execute("""
+                UPDATE monthly_attendance_summary
+                SET actual_days = 0.0,
+                    ot_converted_hours = 0.0,
+                    total_amount = 0.0,
+                    manual_work_hours = NULL,
+                    manual_ot_hours = NULL,
+                    updated_at = datetime('now')
+                WHERE staff_id = ? AND month = ?
+            """, (sid, month_val))
+
+            conn.commit()
+            
+            send_html(handler, page_attendance(
+                {"month": month_val, "vendor_id": parse_int_or_none(vendor_id), "contract_id": parse_int_or_none(contract_id), "q": q},
+                success_msg="Successfully cleared attendance data."
+            ))
+            return
+        finally:
+            conn.close()
+
+    redirect(handler, redirect_url)
+
+
 def to_xml_float(s: str | None) -> float | None:
     if s is None:
         return None
@@ -1083,6 +1328,11 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
 
     conn = db_connect()
     try:
+        if vendor_filter is not None and contract_filter is not None:
+            c_row = conn.execute("SELECT 1 FROM contracts WHERE id=? AND seller_vendor_id=?", (contract_filter, vendor_filter)).fetchone()
+            if not c_row:
+                contract_filter = None
+
         # Load vendors and contracts for dropdowns
         vendors = conn.execute("SELECT id, COALESCE(company_name, company_name_vi) AS company_name FROM vendors WHERE is_active=1 AND purchasing=0").fetchall()
         if vendor_filter is not None:
@@ -1142,7 +1392,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
         for s in locked_staff:
             sid = s["id"]
             row = conn.execute("""
-                SELECT standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked
+                SELECT standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked, manual_work_hours, manual_ot_hours
                 FROM monthly_attendance_summary
                 WHERE staff_id=? AND month=?
             """, (sid, month_val)).fetchone()
@@ -1158,8 +1408,11 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
                     std_days = summary_data["standard_days"]
                     pl_days = summary_data["paid_leave_days"]
                     
-                    actual_days = calc_actual_days
-                    ot_converted = calc_ot_converted
+                    manual_w = summary_data.get("manual_work_hours")
+                    manual_ot = summary_data.get("manual_ot_hours")
+                    
+                    actual_days = (manual_w if manual_w is not None else sum_w) / 8.0
+                    ot_converted = (manual_ot if manual_ot is not None else sum_ot) * 1.5
                     
                     if s["manday_rate"] is not None and s["manday_rate"] > 0:
                         daily_rate = s["manday_rate"]
@@ -1169,9 +1422,9 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
                         daily_rate = 0.0
                         
                     total_days = actual_days + pl_days
-                    work_amt = total_days * daily_rate
+                    work_amt = round(total_days * daily_rate)
                     ot_rate = daily_rate / 8.0
-                    ot_amt = ot_converted * ot_rate
+                    ot_amt = round(ot_converted * ot_rate)
                     total_amount = work_amt + ot_amt
                     
                     cur.execute("""
@@ -1200,9 +1453,9 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
                     daily_rate = 0.0
 
                 total_days = actual_days + paid_leave_days
-                work_amt = total_days * daily_rate
+                work_amt = round(total_days * daily_rate)
                 ot_rate = daily_rate / 8.0
-                ot_amt = ot_converted * ot_rate
+                ot_amt = round(ot_converted * ot_rate)
                 total_amount = work_amt + ot_amt
 
                 cur.execute("""
@@ -1219,7 +1472,9 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
                     "ot_converted_hours": ot_converted,
                     "daily_rate": daily_rate,
                     "total_amount": total_amount,
-                    "locked": 0
+                    "locked": 0,
+                    "manual_work_hours": None,
+                    "manual_ot_hours": None
                 }
         
         conn.commit()
@@ -1289,8 +1544,8 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
         # Get raw hours for display
         raw_w, raw_ot = raw_hours_map.get(sid, (0.0, 0.0))
 
-        work_pay = (act + pl) * daily_rate
-        ot_pay = ot_hours * (daily_rate / 8.0)
+        work_pay = round((act + pl) * daily_rate)
+        ot_pay = round(ot_hours * (daily_rate / 8.0))
         total_pay = sum_data["total_amount"]
 
         total_billing_all += total_pay
@@ -1328,24 +1583,24 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
           </td>
           <!-- OT converted hours (editable) -->
           <td>
-            <input type="number" step="0.1" name="ot_{sid}" value="{sum_data['ot_converted_hours']:.1f}" {disabled_attr}
-                   style="width: 60px; padding: 4px; font-size:12px; text-align:center;">
+            <input type="number" step="0.01" name="ot_{sid}" value="{sum_data['ot_converted_hours']:.2f}" {disabled_attr}
+                   style="width: 65px; padding: 4px; font-size:12px; text-align:center;">
           </td>
           <!-- Hours Worked (Raw Hours) -->
           <td style="text-align:center; font-size:11px; font-family:monospace; line-height:1.3; vertical-align:middle;">
-            <div>Work: {raw_w:.1f}h</div>
-            <div style="color:#666;">OT: {raw_ot:.1f}h</div>
+            <div>Work: {raw_w:.2f}h</div>
+            <div style="color:#666;">OT: {raw_ot:.2f}h</div>
           </td>
           <!-- Daily rate (display) -->
           <td style="text-align:right; font-family:monospace;">
-            {fmt_money(sum_data['daily_rate'])}
+            {int(round(sum_data['daily_rate'])):,}
           </td>
           <!-- Total billing amount (display breakdown) -->
           <td style="text-align:right; font-family:monospace; line-height:1.3; font-size:11px;">
-            <div style="color: #666;">Work: {fmt_money(work_pay)}</div>
-            <div style="color: #666;">OT: {fmt_money(ot_pay)}</div>
+            <div style="color: #666;">Work: {int(work_pay):,}</div>
+            <div style="color: #666;">OT: {int(ot_pay):,}</div>
             <div style="font-weight:bold; color:#0b57d0; font-size:12px; margin-top:2px; border-top:1px dashed #ddd; padding-top:2px;">
-              Total: {fmt_money(total_pay)} VND
+              Total: {int(total_pay):,} VND
             </div>
           </td>
         </tr>
@@ -1434,7 +1689,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
           <a href="/attendance/monthly/export?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&q={escape(q_filter)}" class="btn btn-secondary" style="padding:10px 20px;">Export to Excel (CSV)</a>
         </div>
         <div style="font-size:18px; font-weight:bold; color:#111;">
-          Total Monthly Payment: <span style="color:#0b57d0; font-size:20px;">{fmt_money(total_billing_all)} VND</span>
+          Total Monthly Payment: <span style="color:#0b57d0; font-size:20px;">{int(round(total_billing_all)):,} VND</span>
         </div>
       </div>
       ''' if trs else ''}
@@ -1517,8 +1772,18 @@ def handle_attendance_monthly_save_post(handler):
             pl = vals.get("pl", 0.0)
             ot = vals.get("ot", 0.0)
             
-            # Lấy actual_days trực tiếp từ daily logs
-            actual_days, _ = get_attendance_actual_days_and_ot(conn, sid, month_val)
+            # Check if manual_work_hours is set in monthly summary
+            summary_row = conn.execute("""
+                SELECT manual_work_hours FROM monthly_attendance_summary
+                WHERE staff_id=? AND month=?
+            """, (sid, month_val)).fetchone()
+            
+            manual_w = summary_row["manual_work_hours"] if summary_row else None
+            
+            if manual_w is not None:
+                actual_days = manual_w / 8.0
+            else:
+                actual_days, _ = get_attendance_actual_days_and_ot(conn, sid, month_val)
 
             # Calculate daily rate
             if s["manday_rate"] is not None and s["manday_rate"] > 0:
@@ -1530,9 +1795,9 @@ def handle_attendance_monthly_save_post(handler):
 
             # Recalculate amount
             total_days = actual_days + pl
-            work_amt = total_days * daily_rate
+            work_amt = round(total_days * daily_rate)
             ot_rate = daily_rate / 8.0
-            ot_amt = ot * ot_rate
+            ot_amt = round(ot * ot_rate)
             total_amount = work_amt + ot_amt
 
             cur.execute("""
@@ -1813,8 +2078,8 @@ def handle_attendance_monthly_export_get(handler):
         is_locked = "Locked" if sum_data["locked"] == 1 else "Unlocked"
         
         raw_w, raw_ot = raw_hours_map.get(sid, (0.0, 0.0))
-        work_pay = (act + pl) * daily_rate
-        ot_pay = ot_hours * (daily_rate / 8.0)
+        work_pay = round((act + pl) * daily_rate)
+        ot_pay = round(ot_hours * (daily_rate / 8.0))
         
         writer.writerow([
             sid,
@@ -1826,13 +2091,13 @@ def handle_attendance_monthly_export_get(handler):
             f"{sum_data['standard_days']:.1f}",
             f"{act:.2f}",
             f"{pl:.1f}",
-            f"{ot_hours:.1f}",
-            f"{raw_w:.1f}",
-            f"{raw_ot:.1f}",
-            f"{daily_rate:.2f}",
-            f"{work_pay:.2f}",
-            f"{ot_pay:.2f}",
-            f"{total_pay:.2f}",
+            f"{ot_hours:.2f}",
+            f"{raw_w:.2f}",
+            f"{raw_ot:.2f}",
+            f"{int(round(daily_rate))}",
+            f"{work_pay}",
+            f"{ot_pay}",
+            f"{int(round(total_pay))}",
             is_locked
         ])
         

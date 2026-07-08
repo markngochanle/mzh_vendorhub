@@ -32,7 +32,7 @@ def load_vendors_for_staff(conn):
 
 def load_contracts(conn):
     return conn.execute("""
-        SELECT c.id, c.framework_no, c.framework_name,
+        SELECT c.id, c.framework_no, c.framework_name, c.seller_vendor_id,
                COALESCE(bv.company_name, bv.company_name_vi) AS buyer_name,
                COALESCE(sv.company_name, sv.company_name_vi) AS seller_name
         FROM contracts c
@@ -116,9 +116,10 @@ def check_no_overlap(conn, staff_id_exclude, vendor_id: int, full_name_vi: str,
     return True, None
 
 
-def page_staff_list(q: str, vendor_id: str, status: str, *, return_to: str):
+def page_staff_list(q: str, vendor_id: str, contract_id: str, status: str, *, return_to: str):
     q = (q or "").strip()
     vendor_id = (vendor_id or "").strip()
+    contract_id = (contract_id or "").strip()
     status = (status or "active").strip().lower()  # active|inactive|all
     if status not in ("active", "inactive", "all"):
         status = "active"
@@ -129,6 +130,10 @@ def page_staff_list(q: str, vendor_id: str, status: str, *, return_to: str):
     if vendor_id.isdigit():
         where.append("s.vendor_id = ?")
         params.append(int(vendor_id))
+
+    if contract_id.isdigit():
+        where.append("s.contract_id = ?")
+        params.append(int(contract_id))
 
     if status == "active":
         where.append("(s.status IS NULL OR TRIM(s.status) = '')")
@@ -145,6 +150,7 @@ def page_staff_list(q: str, vendor_id: str, status: str, *, return_to: str):
     conn = db_connect()
     try:
         vendors = load_vendors_for_staff(conn)
+        contracts = load_contracts(conn)
 
         rows = conn.execute(f"""
             SELECT
@@ -169,18 +175,30 @@ def page_staff_list(q: str, vendor_id: str, status: str, *, return_to: str):
         sel = "selected" if vendor_id.isdigit() and int(vendor_id) == v["id"] else ""
         vendor_opts.append(f'<option value="{v["id"]}" {sel}>{escape(vendor_label(v))}</option>')
 
+    contract_opts = ['<option value="">-- all contracts --</option>']
+    for c in contracts:
+        sel = "selected" if contract_id.isdigit() and int(contract_id) == c["id"] else ""
+        contract_opts.append(f'<option value="{c["id"]}" data-vendor-id="{c["seller_vendor_id"]}" {sel}>{escape(contract_label(c))}</option>')
+
     body = f"""
     <div class="card">
       <form class="filters" method="GET" action="/staff">
-        <div style="min-width:320px;">
+        <div style="min-width:260px;">
           <div class="label">Search</div>
           <input type="text" name="q" value="{escape(q)}" placeholder="Name / Position / Project" style="width:100%;">
         </div>
 
-        <div style="min-width:340px;">
+        <div style="min-width:280px;">
           <div class="label">Vendor</div>
-          <select name="vendor_id" style="width:100%;">
+          <select id="vendor_id" name="vendor_id" style="width:100%;">
             {''.join(vendor_opts)}
+          </select>
+        </div>
+
+        <div style="min-width:280px;">
+          <div class="label">Framework Contract</div>
+          <select id="contract_id" name="contract_id" style="width:100%;">
+            {''.join(contract_opts)}
           </select>
         </div>
 
@@ -201,6 +219,39 @@ def page_staff_list(q: str, vendor_id: str, status: str, *, return_to: str):
         </div>
       </form>
     </div>
+
+    <script>
+      (function() {{
+        const vendorSel = document.getElementById('vendor_id');
+        const contractSel = document.getElementById('contract_id');
+        if (vendorSel && contractSel) {{
+          function filterContract() {{
+            const vId = vendorSel.value;
+            const opts = contractSel.querySelectorAll('option');
+            let hasSelectedVisible = false;
+
+            opts.forEach((opt) => {{
+              const optVendor = opt.getAttribute('data-vendor-id');
+              if (!optVendor) {{
+                opt.hidden = false; // -- all contracts --
+                return;
+              }}
+              opt.hidden = (vId && optVendor !== vId);
+              if (!opt.hidden && opt.selected) {{
+                hasSelectedVisible = true;
+              }}
+            }});
+
+            if (!hasSelectedVisible) {{
+              contractSel.value = "";
+            }}
+          }}
+
+          vendorSel.addEventListener('change', filterContract);
+          filterContract();
+        }}
+      }})();
+    </script>
 
     <table>
       <thead>
@@ -294,7 +345,7 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
     contract_opts = ['<option value="">-- select framework contract --</option>']
     for c in contracts:
         sel = "selected" if contract_selected and str(c["id"]) == contract_selected else ""
-        contract_opts.append(f'<option value="{c["id"]}" {sel}>{escape(contract_label(c))}</option>')
+        contract_opts.append(f'<option value="{c["id"]}" data-vendor-id="{c["seller_vendor_id"]}" {sel}>{escape(contract_label(c))}</option>')
 
     annex_opts = ['<option value="">(none)</option>']
     for a in annexes:
@@ -343,7 +394,7 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
 
           <div>
             <div class="label">Vendor (purchasing=0)</div>
-            <select name="vendor_id" style="width:100%;">
+            <select id="vendor_id" name="vendor_id" style="width:100%;">
               {''.join(vendor_opts)}
             </select>
           </div>
@@ -437,8 +488,32 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
 
     <script>
       (function() {{
+        const vendorSel = document.getElementById('vendor_id');
         const contractSel = document.getElementById('contract_id');
         const annexSel = document.getElementById('annex_id');
+
+        function filterContract() {{
+          const vId = vendorSel.value;
+          const opts = contractSel.querySelectorAll('option');
+          let hasSelectedVisible = false;
+
+          opts.forEach((opt) => {{
+            const optVendor = opt.getAttribute('data-vendor-id');
+            if (!optVendor) {{
+              opt.hidden = false; // -- select framework contract --
+              return;
+            }}
+            opt.hidden = (vId && optVendor !== vId);
+            if (!opt.hidden && opt.selected) {{
+              hasSelectedVisible = true;
+            }}
+          }});
+
+          if (!hasSelectedVisible) {{
+            contractSel.value = "";
+          }}
+          filterAnnex();
+        }}
 
         function filterAnnex() {{
           const cId = contractSel.value;
@@ -462,8 +537,9 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
           }}
         }}
 
+        vendorSel.addEventListener('change', filterContract);
         contractSel.addEventListener('change', filterAnnex);
-        filterAnnex();
+        filterContract();
       }})();
     </script>
     """

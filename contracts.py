@@ -57,7 +57,8 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
               c.*,
               COALESCE(bv.company_name, bv.company_name_vi) AS buyer_name, bv.tax_id AS buyer_tax,
               COALESCE(sv.company_name, sv.company_name_vi) AS seller_name, sv.tax_id AS seller_tax,
-              (SELECT COUNT(*) FROM contract_annexes a WHERE a.contract_id=c.id AND a.is_active=1) AS annex_count
+              (SELECT COUNT(*) FROM contract_annexes a WHERE a.contract_id=c.id AND a.is_active=1) AS annex_count,
+              (SELECT SUM(a.value) FROM contract_annexes a WHERE a.contract_id=c.id AND a.is_active=1) AS annexes_sum
             FROM contracts c
             JOIN vendors bv ON bv.id = c.buyer_vendor_id
             JOIN vendors sv ON sv.id = c.seller_vendor_id
@@ -101,6 +102,14 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
         buyer = f"{(r['buyer_name'] or '').strip()} ({(r['buyer_tax'] or '').strip()})"
         seller = f"{(r['seller_name'] or '').strip()} ({(r['seller_tax'] or '').strip()})"
 
+        # Determine value to display
+        if r["contract_value"] is not None and r["contract_value"] > 0:
+            val_display = f"{int(round(r['contract_value'])):,}"
+        elif r["annexes_sum"] is not None and r["annexes_sum"] > 0:
+            val_display = f"{int(round(r['annexes_sum'])):,} <span class='muted' style='font-size:10px;'>(sum of annexes)</span>"
+        else:
+            val_display = '<span class="muted">No value</span>'
+
         actions = f'<a href="/contract/edit?id={r["id"]}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>'
 
         if int(r["is_active"]) == 1:
@@ -134,6 +143,7 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
           <td>{escape(buyer)}</td>
           <td>{escape(seller)}</td>
           <td>{escape(r["start_date"] or "")} → {escape(r["end_date"] or "")}</td>
+          <td style="text-align:right; font-family:monospace;">{val_display}</td>
           <td>{r["annex_count"]}</td>
           <td>
             <div class="actions" style="gap:6px; flex-wrap:nowrap; display:flex; align-items:center;">
@@ -161,12 +171,13 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
           <th>Purchasing (Buyer)</th>
           <th>Vendor (Seller)</th>
           <th>Contract Period</th>
+          <th style="text-align:right;">Value (VND)</th>
           <th>Annexes (Active)</th>
           <th>Actions</th>
         </tr>
       </thead>
       <tbody>
-        {''.join(trs) if trs else '<tr><td colspan="7" class="muted">No contracts</td></tr>'}
+        {''.join(trs) if trs else '<tr><td colspan="8" class="muted">No contracts</td></tr>'}
       </tbody>
     </table>
     """
@@ -179,6 +190,14 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
 
     buyer_opts = load_vendor_options(1)  # purchasing=Yes
     seller_opts = load_vendor_options(0) # purchasing=No
+
+    annex_sum = 0.0
+    if mode == "edit" and annex_rows:
+        for a in annex_rows:
+            if int(a["is_active"]) == 1 and a["value"] is not None:
+                annex_sum += float(a["value"])
+
+    placeholder_val = f"Default (Annexes sum): {int(round(annex_sum))}" if annex_sum > 0 else "e.g. 5000000000"
 
     def gv(key):
         if contract_row is None:
@@ -231,11 +250,13 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
                   </form>
                 """
 
+            val_display = f"{int(round(a['value'])):,}" if a["value"] is not None else '<span class="muted">Not set</span>'
             annex_trs.append(f"""
               <tr>
                 <td>{a["id"]}</td>
                 <td>{escape(a["annex_name"] or "")} {tag}</td>
                 <td>{escape(a["start_date"] or "")} → {escape(a["end_date"] or "")}</td>
+                <td style="text-align:right; font-family:monospace;">{val_display}</td>
                 <td>
                   <div class="actions" style="gap:6px; flex-wrap:nowrap; display:flex; align-items:center;">
                     {actions}
@@ -253,9 +274,9 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
             </a>
           </div>
           <table>
-            <thead><tr><th>ID</th><th>Annex Name</th><th>Period</th><th>Actions</th></tr></thead>
+            <thead><tr><th>ID</th><th>Annex Name</th><th>Period</th><th style="text-align:right;">Value (VND)</th><th>Actions</th></tr></thead>
             <tbody>
-              {''.join(annex_trs) if annex_trs else '<tr><td colspan="4" class="muted">No annexes</td></tr>'}
+              {''.join(annex_trs) if annex_trs else '<tr><td colspan="5" class="muted">No annexes</td></tr>'}
             </tbody>
           </table>
 
@@ -299,6 +320,12 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
           <div>
             <div class="label">Framework Contract Name</div>
             <input type="text" name="framework_name" value="{escape(gv("framework_name"))}" style="width:100%;">
+          </div>
+
+          <div>
+            <div class="label">Contract Value (VND)</div>
+            <input type="number" name="contract_value" value="{escape(gv("contract_value"))}" style="width:100%;" placeholder="{placeholder_val}">
+            {f'<div class="muted" style="margin-top:4px; font-size:11px;">Default (Annexes sum): <b>{int(round(annex_sum)):,} VND</b></div>' if annex_sum > 0 else ''}
           </div>
 
           <div>
@@ -357,7 +384,10 @@ def page_annex_form(mode: str, annex_row, contract_id: int, error_msg: str | Non
             <div class="label">Annex Name</div>
             <input type="text" name="annex_name" value="{escape(gv("annex_name"))}" style="width:100%;">
           </div>
-          <div></div>
+          <div>
+            <div class="label">Annex Value (VND)</div>
+            <input type="number" step="1" name="value" value="{escape(gv("value"))}" style="width:100%;" placeholder="e.g. 500000000">
+          </div>
           <div>
             <div class="label">Start date (Phụ lục)</div>
             <input type="date" name="start_date" value="{escape(gv("start_date"))}" style="width:100%;">
@@ -383,8 +413,16 @@ def handle_contract_create_post(handler):
     seller_id = (form.get("seller_vendor_id", [""])[0] or "").strip()
     framework_no = (form.get("framework_no", [""])[0] or "").strip() or None
     framework_name = (form.get("framework_name", [""])[0] or "").strip() or None
+    contract_value_raw = (form.get("contract_value", [""])[0] or "").strip()
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
+
+    contract_value = None
+    if contract_value_raw:
+        try:
+            contract_value = float(contract_value_raw.replace(",", ""))
+        except ValueError:
+            pass
 
     if not buyer_id.isdigit() or not seller_id.isdigit():
         send_html(handler, layout("Error", "<div class='card danger'>Invalid Buyer/Seller Vendor ID</div>"), status=400)
@@ -404,12 +442,12 @@ def handle_contract_create_post(handler):
         cur.execute("""
             INSERT INTO contracts (
               buyer_vendor_id, seller_vendor_id,
-              framework_no, framework_name,
+              framework_no, framework_name, contract_value,
               start_date, end_date,
               is_active, deleted_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, start_date, end_date, now_iso(), now_iso()))
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, now_iso(), now_iso()))
         conn.commit()
         new_id = cur.lastrowid
     finally:
@@ -429,8 +467,16 @@ def handle_contract_update_post(handler):
     seller_id = (form.get("seller_vendor_id", [""])[0] or "").strip()
     framework_no = (form.get("framework_no", [""])[0] or "").strip() or None
     framework_name = (form.get("framework_name", [""])[0] or "").strip() or None
+    contract_value_raw = (form.get("contract_value", [""])[0] or "").strip()
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
+
+    contract_value = None
+    if contract_value_raw:
+        try:
+            contract_value = float(contract_value_raw.replace(",", ""))
+        except ValueError:
+            pass
 
     if not buyer_id.isdigit() or not seller_id.isdigit():
         send_html(handler, layout("Error", "<div class='card danger'>Invalid Buyer/Seller Vendor ID</div>"), status=400)
@@ -457,11 +503,12 @@ def handle_contract_update_post(handler):
                 seller_vendor_id=?,
                 framework_no=?,
                 framework_name=?,
+                contract_value=?,
                 start_date=?,
                 end_date=?,
                 updated_at=?
             WHERE id=?
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, start_date, end_date, now_iso(), int(cid)))
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, now_iso(), int(cid)))
         conn.commit()
     finally:
         conn.close()
@@ -513,6 +560,13 @@ def handle_annex_create_post(handler):
     annex_name = (form.get("annex_name", [""])[0] or "").strip() or None
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
+    value_raw = (form.get("value", [""])[0] or "").strip()
+    value = None
+    if value_raw:
+        try:
+            value = float(value_raw.replace(",", ""))
+        except ValueError:
+            pass
 
     if not contract_id.isdigit():
         send_html(handler, layout("Error", "<div class='card danger'>Invalid Contract ID</div>"), status=400)
@@ -528,11 +582,11 @@ def handle_annex_create_post(handler):
 
         cur.execute("""
             INSERT INTO contract_annexes (
-              contract_id, annex_name, start_date, end_date,
+              contract_id, annex_name, start_date, end_date, value,
               is_active, deleted_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, 1, NULL, ?, ?)
-        """, (int(contract_id), annex_name, start_date, end_date, now_iso(), now_iso()))
+            VALUES (?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        """, (int(contract_id), annex_name, start_date, end_date, value, now_iso(), now_iso()))
         conn.commit()
     finally:
         conn.close()
@@ -547,6 +601,13 @@ def handle_annex_update_post(handler):
     annex_name = (form.get("annex_name", [""])[0] or "").strip() or None
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
+    value_raw = (form.get("value", [""])[0] or "").strip()
+    value = None
+    if value_raw:
+        try:
+            value = float(value_raw.replace(",", ""))
+        except ValueError:
+            pass
 
     if not aid.isdigit() or not contract_id.isdigit():
         send_html(handler, layout("Error", "<div class='card danger'>Invalid ID</div>"), status=400)
@@ -565,9 +626,10 @@ def handle_annex_update_post(handler):
             SET annex_name=?,
                 start_date=?,
                 end_date=?,
+                value=?,
                 updated_at=?
             WHERE id=?
-        """, (annex_name, start_date, end_date, now_iso(), int(aid)))
+        """, (annex_name, start_date, end_date, value, now_iso(), int(aid)))
         conn.commit()
     finally:
         conn.close()

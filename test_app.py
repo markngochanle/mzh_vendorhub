@@ -307,6 +307,44 @@ class TestContracts(BaseTestCase):
         deleted = self.conn.execute("SELECT is_active FROM contracts WHERE id=?", (self.contract_id,)).fetchone()
         self.assertEqual(deleted["is_active"], 0)
 
+    def test_contract_and_annex_values(self):
+        # Create a contract with custom contract_value
+        body = f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&framework_no=MHB/VAL/2026&contract_value=5000000000".encode()
+        handler = MockHandler(body=body, headers={"content-length": str(len(body))})
+        contracts.handle_contract_create_post(handler)
+        c = self.conn.execute("SELECT * FROM contracts WHERE framework_no='MHB/VAL/2026'").fetchone()
+        self.assertIsNotNone(c)
+        self.assertEqual(c["contract_value"], 5000000000.0)
+
+        # Create annexes for this contract and verify sum default calculation
+        body_annex1 = f"contract_id={c['id']}&annex_name=AnnexA&value=1200000000".encode()
+        handler1 = MockHandler(body=body_annex1, headers={"content-length": str(len(body_annex1))})
+        contracts.handle_annex_create_post(handler1)
+
+        body_annex2 = f"contract_id={c['id']}&annex_name=AnnexB&value=800000000".encode()
+        handler2 = MockHandler(body=body_annex2, headers={"content-length": str(len(body_annex2))})
+        contracts.handle_annex_create_post(handler2)
+
+        # Get list view html and check default fallback/total
+        html = contracts.page_contracts_list("", "active", return_to="/")
+        self.assertIn("5,000,000,000", html) # Since contract_value is set, it shows contract_value
+
+        # Create another contract without contract_value (defaults to annexes sum)
+        body2 = f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&framework_no=MHB/VAL_DEF/2026".encode()
+        handler_c2 = MockHandler(body=body2, headers={"content-length": str(len(body2))})
+        contracts.handle_contract_create_post(handler_c2)
+        c2 = self.conn.execute("SELECT * FROM contracts WHERE framework_no='MHB/VAL_DEF/2026'").fetchone()
+
+        # Add annexes
+        body_annex3 = f"contract_id={c2['id']}&annex_name=AnnexC&value=1500000000".encode()
+        handler3 = MockHandler(body=body_annex3, headers={"content-length": str(len(body_annex3))})
+        contracts.handle_annex_create_post(handler3)
+
+        # Verify page list displays sum
+        html2 = contracts.page_contracts_list("", "active", return_to="/")
+        self.assertIn("1,500,000,000", html2)
+        self.assertIn("sum of annexes", html2)
+
 
 # ==================== 4. Test Staff / Shifts ====================
 class TestStaff(BaseTestCase):
@@ -523,6 +561,45 @@ Content-Disposition: form-data; name="xml_content"
         # 4. Test HTML page detail contains To MGS button
         html_detail = invoices.page_invoice_detail(invoice_id)
         self.assertIn("To MGS", html_detail)
+
+    def test_force_match(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO invoices (
+                service_year, service_month, service_day, contract_no,
+                khhdon, shdon, nlap, dvtte,
+                seller_name, seller_mst, seller_address,
+                buyer_name, buyer_mst, buyer_address,
+                tg_tttbso
+            ) VALUES (2026, 6, 30, 'MHB/FPT/2025/001', '1C26TUU', '0005555', '2026-06-30', 'VND',
+                      'CÔNG TY TNHH PHẦN MỀM FPT', '0102135934', 'Duy Tân',
+                      'NGÂN HÀNG MIZUHO', '0100234567', '16 Phan Chu Trinh', 50000000.0)
+        """)
+        invoice_id = cur.lastrowid
+        self.conn.commit()
+
+        # By default it is mismatch/no_payroll
+        html_list = invoices.page_invoices_list({}, return_to="/")
+        self.assertIn("No payroll", html_list)
+
+        # Force Match via POST handler
+        body = f"id={invoice_id}&value=1&return_to=/".encode()
+        handler = MockHandler(body=body, headers={"content-length": str(len(body))})
+        invoices.handle_force_match_post(handler)
+
+        self.assertEqual(handler.response_status, 302)
+
+        # Refresh connection
+        self.conn.close()
+        self.conn = common.db_connect()
+
+        # Check in DB
+        row = self.conn.execute("SELECT force_match FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        self.assertEqual(row["force_match"], 1)
+
+        # Verify page list displays "✓ Force Matched"
+        html_list_after = invoices.page_invoices_list({}, return_to="/")
+        self.assertIn("✓ Force Matched", html_list_after)
 
 
 # ==================== 6. Test Time Attendance ====================
@@ -783,7 +860,7 @@ class TestAttendance(BaseTestCase):
         orig = attendance.parse_multipart_attendance
         attendance.parse_multipart_attendance = lambda h: {
             "month": ["2026-06"],
-            "file": [{"filename": "face_log.csv", "content": b"""Date,Door,Device ID,Device,User Group,User,Event
+            "files": [{"filename": "face_log.csv", "content": b"""Date,Door,Device ID,Device,User Group,User,Event
 2026-06-01 17:36:26,,538218377,MAIN DOOR,OSMale,378(Nguyen Van An),Face Succeed
 2026-06-01 08:26:00,,538218382,MAIN DOOR,OSMale,378(Nguyen Van An),Face Succeed
 2026-06-02 17:30:00,,538218377,MAIN DOOR,OSMale,111(Nonexistent User),Face Succeed
@@ -793,7 +870,7 @@ class TestAttendance(BaseTestCase):
             # 1. Test GET page
             handler_get = MockHandler()
             html_get = attendance.page_attendance_import_bulk(handler_get)
-            self.assertIn("Upload file nhận diện khuôn mặt hàng loạt", html_get)
+            self.assertIn("Import dữ liệu chấm công từ Thư mục", html_get)
 
             # 2. Test POST upload
             handler_post = MockHandler()
@@ -805,7 +882,55 @@ class TestAttendance(BaseTestCase):
             self.assertIn("Nonexistent User", output)
         finally:
             attendance.parse_multipart_attendance = orig
+    def test_attendance_clear(self):
+        # Insert a daily attendance record first
+        conn = attendance.db_connect()
+        try:
+            conn.execute("""
+                INSERT INTO attendance (staff_id, date, work_hours, ot_hours)
+                VALUES (?, '2026-06-01', 8.0, 2.0)
+                ON CONFLICT(staff_id, date) DO UPDATE SET work_hours=8.0, ot_hours=2.0
+            """, (self.staff_id,))
+            conn.commit()
+            
+            # Verify it exists
+            r = conn.execute("SELECT 1 FROM attendance WHERE staff_id=? AND date='2026-06-01'", (self.staff_id,)).fetchone()
+            self.assertIsNotNone(r)
+            
+            # Invoke clear GET route
+            handler = MockHandler()
+            handler.path = f"/attendance/clear?staff_id={self.staff_id}&month=2026-06"
+            attendance.handle_attendance_clear_get(handler)
+            
+            # Verify records are deleted
+            r_deleted = conn.execute("SELECT 1 FROM attendance WHERE staff_id=? AND date='2026-06-01'", (self.staff_id,)).fetchone()
+            self.assertIsNone(r_deleted)
+        finally:
+            conn.close()
 
+    def test_attendance_manual_totals(self):
+        # Mock save post with manual totals
+        body = f"month=2026-06&total_work_{self.staff_id}=164.0&total_ot_{self.staff_id}=10.0".encode('utf-8')
+        handler = MockHandler()
+        handler.headers = {"Content-Length": str(len(body))}
+        handler.rfile = io.BytesIO(body)
+        
+        attendance.handle_attendance_save_post(handler)
+        
+        # Verify manual work and ot hours are saved in monthly_attendance_summary
+        conn = attendance.db_connect()
+        try:
+            row = conn.execute("""
+                SELECT manual_work_hours, manual_ot_hours, total_amount, actual_days, ot_converted_hours FROM monthly_attendance_summary
+                WHERE staff_id=? AND month='2026-06'
+            """, (self.staff_id,)).fetchone()
+            self.assertIsNotNone(row)
+            self.assertEqual(row["manual_work_hours"], 164.0)
+            self.assertEqual(row["manual_ot_hours"], 10.0)
+            self.assertEqual(row["actual_days"], 164.0 / 8.0)
+            self.assertEqual(row["ot_converted_hours"], 15.0)
+        finally:
+            conn.close()
 
 
 # ==================== 7. Test Web Routes routing ====================
@@ -819,7 +944,7 @@ class TestServerRoutes(BaseTestCase):
             ("/staff", "Contract Staff (HR)"),
             ("/staff/shifts", "Staff Work Shifts Settings"),
             ("/attendance", "Time Attendance"),
-            ("/attendance/import-bulk", "Upload file nhận diện khuôn mặt hàng loạt"),
+            ("/attendance/import-bulk", "Import dữ liệu chấm công từ Thư mục"),
             ("/invoice/new", "Import New Invoice"),
             ("/vendor/new", "Add Vendor"),
             (f"/vendor/edit?id={self.seller_id}", "Edit Vendor"),

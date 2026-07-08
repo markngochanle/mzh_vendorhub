@@ -227,6 +227,30 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+        try:
+            cur.execute("ALTER TABLE monthly_attendance_summary ADD COLUMN manual_work_hours REAL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cur.execute("ALTER TABLE monthly_attendance_summary ADD COLUMN manual_ot_hours REAL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cur.execute("ALTER TABLE contracts ADD COLUMN contract_value REAL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        try:
+            cur.execute("ALTER TABLE contract_annexes ADD COLUMN value REAL")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
         # -------- invoices --------
         cur.execute("""
             CREATE TABLE IF NOT EXISTS invoices (
@@ -267,6 +291,12 @@ def init_db():
             )
         """)
         conn.commit()
+
+        try:
+            cur.execute("ALTER TABLE invoices ADD COLUMN force_match INTEGER NOT NULL DEFAULT 0")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
 
         # -------- invoice_tax_lines --------
         cur.execute("""
@@ -939,7 +969,11 @@ def layout(title: str, body_html: str):
       const data = JSON.parse(dataJson);
       currentMgsData = data;
       
-      const text = `Requesting you to kindly process the Invoice with below details    
+      const text = `Subject: INV99999 || ${{data.vendor.company_name}} || Hanoi Branch
+
+Hi Team,
+
+Requesting you to kindly process the Invoice with below details    
                                                                                                         
 [Reference Number]: ${{data.ref_num}}    
 [Tax ID]: ${{data.vendor.tax_id}}        

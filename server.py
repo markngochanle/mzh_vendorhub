@@ -41,6 +41,7 @@ from invoices import (
     page_new_invoice,
     handle_new_invoice_post,
     handle_toggle_mgs_sent_ajax,
+    handle_force_match_post,
 )
 
 from dashboard import page_dashboard
@@ -84,6 +85,7 @@ from attendance import (
     handle_attendance_save_post,
     handle_attendance_lock_get,
     handle_attendance_unlock_get,
+    handle_attendance_clear_get,
     page_monthly_attendance,
     handle_attendance_monthly_save_post,
     handle_attendance_monthly_lock_get,
@@ -259,8 +261,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/staff":
                 q = qs.get("q", [""])[0]
                 vendor_id = qs.get("vendor_id", [""])[0]
+                contract_id = qs.get("contract_id", [""])[0]
                 status = qs.get("status", ["active"])[0]
-                send_html(self, page_staff_list(q=q, vendor_id=vendor_id, status=status, return_to=self.path))
+                send_html(self, page_staff_list(q=q, vendor_id=vendor_id, contract_id=contract_id, status=status, return_to=self.path))
                 return
 
             if path == "/staff/shifts":
@@ -287,6 +290,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/attendance/unlock":
                 handle_attendance_unlock_get(self)
+                return
+
+            if path == "/attendance/clear":
+                handle_attendance_clear_get(self)
                 return
 
             if path == "/attendance/monthly":
@@ -376,6 +383,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/invoice/toggle-mgs-sent":
                 handle_toggle_mgs_sent_ajax(self)
+                return
+
+            if path == "/invoice/force-match":
+                handle_force_match_post(self)
                 return
 
             # ---------------- Vendors ----------------
