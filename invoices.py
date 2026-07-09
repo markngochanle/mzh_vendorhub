@@ -200,7 +200,7 @@ def check_invoice_payroll_reconciliation(conn, contract_no_str, year, month, inv
             return 'no_payroll', 0.0, 0.0, "No monthly payroll records found for this contract/annex in this month."
 
 
-def get_mgs_details(conn, inv) -> tuple[str, str, str, str, str, str]:
+def get_mgs_details(conn, inv) -> tuple[str, str, str, str, str, str, str, str]:
     contract_no_clean = (inv["contract_no"] or "").strip()
     year = inv["service_year"]
     month = inv["service_month"]
@@ -358,11 +358,31 @@ def get_mgs_data_dict(conn, inv) -> dict:
                                 break
                     except Exception:
                         pass
+
+            # Fallback to any active annex of the contract if still not resolved
+            if not resolved_annex_name:
+                any_annex = conn.execute("""
+                    SELECT annex_name FROM contract_annexes 
+                    WHERE contract_id = ? AND is_active = 1 
+                    ORDER BY id DESC LIMIT 1
+                """, (c_row["id"],)).fetchone()
+                if any_annex:
+                    resolved_annex_name = any_annex["annex_name"]
         else:
+            # Try exact annex match
             a_row = conn.execute("""
                 SELECT id, contract_id, annex_name FROM contract_annexes
                 WHERE LOWER(TRIM(annex_name)) = ? AND is_active = 1
             """, (contract_no.lower(),)).fetchone()
+            
+            # Try partial annex match if exact match fails
+            if not a_row:
+                a_row = conn.execute("""
+                    SELECT id, contract_id, annex_name FROM contract_annexes
+                    WHERE annex_name LIKE ? AND is_active = 1
+                    LIMIT 1
+                """, (f"%{contract_no}%",)).fetchone()
+                
             if a_row:
                 resolved_annex_name = a_row["annex_name"]
                 c_row2 = conn.execute("""
@@ -373,10 +393,6 @@ def get_mgs_data_dict(conn, inv) -> dict:
                     buyer_id = c_row2["buyer_vendor_id"]
                     seller_id = c_row2["seller_vendor_id"]
                     resolved_framework_no = c_row2["framework_no"]
-                    
-    # Fallback if both are empty but contract_no is present
-    if contract_no and not resolved_framework_no and not resolved_annex_name:
-        resolved_framework_no = contract_no
 
     seller_mst = (inv["seller_mst"] or "").strip()
     if not seller_id and seller_mst:
@@ -388,6 +404,25 @@ def get_mgs_data_dict(conn, inv) -> dict:
         b_row = conn.execute("SELECT id FROM vendors WHERE purchasing = 1 AND is_active = 1 LIMIT 1").fetchone()
         if b_row:
             buyer_id = b_row["id"]
+
+    # Fallback: if we resolved an annex but not the framework contract, or
+    # if contract_no is just a free text annex number, try to prepend vendor's framework contract
+    if contract_no and not resolved_framework_no:
+        if seller_id:
+            c_row_fallback = conn.execute("""
+                SELECT framework_no FROM contracts
+                WHERE seller_vendor_id = ? AND is_active = 1
+                LIMIT 1
+            """, (seller_id,)).fetchone()
+            if c_row_fallback:
+                resolved_framework_no = c_row_fallback["framework_no"]
+                # If we don't have a resolved annex yet, treat contract_no as the annex name
+                if not resolved_annex_name:
+                    resolved_annex_name = contract_no
+
+    # Fallback if both are empty but contract_no is present
+    if contract_no and not resolved_framework_no and not resolved_annex_name:
+        resolved_framework_no = contract_no
 
     vendor_details = {
         "company_name": inv["seller_name"] or "",
@@ -462,7 +497,7 @@ def get_mgs_data_dict(conn, inv) -> dict:
     # Format the contract and annex text for PDF
     contract_display = ""
     if resolved_framework_no and resolved_annex_name:
-        contract_display = f"{resolved_framework_no} and {resolved_annex_name}"
+        contract_display = f"{resolved_framework_no}-{resolved_annex_name}"
     elif resolved_framework_no:
         contract_display = resolved_framework_no
     elif resolved_annex_name:
@@ -613,6 +648,10 @@ def page_invoices_list(filters: dict, *, return_to: str):
             mgs_data = get_mgs_data_dict(conn, r)
             mgs_json = json.dumps(mgs_data)
             is_sent = int(r["sent_to_mgs"] or 0) == 1
+
+            edit_btn = f'<a href="/edit-invoice?id={r["id"]}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>'
+            if is_sent:
+                edit_btn = f'<button type="button" class="btn-secondary" disabled title="Invoice already sent to MGS and cannot be edited." style="font-size:11px; padding: 4px 8px; margin-top:2px; opacity: 0.6; cursor: not-allowed;">Edit</button>'
             
             disabled_attr = "disabled" if (not is_matched or is_sent) else ""
             btn_style = "background:#10b981; color:#fff; border-color:#10b981;" if is_sent else ""
@@ -620,24 +659,29 @@ def page_invoices_list(filters: dict, *, return_to: str):
             
             onclick_js = f"showMgsModal('{escape(mgs_json)}')"
             
-            mgs_btn = f'<button type="button" id="mgs-btn-{r["id"]}" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px; {btn_style}" onclick="{onclick_js}" {disabled_attr}>{btn_text}</button>'
+            mgs_btn = f"""<button type="button" id="mgs-btn-{r['id']}" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px; {btn_style}" onclick="{onclick_js}" {disabled_attr}>{btn_text}</button>"""
 
-            delete_form = f"""
-              <form class="inline" method="POST" action="/delete-invoice"
-                    onsubmit="return confirm('Delete invoice ID={r["id"]} ({escape(r["khhdon"] or "")}/{escape(r["shdon"] or "")}) ?');"
-                    style="margin:0; display:inline-block;">
-                <input type="hidden" name="id" value="{r["id"]}">
-                <input type="hidden" name="return_to" value="{escape(return_to)}">
-                <button class="btn-danger" type="submit" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Delete</button>
-              </form>
-            """
+            if is_sent:
+                delete_form = f"""
+                  <button class="btn-danger" disabled title="Invoice already sent to MGS and cannot be deleted." style="font-size:11px; padding: 4px 8px; margin-top:2px; opacity: 0.6; cursor: not-allowed;">Delete</button>
+                """
+            else:
+                delete_form = f"""
+                  <form class="inline" method="POST" action="/delete-invoice"
+                        onsubmit="return confirm('Delete invoice ID={r['id']} ({escape(r['khhdon'] or "")}/{escape(r['shdon'] or "")}) ?');"
+                        style="margin:0; display:inline-block;">
+                    <input type="hidden" name="id" value="{r['id']}">
+                    <input type="hidden" name="return_to" value="{escape(return_to)}">
+                    <button class="btn-danger" type="submit" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Delete</button>
+                  </form>
+                """
 
             force_btn = ""
             if not is_sent:
                 if is_force_match:
                     force_btn = f"""
                       <form class="inline" method="POST" action="/invoice/force-match" style="margin:0; display:inline-block;">
-                        <input type="hidden" name="id" value="{r["id"]}">
+                        <input type="hidden" name="id" value="{r['id']}">
                         <input type="hidden" name="value" value="0">
                         <input type="hidden" name="return_to" value="{escape(return_to)}">
                         <button class="btn-secondary" type="submit" style="font-size:11px; padding: 4px 8px; margin-top:2px; background:#fff; color:#6b21a8; border-color:#d8b4fe;">Unforce</button>
@@ -646,7 +690,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
                 elif not is_matched_natural:
                     force_btn = f"""
                       <form class="inline" method="POST" action="/invoice/force-match" style="margin:0; display:inline-block;">
-                        <input type="hidden" name="id" value="{r["id"]}">
+                        <input type="hidden" name="id" value="{r['id']}">
                         <input type="hidden" name="value" value="1">
                         <input type="hidden" name="return_to" value="{escape(return_to)}">
                         <button class="btn-secondary" type="submit" style="font-size:11px; padding: 4px 8px; margin-top:2px; background:#f3e8ff; color:#6b21a8; border-color:#d8b4fe;">Force Match</button>
@@ -657,7 +701,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
             <tr>
               <td>{idx}</td>
               <td>
-                <a href="/invoice?id={r["id"]}">
+                <a href="/invoice?id={r['id']}">
                   {escape(r["khhdon"] or "")} / {escape(r["shdon"] or "")}
                 </a>
                 <div class="muted">Issued: {escape(r["nlap"] or "")}</div>
@@ -682,7 +726,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
 
               <td>
                 <div class="actions" style="gap:6px; flex-wrap:nowrap; display:flex; align-items:center;">
-                  <a href="/edit-invoice?id={r["id"]}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>
+                  {edit_btn}
                   {delete_form}
                   {force_btn}
                   {mgs_btn}
@@ -792,7 +836,7 @@ def page_invoice_detail(invoice_id: int):
     
     mgs_json = json.dumps(mgs_data)
     onclick_js = f"showMgsModal('{escape(mgs_json)}')"
-    mgs_btn = f'<button type="button" id="mgs-btn-{inv["id"]}" class="btn" style="{btn_style}" onclick="{onclick_js}" {disabled_attr}>{btn_text}</button>'
+    mgs_btn = f"""<button type="button" id="mgs-btn-{inv['id']}" class="btn" style="{btn_style}" onclick="{onclick_js}" {disabled_attr}>{btn_text}</button>"""
 
     def v(key):
         x = inv[key]
@@ -812,14 +856,21 @@ def page_invoice_detail(invoice_id: int):
           </tr>
         """)
 
-    delete_form = f"""
-      <form class="inline" method="POST" action="/delete-invoice"
-            onsubmit="return confirm('Delete invoice ID={invoice_id} ({escape(inv["khhdon"] or "")}/{escape(inv["shdon"] or "")}) ?');">
-        <input type="hidden" name="id" value="{invoice_id}">
-        <input type="hidden" name="return_to" value="/">
-        <button class="btn-danger" type="submit">Delete Invoice</button>
-      </form>
-    """
+    if is_sent:
+        delete_form = '<button class="btn-danger" disabled title="Invoice already sent to MGS and cannot be deleted." style="opacity: 0.6; cursor: not-allowed;">Delete Invoice</button>'
+    else:
+        delete_form = f"""
+          <form class="inline" method="POST" action="/delete-invoice"
+                onsubmit="return confirm('Delete invoice ID={invoice_id} ({escape(inv["khhdon"] or "")}/{escape(inv["shdon"] or "")}) ?');">
+            <input type="hidden" name="id" value="{invoice_id}">
+            <input type="hidden" name="return_to" value="/">
+            <button class="btn-danger" type="submit">Delete Invoice</button>
+          </form>
+        """
+
+    edit_btn = f'<a href="/edit-invoice?id={invoice_id}" class="btn">Edit Data</a>'
+    if is_sent:
+        edit_btn = '<button class="btn" disabled title="Invoice already sent to MGS and cannot be edited." style="opacity: 0.6; cursor: not-allowed;">Edit Data</button>'
 
     recon_style = ""
     if is_force_match:
@@ -875,7 +926,7 @@ def page_invoice_detail(invoice_id: int):
     body = f"""
     <div class="actions" style="margin-bottom:14px; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
       <a href="/">← Invoices List</a>
-      <a href="/edit-invoice?id={invoice_id}" class="btn">Edit Data</a>
+      {edit_btn}
       <a href="/raw?id={invoice_id}" class="btn">View Raw XML</a>
       {delete_form}
       {force_btn}
@@ -931,6 +982,8 @@ def page_edit_invoice(invoice_id: int, error_msg: str | None = None):
         inv = conn.execute("SELECT * FROM invoices WHERE id=?", (invoice_id,)).fetchone()
         if not inv:
             return layout("Not Found", f"<div class='card'>Invoice ID={invoice_id} not found. <a href='/'>Back</a></div>")
+        if int(inv["sent_to_mgs"] or 0) == 1:
+            return layout("Access Denied", f"<div class='card danger'>Invoice ID={invoice_id} has already been sent to MGS and cannot be edited. <a href='/invoice?id={invoice_id}'>Back to Details</a></div>")
     finally:
         conn.close()
 
@@ -992,6 +1045,16 @@ def handle_edit_invoice_post(handler):
         return
 
     invoice_id = int(invoice_id_raw)
+
+    # Prevent saving edit if invoice already sent to MGS
+    conn = db_connect()
+    try:
+        inv = conn.execute("SELECT sent_to_mgs FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        if inv and int(inv["sent_to_mgs"] or 0) == 1:
+            send_html(handler, layout("Error", "<div class='card danger'>Invoice already sent to MGS and cannot be edited.</div>"), status=400)
+            return
+    finally:
+        conn.close()
     sy = parse_int_or_none(form.get("service_year", [""])[0])
     sm = parse_int_or_none(form.get("service_month", [""])[0])
     sd = parse_int_or_none(form.get("service_day", [""])[0])
@@ -1034,6 +1097,16 @@ def handle_delete_invoice_post(handler):
         return
 
     invoice_id = int(invoice_id_raw)
+
+    # Prevent deleting if invoice already sent to MGS
+    conn = db_connect()
+    try:
+        inv = conn.execute("SELECT sent_to_mgs FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        if inv and int(inv["sent_to_mgs"] or 0) == 1:
+            send_html(handler, layout("Error", "<div class='card danger'>Invoice already sent to MGS and cannot be deleted.</div>"), status=400)
+            return
+    finally:
+        conn.close()
 
     conn = db_connect()
     try:
@@ -1547,7 +1620,7 @@ def handle_new_invoice_post(handler):
         result_rows.append(f"""
         <tr>
           <td>{source_link}</td>
-          <td><span class="{status_class}" style="font-weight:bold;">{res["status"]}</span></td>
+          <td><span class="{status_class}" style="font-weight:bold;">{res['status']}</span></td>
           <td>{escape(res["detail"])}</td>
         </tr>
         """)

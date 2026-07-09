@@ -332,6 +332,38 @@ def init_db():
         ensure_column(conn, "invoices", "sent_to_mgs", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "contract_references", "locked", "INTEGER NOT NULL DEFAULT 0")
 
+        # -------- projects --------
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS projects (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                short_name TEXT NOT NULL,
+                full_name TEXT NOT NULL,
+                it_outsourcing_budget REAL,
+                os_start_date TEXT,
+                os_end_date TEXT,
+                is_active INTEGER NOT NULL DEFAULT 1,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        conn.commit()
+
+        # -------- project_staff_assignments --------
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS project_staff_assignments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                project_id INTEGER NOT NULL,
+                staff_id INTEGER NOT NULL,
+                month TEXT NOT NULL, -- YYYY-MM
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(project_id) REFERENCES projects(id),
+                FOREIGN KEY(staff_id) REFERENCES contract_staff(id),
+                UNIQUE(staff_id, month)
+            )
+        """)
+        conn.commit()
+
     finally:
         conn.close()
 
@@ -351,6 +383,7 @@ def layout(title: str, body_html: str):
       <a href="/vendors" class="nav-link">Vendors</a>
       <a href="/contracts" class="nav-link">Contracts</a>
       <a href="/staff" class="nav-link">Staff</a>
+      <a href="/projects" class="nav-link">Projects</a>
       <a href="/attendance" class="nav-link">Attendance</a>
     </div>
     """
@@ -1020,6 +1053,7 @@ Requesting you to kindly process the Invoice with below details
             }}
           }}
           currentMgsData.sent_to_mgs = isChecked ? 1 : 0;
+          window.location.reload();
         }} else {{
           alert('Error saving state: ' + data.message);
           document.getElementById('mgs-sent-checkbox').checked = !isChecked;

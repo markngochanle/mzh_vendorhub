@@ -129,6 +129,35 @@ def page_dashboard(handler):
         # Sort expiring contracts/annexes by days_left
         expiring_contracts.sort(key=lambda x: x["days_left"])
 
+        # 4. Project Budget Utilization data
+        project_budget_data = conn.execute("""
+            SELECT 
+                p.id AS project_id,
+                p.short_name,
+                p.full_name,
+                p.it_outsourcing_budget,
+                COALESCE(SUM(mas.total_amount), 0) AS total_paid
+            FROM projects p
+            LEFT JOIN project_staff_assignments psa ON psa.project_id = p.id
+            LEFT JOIN monthly_attendance_summary mas ON mas.staff_id = psa.staff_id AND mas.month = psa.month
+            WHERE p.is_active = 1
+            GROUP BY p.id
+            ORDER BY p.short_name ASC
+        """).fetchall()
+
+        # 5. Vendor Cost Share data
+        vendor_costs = conn.execute("""
+            SELECT 
+                v.short_name,
+                COALESCE(SUM(mas.total_amount), 0) AS total_cost
+            FROM vendors v
+            LEFT JOIN contract_staff cs ON cs.vendor_id = v.id
+            LEFT JOIN monthly_attendance_summary mas ON mas.staff_id = cs.id
+            WHERE v.purchasing = 0 AND v.is_active = 1
+            GROUP BY v.id
+            ORDER BY total_cost DESC
+        """).fetchall()
+
     finally:
         conn.close()
 
@@ -172,6 +201,74 @@ def page_dashboard(handler):
     
     js_trend_labels = json.dumps(monthly_trend_labels)
     js_trend_data = json.dumps(monthly_trend_data)
+
+    # Format project budget rows and chart data
+    project_rows_html = []
+    chart_proj_labels = []
+    chart_proj_budget = []
+    chart_proj_paid = []
+    
+    for pr in project_budget_data:
+        budget = pr["it_outsourcing_budget"]
+        paid = pr["total_paid"]
+        
+        budget_txt = f"{fmt_money(budget, 'VND')}" if budget is not None else "N/A"
+        paid_txt = f"{fmt_money(paid, 'VND')}"
+        
+        if budget is not None:
+            remaining = budget - paid
+            remaining_txt = f"{fmt_money(remaining, 'VND')}"
+            usage_pct = (paid / budget * 100) if budget > 0 else 0
+            
+            # Save for Chart
+            chart_proj_labels.append(pr["short_name"])
+            chart_proj_budget.append(budget)
+            chart_proj_paid.append(paid)
+        else:
+            remaining_txt = "N/A"
+            usage_pct = 0
+            
+        if budget is not None:
+            if usage_pct > 90:
+                bar_color = "#dc2626"
+            elif usage_pct > 75:
+                bar_color = "#ea580c"
+            else:
+                bar_color = "#10b981"
+                
+            usage_bar = f"""
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="flex: 1; background: #e2e8f0; height: 6px; border-radius: 3px; overflow: hidden; min-width: 60px;">
+                <div style="background: {bar_color}; width: {min(usage_pct, 100):.1f}%; height: 100%; border-radius: 3px;"></div>
+              </div>
+              <span style="font-size: 11px; font-weight: 600; color: var(--text-secondary);">{usage_pct:.1f}%</span>
+            </div>
+            """
+        else:
+            usage_bar = '<span class="muted" style="font-size:11px;">N/A</span>'
+            
+        project_rows_html.append(f"""
+        <tr style="border-bottom: 1px solid var(--border);">
+          <td style="padding: 10px 8px; border: none; background: transparent;">
+            <strong>{escape(pr['short_name'])}</strong>
+            <div class="muted" style="font-size: 11px; margin-top: 1px;">{escape(pr['full_name'])}</div>
+          </td>
+          <td style="padding: 10px 8px; text-align: right; border: none; background: transparent; font-size: 13px; font-weight: 500;">{budget_txt}</td>
+          <td style="padding: 10px 8px; text-align: right; border: none; background: transparent; font-size: 13px; font-weight: 500; color: var(--primary);">{paid_txt}</td>
+          <td style="padding: 10px 8px; text-align: right; border: none; background: transparent; font-size: 13px; font-weight: 500; color: {'#dc2626' if (budget is not None and remaining < 0) else 'var(--text-primary)'};">{remaining_txt}</td>
+          <td style="padding: 10px 8px; border: none; background: transparent;">{usage_bar}</td>
+        </tr>
+        """)
+        
+    js_proj_labels = json.dumps(chart_proj_labels)
+    js_proj_budget = json.dumps(chart_proj_budget)
+    js_proj_paid = json.dumps(chart_proj_paid)
+
+    # Format vendor cost share labels/data
+    vendor_cost_labels = [r["short_name"] or "Unknown" for r in vendor_costs if r["total_cost"] > 0]
+    vendor_cost_data = [r["total_cost"] for r in vendor_costs if r["total_cost"] > 0]
+    js_vendor_cost_labels = json.dumps(vendor_cost_labels)
+    js_vendor_cost_data = json.dumps(vendor_cost_data)
 
     # Render expiring contracts list HTML
     exp_rows_html = []
@@ -243,29 +340,42 @@ def page_dashboard(handler):
     </div>
 
     <!-- Charts Row 1 -->
-    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-bottom:24px; min-height:350px; flex-wrap:wrap;">
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:20px; margin-bottom:24px; min-height:350px;">
       
       <!-- Left: Reconciliation Status -->
       <div class="card" style="margin:0; display:flex; flex-direction:column; padding:18px;">
         <h3 style="margin:0 0 14px 0; font-size:15px; border-bottom:1px solid var(--border); padding-bottom:8px;">Reconciliation Overview</h3>
         <div style="display:flex; align-items:center; justify-content:space-around; flex:1; gap:10px;">
-          <div style="width:180px; height:180px; position:relative;">
+          <div style="width:130px; height:130px; position:relative;">
             <canvas id="reconChart"></canvas>
           </div>
-          <div style="font-size:12px; display:flex; flex-direction:column; gap:8px;">
-            <div style="display:flex; align-items:center; gap:8px;"><span style="width:12px; height:12px; border-radius:3px; background:#10b981; display:inline-block;"></span><strong>Matched:</strong> {status_counts["Matched"]}</div>
-            <div style="display:flex; align-items:center; gap:8px;"><span style="width:12px; height:12px; border-radius:3px; background:#ef4444; display:inline-block;"></span><strong>Mismatch:</strong> {status_counts["Mismatch"]}</div>
-            <div style="display:flex; align-items:center; gap:8px;"><span style="width:12px; height:12px; border-radius:3px; background:#f59e0b; display:inline-block;"></span><strong>No Payroll:</strong> {status_counts["No Payroll"]}</div>
-            <div style="display:flex; align-items:center; gap:8px;"><span style="width:12px; height:12px; border-radius:3px; background:#6b7280; display:inline-block;"></span><strong>No Contract:</strong> {status_counts["No Contract"]}</div>
+          <div style="font-size:11px; display:flex; flex-direction:column; gap:6px;">
+            <div style="display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:2px; background:#10b981; display:inline-block;"></span><strong>Matched:</strong> {status_counts["Matched"]}</div>
+            <div style="display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:2px; background:#ef4444; display:inline-block;"></span><strong>Mismatch:</strong> {status_counts["Mismatch"]}</div>
+            <div style="display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:2px; background:#f59e0b; display:inline-block;"></span><strong>No Payroll:</strong> {status_counts["No Payroll"]}</div>
+            <div style="display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:2px; background:#6b7280; display:inline-block;"></span><strong>No Contract:</strong> {status_counts["No Contract"]}</div>
           </div>
         </div>
       </div>
 
-      <!-- Right: Staff Count per Vendor -->
+      <!-- Middle: Staff Count per Vendor -->
       <div class="card" style="margin:0; display:flex; flex-direction:column; padding:18px;">
         <h3 style="margin:0 0 14px 0; font-size:15px; border-bottom:1px solid var(--border); padding-bottom:8px;">Staff Count by Vendor</h3>
         <div style="flex:1; position:relative; display:flex; align-items:center; justify-content:center;">
           <canvas id="staffChart" style="max-height:220px;"></canvas>
+        </div>
+      </div>
+
+      <!-- Right: Vendor Cost Share -->
+      <div class="card" style="margin:0; display:flex; flex-direction:column; padding:18px;">
+        <h3 style="margin:0 0 14px 0; font-size:15px; border-bottom:1px solid var(--border); padding-bottom:8px;">Vendor Cost Distribution</h3>
+        <div style="display:flex; align-items:center; justify-content:space-around; flex:1; gap:10px;">
+          <div style="width:130px; height:130px; position:relative;">
+            <canvas id="vendorCostChart"></canvas>
+          </div>
+          <div id="vendorCostLegend" style="font-size:11px; display:flex; flex-direction:column; gap:6px; max-height:160px; overflow-y:auto; padding-left: 4px;">
+            <!-- Populated dynamically by JS -->
+          </div>
         </div>
       </div>
 
@@ -287,6 +397,40 @@ def page_dashboard(handler):
         <h3 style="margin:0 0 10px 0; font-size:15px; border-bottom:1px solid var(--border); padding-bottom:8px;">Upcoming Contract/Annex Expirations</h3>
         <div style="flex:1; overflow-y:auto; max-height:230px;">
           {''.join(exp_rows_html)}
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Row 3: Project Budget Table & Chart -->
+    <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px; margin-bottom:24px; min-height:300px;">
+      
+      <!-- Left: Budget Table -->
+      <div class="card" style="margin:0; display:flex; flex-direction:column; padding:18px;">
+        <h3 style="margin:0 0 14px 0; font-size:15px; border-bottom:1px solid var(--border); padding-bottom:8px;">Project Budget Utilization</h3>
+        <div style="flex:1; overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; margin:0; min-width:500px; border:none;">
+            <thead>
+              <tr style="background:#f8fafc; border-bottom:1px solid var(--border);">
+                <th style="text-align:left; padding:8px; border:none; font-size:12px;">Project</th>
+                <th style="text-align:right; padding:8px; border:none; font-size:12px;">Total Budget</th>
+                <th style="text-align:right; padding:8px; border:none; font-size:12px;">Paid Amount</th>
+                <th style="text-align:right; padding:8px; border:none; font-size:12px;">Remaining</th>
+                <th style="text-align:left; padding:8px; border:none; font-size:12px; width:150px;">Usage %</th>
+              </tr>
+            </thead>
+            <tbody>
+              {"".join(project_rows_html) if project_rows_html else '<tr><td colspan="5" style="text-align:center; color:var(--text-muted); padding:20px;">No projects found.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Right: Budget Chart -->
+      <div class="card" style="margin:0; display:flex; flex-direction:column; padding:18px;">
+        <h3 style="margin:0 0 14px 0; font-size:15px; border-bottom:1px solid var(--border); padding-bottom:8px;">Project Budget vs Spent</h3>
+        <div style="flex:1; position:relative; display:flex; align-items:center; justify-content:center;">
+          <canvas id="budgetChart" style="max-height:220px;"></canvas>
         </div>
       </div>
 
@@ -378,6 +522,91 @@ def page_dashboard(handler):
           }}
         }}
       }});
+
+      // 4. Project Budget Chart
+      new Chart(document.getElementById('budgetChart'), {{
+        type: 'bar',
+        data: {{
+          labels: {js_proj_labels},
+          datasets: [
+            {{
+              label: 'Budget',
+              data: {js_proj_budget},
+              backgroundColor: '#cbd5e1',
+              borderRadius: 4
+            }},
+            {{
+              label: 'Spent',
+              data: {js_proj_paid},
+              backgroundColor: '#6366f1',
+              borderRadius: 4
+            }}
+          ]
+        }},
+        options: {{
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {{
+            legend: {{
+              position: 'bottom',
+              labels: {{ boxWidth: 12, font: {{ size: 10 }} }}
+            }}
+          }},
+          scales: {{
+            y: {{
+              beginAtZero: true,
+              ticks: {{
+                callback: function(value) {{
+                  if (value >= 1e9) return (value / 1e9).toFixed(1) + 'B';
+                  if (value >= 1e6) return (value / 1e6).toFixed(0) + 'M';
+                  return value;
+                }}
+              }}
+            }}
+          }}
+        }}
+      }});
+
+      // 5. Vendor Cost Share Chart
+      const costLabels = {js_vendor_cost_labels};
+      const costData = {js_vendor_cost_data};
+      const costColors = ['#6366f1', '#10b981', '#3b82f6', '#f59e0b', '#ec4899', '#8b5cf6'];
+      
+      new Chart(document.getElementById('vendorCostChart'), {{
+        type: 'pie',
+        data: {{
+          labels: costLabels,
+          datasets: [{{
+            data: costData,
+            backgroundColor: costColors.slice(0, costLabels.length),
+            borderWidth: 1
+          }}]
+        }},
+        options: {{
+          plugins: {{
+            legend: {{ display: false }}
+          }},
+          responsive: true,
+          maintainAspectRatio: false
+        }}
+      }});
+      
+      // Populate legend
+      const legendDiv = document.getElementById('vendorCostLegend');
+      if (costLabels.length === 0) {{
+        legendDiv.innerHTML = '<span class="muted" style="font-size:11px;">No cost data available</span>';
+      }} else {{
+        let legendHtml = '';
+        const total = costData.reduce((a, b) => a + b, 0);
+        costLabels.forEach((label, idx) => {{
+          const val = costData[idx];
+          const pct = total > 0 ? ((val / total) * 100).toFixed(1) : 0;
+          const color = costColors[idx % costColors.length];
+          let valTxt = val >= 1e9 ? (val / 1e9).toFixed(2) + 'B' : (val / 1e6).toFixed(1) + 'M';
+          legendHtml += `<div style="display:flex; align-items:center; gap:6px;"><span style="width:10px; height:10px; border-radius:2px; background:${{color}}; display:inline-block;"></span><strong>${{label}}:</strong> ${{pct}}% (${{valTxt}})</div>`;
+        }});
+        legendDiv.innerHTML = legendHtml;
+      }}
     </script>
     """
     send_html(handler, layout("Dashboard", dashboard_html))

@@ -93,6 +93,16 @@ from attendance import (
     handle_attendance_save_cell_post,
     handle_attendance_monthly_export_get,
 )
+from projects import (
+    page_projects_list,
+    handle_project_create_post,
+    handle_project_delete_post,
+    page_projects_assign,
+    handle_project_assign_create_post,
+    handle_project_assign_delete_post,
+    handle_available_staff_ajax,
+    handle_project_toggle_assignment_ajax,
+)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -317,6 +327,26 @@ class Handler(BaseHTTPRequestHandler):
                 handle_attendance_monthly_export_get(self)
                 return
 
+            # ---------------- Projects ----------------
+            if path == "/projects":
+                err = qs.get("error", [None])[0]
+                succ = qs.get("success", [None])[0]
+                send_html(self, page_projects_list(error_msg=err, success_msg=succ))
+                return
+
+            if path == "/projects/assign":
+                m = qs.get("month", [None])[0]
+                pid = qs.get("project_id", [None])[0]
+                vid = qs.get("vendor_id", [None])[0]
+                err = qs.get("error", [None])[0]
+                succ = qs.get("success", [None])[0]
+                send_html(self, page_projects_assign(selected_month=m, selected_project_id=pid, selected_vendor_id=vid, error_msg=err, success_msg=succ))
+                return
+
+            if path == "/api/projects/available-staff":
+                handle_available_staff_ajax(self)
+                return
+
             if path == "/staff/new":
                 return_to = qs.get("return_to", ["/staff"])[0]
                 send_html(self, page_staff_form("new", None, None, return_to=return_to))
@@ -445,6 +475,27 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/annex/restore":
                 handle_annex_restore_post(self)
+                return
+
+            # ---------------- Projects ----------------
+            if path == "/project/create":
+                handle_project_create_post(self)
+                return
+
+            if path == "/project/delete":
+                handle_project_delete_post(self)
+                return
+
+            if path == "/project/assign/create":
+                handle_project_assign_create_post(self)
+                return
+
+            if path == "/project/assign/delete":
+                handle_project_assign_delete_post(self)
+                return
+
+            if path == "/api/projects/toggle-assignment":
+                handle_project_toggle_assignment_ajax(self)
                 return
 
             # ---------------- Staff / HR ----------------

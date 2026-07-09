@@ -1,5 +1,6 @@
 # staff.py
 from html import escape
+from datetime import datetime
 
 from common import (
     db_connect, layout, LIST_LIMIT, now_iso,
@@ -156,21 +157,26 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
         contracts = load_contracts(conn)
         annexes = load_annexes(conn)
 
+        current_month = datetime.now().strftime("%Y-%m")
         rows = conn.execute(f"""
             SELECT
               s.*,
               COALESCE(v.company_name, v.company_name_vi) AS vendor_name,
               v.tax_id AS vendor_tax,
               c.framework_no,
-              a.annex_name
+              a.annex_name,
+              p.id AS assigned_project_id,
+              p.short_name AS assigned_project_name
             FROM contract_staff s
             JOIN vendors v ON v.id = s.vendor_id
             JOIN contracts c ON c.id = s.contract_id
             LEFT JOIN contract_annexes a ON a.id = s.annex_id
+            LEFT JOIN project_staff_assignments psa ON psa.staff_id = s.id AND psa.month = ?
+            LEFT JOIN projects p ON p.id = psa.project_id
             {where_sql}
             ORDER BY s.id DESC
             LIMIT ?
-        """, params + [LIST_LIMIT]).fetchall()
+        """, [current_month] + params + [LIST_LIMIT]).fetchall()
     finally:
         conn.close()
 
@@ -231,6 +237,7 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
           <button type="submit">Filter</button>
           <a class="muted" href="/staff">Reset</a>
           <a href="/staff/shifts"><button class="btn-secondary" type="button">Ca làm việc (Shifts)</button></a>
+          <a href="/projects/assign"><button class="btn-secondary" type="button">Assign to Project</button></a>
           <a href="/staff/new"><button class="btn-secondary" type="button">+ Add Staff</button></a>
         </div>
       </form>
@@ -329,12 +336,26 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
         ot = "Yes" if int(r["ot"] or 0) == 1 else "No"
         st = (r["status"] or "").strip()
 
+        # Build Project column display with active assignment links
+        if r["assigned_project_id"]:
+            project_td = f"""<a href="/projects/assign?project_id={r['assigned_project_id']}&vendor_id={r['vendor_id']}" style="font-weight: 600; color: var(--primary);">{escape(r['assigned_project_name'])}</a>"""
+            assign_url = f"/projects/assign?project_id={r['assigned_project_id']}&vendor_id={r['vendor_id']}"
+        else:
+            fallback_proj = r["project_name"] or ""
+            project_td = f"""
+            <span class="muted">{escape(fallback_proj)}</span>
+            <div style="margin-top: 2px;">
+              <a href="/projects/assign?vendor_id={r['vendor_id']}" class="btn" style="font-size: 10px; padding: 2px 6px;">Assign Project</a>
+            </div>
+            """
+            assign_url = f"/projects/assign?vendor_id={r['vendor_id']}"
+
         body += f"""
         <tr>
           <td>{idx}</td>
           <td><a href="/staff/edit?id={r["id"]}">{escape(r["full_name_vi"] or "")}</a></td>
           <td>{escape(r["vendor_name"] or "")}<div class="muted">{escape(r["vendor_tax"] or "")}</div></td>
-          <td>{escape(r["project_name"] or "")}</td>
+          <td>{project_td}</td>
           <td>{escape(r["position"] or "")}</td>
           <td>{escape(r["framework_no"] or "")}<div class="muted">{escape(r["annex_name"] or "")}</div></td>
           <td>{escape(r["joining_date"] or "")}</td>
@@ -347,7 +368,12 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
           </td>
           <td>{escape(ot)}</td>
           <td>{escape(st)}</td>
-          <td><a href="/staff/edit?id={r["id"]}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a></td>
+          <td>
+            <div style="display: flex; flex-direction: column; gap: 4px; align-items: stretch; min-width: 90px;">
+              <a href="/staff/edit?id={r["id"]}" style="text-decoration:none; width: 100%;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; width: 100%;">Edit</button></a>
+              <a href="{assign_url}" style="text-decoration:none; width: 100%;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; width: 100%;">Assignments</button></a>
+            </div>
+          </td>
         </tr>
         """
 

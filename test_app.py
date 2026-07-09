@@ -19,6 +19,7 @@ import staff
 import invoices
 import attendance
 import server
+import projects
 
 
 class MockHeaders(dict):
@@ -553,6 +554,10 @@ Content-Disposition: form-data; name="xml_content"
         self.assertEqual(comp, "CÔNG TY TNHH PHẦN MỀM FPT")
         self.assertEqual(curr, "VND")
         self.assertEqual(num, "0001234")
+
+        # Test get_mgs_data_dict contract format: "framework_no-annex_name"
+        mgs_data = invoices.get_mgs_data_dict(self.conn, inv)
+        self.assertEqual(mgs_data["contract_no"], "MHB/FPT/2025/001-Phụ lục 1")
         
         # 3. Test HTML page list contains To MGS button
         html_list = invoices.page_invoices_list({}, return_to="/")
@@ -1327,6 +1332,158 @@ class TestDashboardAndReferencesImprovements(BaseTestCase):
         # Assertions
         self.assertIn("MHB/TEST/ALERT/001 - Annex Expiring Soon", output)
         self.assertIn("Contract/Annex alert", output)
+
+
+# ==================== Test Projects & Assignments ====================
+class TestProjects(BaseTestCase):
+    def test_page_projects_list(self):
+        # Insert a project
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, it_outsourcing_budget, os_start_date, os_end_date, is_active)
+            VALUES ('TEST-PROJ', 'Test Project Name', 12345.67, '2026-01-01', '2026-12-31', 1)
+        """)
+        self.conn.commit()
+
+        html = projects.page_projects_list()
+        self.assertIn("TEST-PROJ", html)
+        self.assertIn("Test Project Name", html)
+        self.assertIn("12,345.67 VND", html)
+
+    def test_handle_project_create_post(self):
+        body = b"short_name=NEW-PROJ&full_name=New+Project+Full+Name&it_outsourcing_budget=54321.00&os_start_date=2026-01-01&os_end_date=2026-12-31"
+        handler = MockHandler(body=body, headers={"content-length": str(len(body))})
+        projects.handle_project_create_post(handler)
+        self.assertEqual(handler.response_status, 302)
+
+        # Verify db insert
+        inserted = self.conn.execute("SELECT * FROM projects WHERE short_name='NEW-PROJ'").fetchone()
+        self.assertIsNotNone(inserted)
+        self.assertEqual(inserted["full_name"], "New Project Full Name")
+        self.assertEqual(inserted["it_outsourcing_budget"], 54321.00)
+
+    def test_handle_project_delete_post(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, is_active)
+            VALUES ('DEL-PROJ', 'To Be Deleted', 1)
+        """)
+        self.conn.commit()
+        p_id = cur.lastrowid
+
+        body = f"id={p_id}".encode()
+        handler = MockHandler(body=body, headers={"content-length": str(len(body))})
+        projects.handle_project_delete_post(handler)
+        self.assertEqual(handler.response_status, 302)
+
+        # Verify inactive
+        p = self.conn.execute("SELECT is_active FROM projects WHERE id=?", (p_id,)).fetchone()
+        self.assertEqual(p["is_active"], 0)
+
+    def test_staff_assignments_logic(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, is_active)
+            VALUES ('ASSIGN-PROJ-1', 'Assign Project One', 1)
+        """)
+        p1_id = cur.lastrowid
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, is_active)
+            VALUES ('ASSIGN-PROJ-2', 'Assign Project Two', 1)
+        """)
+        p2_id = cur.lastrowid
+        self.conn.commit()
+
+        # In mock data, staff Nguyễn Văn An (self.staff_id) is active from 2025-06-01 to 2026-05-31.
+        # So in 2026-05, he is active.
+        month_active = "2026-05"
+        month_inactive = "2026-06" # out of range (tentative_leaving_date is 2026-05-31)
+
+        # 1. Verify staff Nguyễn Văn An is available in month_active via AJAX
+        handler_ajax = MockHandler(path=f"/api/projects/available-staff?months={month_active}")
+        projects.handle_available_staff_ajax(handler_ajax)
+        self.assertEqual(handler_ajax.response_status, 200)
+        import json
+        data = json.loads(handler_ajax.get_output_text())
+        self.assertTrue(any(s['full_name_vi'] == "Nguyễn Văn An" for s in data))
+
+        # 2. Assign staff to project 1 in month_active
+        body = f"project_id={p1_id}&staff_id={self.staff_id}&months={month_active}".encode()
+        handler = MockHandler(body=body, headers={"content-length": str(len(body))})
+        projects.handle_project_assign_create_post(handler)
+        self.assertEqual(handler.response_status, 302)
+
+        # 3. Verify staff is now assigned and NOT in available list anymore
+        html_after = projects.page_projects_assign(selected_month=month_active, selected_project_id=p1_id)
+        # Should show in the assigned section
+        self.assertIn("Nguyễn Văn An", html_after)
+        
+        # But should NOT show in the available staff dropdown options via AJAX
+        handler_ajax_after = MockHandler(path=f"/api/projects/available-staff?months={month_active}")
+        projects.handle_available_staff_ajax(handler_ajax_after)
+        data_after = json.loads(handler_ajax_after.get_output_text())
+        self.assertFalse(any(s['full_name_vi'] == "Nguyễn Văn An" for s in data_after))
+
+        # 4. Attempt to assign the same staff to project 2 in the same month (should fail due to validation)
+        body2 = f"project_id={p2_id}&staff_id={self.staff_id}&months={month_active}".encode()
+        handler2 = MockHandler(body=body2, headers={"content-length": str(len(body2))})
+        projects.handle_project_assign_create_post(handler2)
+        # The logic will return a 400 bad request / display page with error message
+        self.assertEqual(handler2.response_status, 400)
+        self.assertIn("already assigned", handler2.get_output_text())
+
+        # 5. Attempt to assign staff in month_inactive (should fail since staff is inactive in 2026-06)
+        body3 = f"project_id={p1_id}&staff_id={self.staff_id}&months={month_inactive}".encode()
+        handler3 = MockHandler(body=body3, headers={"content-length": str(len(body3))})
+        projects.handle_project_assign_create_post(handler3)
+        self.assertEqual(handler3.response_status, 400)
+        self.assertIn("not active", handler3.get_output_text())
+
+        # 6. Unassign staff
+        assignment = self.conn.execute("SELECT id FROM project_staff_assignments WHERE staff_id=? AND month=?", (self.staff_id, month_active)).fetchone()
+        self.assertIsNotNone(assignment)
+        
+        body_del = f"id={assignment['id']}&month={month_active}".encode()
+        handler_del = MockHandler(body=body_del, headers={"content-length": str(len(body_del))})
+        projects.handle_project_assign_delete_post(handler_del)
+        self.assertEqual(handler_del.response_status, 302)
+
+        # Verify assignment deleted from DB
+        deleted = self.conn.execute("SELECT 1 FROM project_staff_assignments WHERE id=?", (assignment['id'],)).fetchone()
+        self.assertIsNone(deleted)
+
+    def test_staff_assignments_multi_month(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, is_active)
+            VALUES ('ASSIGN-PROJ-3', 'Assign Project Three', 1)
+        """)
+        p3_id = cur.lastrowid
+        self.conn.commit()
+
+        # Nguyễn Văn An is active from 2025-06-01 to 2026-05-31
+        # Let's test assigning to 2026-04 and 2026-05
+        
+        # Verify available in both months via AJAX
+        handler_ajax = MockHandler(path="/api/projects/available-staff?months=2026-04,2026-05")
+        projects.handle_available_staff_ajax(handler_ajax)
+        self.assertEqual(handler_ajax.response_status, 200)
+        import json
+        data = json.loads(handler_ajax.get_output_text())
+        self.assertTrue(any(s['full_name_vi'] == "Nguyễn Văn An" for s in data))
+        
+        # Perform multi-month assignment
+        body = f"project_id={p3_id}&staff_id={self.staff_id}&months=2026-04&months=2026-05".encode()
+        handler = MockHandler(body=body, headers={"content-length": str(len(body))})
+        projects.handle_project_assign_create_post(handler)
+        self.assertEqual(handler.response_status, 302)
+        
+        # Verify assigned in both months in DB
+        rows = self.conn.execute("SELECT month FROM project_staff_assignments WHERE staff_id=? AND project_id=?", (self.staff_id, p3_id)).fetchall()
+        assigned_months = [r['month'] for r in rows]
+        self.assertIn("2026-04", assigned_months)
+        self.assertIn("2026-05", assigned_months)
+        self.assertEqual(len(assigned_months), 2)
 
 
 if __name__ == "__main__":
