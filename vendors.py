@@ -1,7 +1,7 @@
 from html import escape
 from common import (
     db_connect, layout, LIST_LIMIT, now_iso,
-    read_post_form, redirect, send_html, safe_return_to
+    read_post_form, redirect, send_html, safe_return_to, log_action
 )
 
 # All TEXT fields to preserve leading zeros
@@ -300,8 +300,9 @@ def handle_vendor_create_post(handler):
             purchasing,
             now_iso(), now_iso()
         ))
-        conn.commit()
         new_id = cur.lastrowid
+        log_action(cur, "CREATE_VENDOR", "vendors", new_id, f"Tạo nhà cung cấp mới: {data['short_name']} ({data['company_name_vi']})")
+        conn.commit()
     finally:
         conn.close()
 
@@ -353,6 +354,7 @@ def handle_vendor_update_post(handler):
             purchasing,
             now_iso(), vendor_id
         ))
+        log_action(cur, "UPDATE_VENDOR", "vendors", vendor_id, f"Cập nhật thông tin nhà cung cấp '{data['short_name']}'")
         conn.commit()
     finally:
         conn.close()
@@ -372,6 +374,10 @@ def handle_vendor_deactivate_post(handler):
 
     conn = db_connect()
     try:
+        # Get vendor short name for log
+        v_row = conn.execute("SELECT short_name FROM vendors WHERE id=?", (vendor_id,)).fetchone()
+        v_name = v_row["short_name"] if v_row else f"ID {vendor_id}"
+
         cur = conn.cursor()
         cur.execute("""
             UPDATE vendors
@@ -380,6 +386,7 @@ def handle_vendor_deactivate_post(handler):
                 updated_at=?
             WHERE id=?
         """, (now_iso(), now_iso(), vendor_id))
+        log_action(cur, "DEACTIVATE_VENDOR", "vendors", vendor_id, f"Hủy kích hoạt nhà cung cấp '{v_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -397,6 +404,10 @@ def handle_vendor_restore_post(handler):
 
     conn = db_connect()
     try:
+        # Get vendor short name for log
+        v_row = conn.execute("SELECT short_name FROM vendors WHERE id=?", (vendor_id,)).fetchone()
+        v_name = v_row["short_name"] if v_row else f"ID {vendor_id}"
+
         cur = conn.cursor()
         cur.execute("""
             UPDATE vendors
@@ -405,6 +416,7 @@ def handle_vendor_restore_post(handler):
                 updated_at=?
             WHERE id=?
         """, (now_iso(), vendor_id))
+        log_action(cur, "RESTORE_VENDOR", "vendors", vendor_id, f"Khôi phục hoạt động nhà cung cấp '{v_name}'")
         conn.commit()
     finally:
         conn.close()

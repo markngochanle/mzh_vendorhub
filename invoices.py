@@ -14,7 +14,7 @@ import calendar
 
 from common import (
     db_connect, layout, parse_int_or_none, fmt_money,
-    LIST_LIMIT, read_post_form, send_html, redirect, safe_return_to, now_iso
+    LIST_LIMIT, read_post_form, send_html, redirect, safe_return_to, now_iso, log_action
 )
 
 
@@ -1074,12 +1074,17 @@ def handle_edit_invoice_post(handler):
 
     conn = db_connect()
     try:
+        # Get invoice info for log
+        inv_row = conn.execute("SELECT khhdon, shdon FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        inv_name = f"{inv_row['khhdon']}/{inv_row['shdon']}" if inv_row else f"ID {invoice_id}"
+        
         cur = conn.cursor()
         cur.execute("""
             UPDATE invoices
             SET service_year=?, service_month=?, service_day=?, contract_no=?
             WHERE id=?
         """, (sy, sm, sd, contract_no, invoice_id))
+        log_action(cur, "UPDATE_INVOICE", "invoices", invoice_id, f"Cập nhật thông tin hóa đơn '{inv_name}': Kỳ dịch vụ {sy}-{sm}-{sd}, Số hợp đồng: {contract_no}")
         conn.commit()
     finally:
         conn.close()
@@ -1110,9 +1115,14 @@ def handle_delete_invoice_post(handler):
 
     conn = db_connect()
     try:
+        # Get invoice info for log before delete
+        inv_row = conn.execute("SELECT khhdon, shdon, seller_name FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        inv_name = f"{inv_row['khhdon']}/{inv_row['shdon']} của {inv_row['seller_name']}" if inv_row else f"ID {invoice_id}"
+        
         cur = conn.cursor()
         cur.execute("DELETE FROM invoice_tax_lines WHERE invoice_id=?", (invoice_id,))
         cur.execute("DELETE FROM invoices WHERE id=?", (invoice_id,))
+        log_action(cur, "DELETE_INVOICE", "invoices", invoice_id, f"Xóa hóa đơn '{inv_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -1301,7 +1311,9 @@ def db_insert_or_duplicate(
         invoice["tg_tcthue"], invoice["tg_tthue"], invoice["ttcktmai"], invoice["tg_tttbso"],
         source_path, invoice["raw_xml"],
     ))
-    return cur.lastrowid, False
+    invoice_id = cur.lastrowid
+    log_action(cur, "IMPORT_INVOICE", "invoices", invoice_id, f"Import hóa đơn mới '{invoice['khhdon']}/{invoice['shdon']}' của {invoice['seller_name']}")
+    return invoice_id, False
 
 
 def db_replace_tax_lines(conn, invoice_id: int, tax_lines: list[dict]):
@@ -1689,8 +1701,15 @@ def handle_toggle_mgs_sent_ajax(handler):
 
     conn = db_connect()
     try:
+        # Get invoice info for log
+        inv_row = conn.execute("SELECT khhdon, shdon FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        inv_name = f"{inv_row['khhdon']}/{inv_row['shdon']}" if inv_row else f"ID {invoice_id}"
+        
         cur = conn.cursor()
         cur.execute("UPDATE invoices SET sent_to_mgs = ?, updated_at = datetime('now') WHERE id = ?", (sent, invoice_id))
+        
+        status_desc = "Đã gửi MGS" if sent == 1 else "Hủy gửi MGS"
+        log_action(cur, "TOGGLE_MGS_SENT", "invoices", invoice_id, f"Thay đổi trạng thái MGS: {status_desc} hóa đơn '{inv_name}'")
         conn.commit()
         send_html(handler, json.dumps({"status": "ok"}), status=200)
     except Exception as e:
@@ -1714,8 +1733,15 @@ def handle_force_match_post(handler):
 
     conn = db_connect()
     try:
+        # Get invoice info for log
+        inv_row = conn.execute("SELECT khhdon, shdon FROM invoices WHERE id=?", (invoice_id,)).fetchone()
+        inv_name = f"{inv_row['khhdon']}/{inv_row['shdon']}" if inv_row else f"ID {invoice_id}"
+        
         cur = conn.cursor()
         cur.execute("UPDATE invoices SET force_match=?, updated_at=? WHERE id=?", (val, now_iso(), invoice_id))
+        
+        status_desc = "Buộc khớp (Force Match)" if val == 1 else "Hủy buộc khớp (Unforce Match)"
+        log_action(cur, "TOGGLE_FORCE_MATCH", "invoices", invoice_id, f"Thực hiện: {status_desc} hóa đơn '{inv_name}'")
         conn.commit()
     finally:
         conn.close()

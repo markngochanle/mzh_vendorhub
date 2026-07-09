@@ -364,8 +364,31 @@ def init_db():
         """)
         conn.commit()
 
+        # -------- audit_logs --------
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS audit_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                action TEXT NOT NULL,
+                table_name TEXT,
+                record_id INTEGER,
+                description TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+        """)
+        conn.commit()
+
     finally:
         conn.close()
+
+
+def log_action(conn_or_cursor, action: str, table_name: str | None = None, record_id: int | None = None, description: str = ""):
+    try:
+        conn_or_cursor.execute("""
+            INSERT INTO audit_logs (action, table_name, record_id, description, created_at)
+            VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
+        """, (action, table_name, record_id, description))
+    except Exception as e:
+        print(f"Failed to write audit log: {e}")
 
 
 # -------------------- HTTP/HTML helpers --------------------
@@ -385,6 +408,7 @@ def layout(title: str, body_html: str):
       <a href="/staff" class="nav-link">Staff</a>
       <a href="/projects" class="nav-link">Projects</a>
       <a href="/attendance" class="nav-link">Attendance</a>
+      <a href="/audit-logs" class="nav-link">Audit Logs</a>
     </div>
     """
     return f"""<!doctype html>

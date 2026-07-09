@@ -4,7 +4,7 @@ from datetime import datetime
 
 from common import (
     db_connect, layout, LIST_LIMIT, now_iso,
-    read_post_form, redirect, send_html
+    read_post_form, redirect, send_html, log_action
 )
 
 
@@ -725,8 +725,12 @@ def handle_staff_create_post(handler):
             ot, status, work_shift,
             now_iso(), now_iso()
         ))
-        conn.commit()
         new_id = cur.lastrowid
+        # Get vendor short name for log
+        v_row = cur.execute("SELECT short_name FROM vendors WHERE id=?", (int(vendor_id),)).fetchone()
+        v_name = v_row["short_name"] if v_row else f"Vendor ID {vendor_id}"
+        log_action(cur, "CREATE_STAFF", "contract_staff", new_id, f"Thêm nhân sự mới '{full_name_vi}' thuộc nhà cung cấp '{v_name}'")
+        conn.commit()
     finally:
         conn.close()
 
@@ -853,6 +857,7 @@ def handle_staff_update_post(handler):
             now_iso(),
             int(sid)
         ))
+        log_action(cur, "UPDATE_STAFF", "contract_staff", int(sid), f"Cập nhật thông tin nhân sự '{full_name_vi}'")
         conn.commit()
     finally:
         conn.close()

@@ -4,7 +4,7 @@ from html import escape
 from datetime import datetime
 
 from common import (
-    db_connect, layout, read_post_form, redirect, send_html, now_iso
+    db_connect, layout, read_post_form, redirect, send_html, now_iso, log_action
 )
 
 def page_projects_list(error_msg: str | None = None, success_msg: str | None = None):
@@ -147,8 +147,9 @@ def handle_project_create_post(handler):
             INSERT INTO projects (short_name, full_name, it_outsourcing_budget, os_start_date, os_end_date, is_active, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, 1, ?, ?)
         """, (short_name, full_name, it_outsourcing_budget, os_start_date, os_end_date, now_iso(), now_iso()))
-        conn.commit()
         new_project_id = cur.lastrowid
+        log_action(cur, "CREATE_PROJECT", "projects", new_project_id, f"Tạo dự án mới '{short_name}' - {full_name}")
+        conn.commit()
     finally:
         conn.close()
 
@@ -173,7 +174,13 @@ def handle_project_delete_post(handler):
 
     conn = db_connect()
     try:
-        conn.execute("UPDATE projects SET is_active = 0, updated_at = ? WHERE id = ?", (now_iso(), project_id))
+        # Get project name first for log
+        p_row = conn.execute("SELECT short_name FROM projects WHERE id=?", (project_id,)).fetchone()
+        p_name = p_row["short_name"] if p_row else f"ID {project_id}"
+        
+        cur = conn.cursor()
+        cur.execute("UPDATE projects SET is_active = 0, updated_at = ? WHERE id = ?", (now_iso(), project_id))
+        log_action(cur, "DEACTIVATE_PROJECT", "projects", project_id, f"Hủy kích hoạt dự án '{p_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -637,15 +644,24 @@ def handle_project_assign_create_post(handler):
                 send_html(handler, page_projects_assign(month, error_msg=f"Staff member is already assigned to project '{exists['short_name']}' in {month}."), status=400)
                 return
 
+        # Get names for log
+        p_row = conn.execute("SELECT short_name FROM projects WHERE id=?", (project_id,)).fetchone()
+        s_row = conn.execute("SELECT full_name_vi FROM contract_staff WHERE id=?", (staff_id,)).fetchone()
+        p_name = p_row["short_name"] if p_row else f"ID {project_id}"
+        s_name = s_row["full_name_vi"] if s_row else f"ID {staff_id}"
+
         # Perform insertion for all selected months
+        cur = conn.cursor()
         for month in months:
             month = month.strip()
             if not month:
                 continue
-            conn.execute("""
+            cur.execute("""
                 INSERT INTO project_staff_assignments (project_id, staff_id, month, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?)
             """, (project_id, staff_id, month, now_iso(), now_iso()))
+            new_assign_id = cur.lastrowid
+            log_action(cur, "ASSIGN_STAFF", "project_staff_assignments", new_assign_id, f"Gán nhân sự '{s_name}' vào dự án '{p_name}' tháng {month}")
         conn.commit()
     except Exception as e:
         send_html(handler, page_projects_assign(error_msg=f"Database error: {str(e)}"), status=500)
@@ -816,19 +832,36 @@ def handle_project_toggle_assignment_ajax(handler):
                 handler.wfile.write(json.dumps({"status": "error", "message": f"Staff member is already assigned to project '{exists['short_name']}' in {month}"}).encode('utf-8'))
                 return
 
+            # Get names for log
+            p_row = conn.execute("SELECT short_name FROM projects WHERE id=?", (project_id,)).fetchone()
+            s_row = conn.execute("SELECT full_name_vi FROM contract_staff WHERE id=?", (staff_id,)).fetchone()
+            p_name = p_row["short_name"] if p_row else f"ID {project_id}"
+            s_name = s_row["full_name_vi"] if s_row else f"ID {staff_id}"
+
             # Insert
-            conn.execute("""
+            cur = conn.cursor()
+            cur.execute("""
                 INSERT INTO project_staff_assignments (project_id, staff_id, month, created_at, updated_at)
                 VALUES (?, ?, ?, ?, ?)
             """, (project_id, staff_id, month, now_iso(), now_iso()))
+            new_assign_id = cur.lastrowid
+            log_action(cur, "ASSIGN_STAFF", "project_staff_assignments", new_assign_id, f"Gán nhân sự '{s_name}' vào dự án '{p_name}' tháng {month}")
             conn.commit()
             
         else:
+            # Get names for log
+            p_row = conn.execute("SELECT short_name FROM projects WHERE id=?", (project_id,)).fetchone()
+            s_row = conn.execute("SELECT full_name_vi FROM contract_staff WHERE id=?", (staff_id,)).fetchone()
+            p_name = p_row["short_name"] if p_row else f"ID {project_id}"
+            s_name = s_row["full_name_vi"] if s_row else f"ID {staff_id}"
+
             # Delete
-            conn.execute("""
+            cur = conn.cursor()
+            cur.execute("""
                 DELETE FROM project_staff_assignments 
                 WHERE project_id = ? AND staff_id = ? AND month = ?
             """, (project_id, staff_id, month))
+            log_action(cur, "UNASSIGN_STAFF", "project_staff_assignments", None, f"Hủy gán nhân sự '{s_name}' khỏi dự án '{p_name}' tháng {month}")
             conn.commit()
             
         handler.send_response(200)

@@ -3,7 +3,7 @@
 from html import escape
 from common import (
     db_connect, layout, LIST_LIMIT, now_iso,
-    read_post_form, redirect, send_html, safe_return_to
+    read_post_form, redirect, send_html, safe_return_to, log_action
 )
 
 def vendor_label(row):
@@ -448,8 +448,9 @@ def handle_contract_create_post(handler):
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
         """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, now_iso(), now_iso()))
-        conn.commit()
         new_id = cur.lastrowid
+        log_action(cur, "CREATE_CONTRACT", "contracts", new_id, f"Tạo hợp đồng khung mới '{framework_no}' - {framework_name}")
+        conn.commit()
     finally:
         conn.close()
 
@@ -509,6 +510,7 @@ def handle_contract_update_post(handler):
                 updated_at=?
             WHERE id=?
         """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, now_iso(), int(cid)))
+        log_action(cur, "UPDATE_CONTRACT", "contracts", int(cid), f"Cập nhật hợp đồng khung '{framework_no}' - {framework_name}")
         conn.commit()
     finally:
         conn.close()
@@ -526,8 +528,13 @@ def handle_contract_delete_post(handler):
 
     conn = db_connect()
     try:
+        # Get framework no for log
+        c_row = conn.execute("SELECT framework_no FROM contracts WHERE id=?", (int(cid),)).fetchone()
+        c_name = c_row["framework_no"] if c_row else f"ID {cid}"
+
         cur = conn.cursor()
         cur.execute("UPDATE contracts SET is_active=0, deleted_at=?, updated_at=? WHERE id=?", (now_iso(), now_iso(), int(cid)))
+        log_action(cur, "DEACTIVATE_CONTRACT", "contracts", int(cid), f"Hủy kích hoạt hợp đồng khung '{c_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -545,8 +552,13 @@ def handle_contract_restore_post(handler):
 
     conn = db_connect()
     try:
+        # Get framework no for log
+        c_row = conn.execute("SELECT framework_no FROM contracts WHERE id=?", (int(cid),)).fetchone()
+        c_name = c_row["framework_no"] if c_row else f"ID {cid}"
+
         cur = conn.cursor()
         cur.execute("UPDATE contracts SET is_active=1, deleted_at=NULL, updated_at=? WHERE id=?", (now_iso(), int(cid)))
+        log_action(cur, "RESTORE_CONTRACT", "contracts", int(cid), f"Khôi phục hoạt động hợp đồng khung '{c_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -580,6 +592,10 @@ def handle_annex_create_post(handler):
             send_html(handler, layout("Error", "<div class='card danger'>Contract does not exist or has been deleted</div>"), status=400)
             return
 
+        # Get contract framework no for log
+        c_row = cur.execute("SELECT framework_no FROM contracts WHERE id=?", (int(contract_id),)).fetchone()
+        c_name = c_row["framework_no"] if c_row else f"ID {contract_id}"
+
         cur.execute("""
             INSERT INTO contract_annexes (
               contract_id, annex_name, start_date, end_date, value,
@@ -587,6 +603,8 @@ def handle_annex_create_post(handler):
             )
             VALUES (?, ?, ?, ?, ?, 1, NULL, ?, ?)
         """, (int(contract_id), annex_name, start_date, end_date, value, now_iso(), now_iso()))
+        new_annex_id = cur.lastrowid
+        log_action(cur, "CREATE_ANNEX", "contract_annexes", new_annex_id, f"Tạo phụ lục mới '{annex_name}' thuộc hợp đồng khung '{c_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -621,6 +639,10 @@ def handle_annex_update_post(handler):
             send_html(handler, layout("Not Found", f"<div class='card'>Annex ID={aid} not found</div>"), status=404)
             return
 
+        # Get contract framework no for log
+        c_row = cur.execute("SELECT framework_no FROM contracts WHERE id=?", (int(contract_id),)).fetchone()
+        c_name = c_row["framework_no"] if c_row else f"ID {contract_id}"
+
         cur.execute("""
             UPDATE contract_annexes
             SET annex_name=?,
@@ -630,6 +652,7 @@ def handle_annex_update_post(handler):
                 updated_at=?
             WHERE id=?
         """, (annex_name, start_date, end_date, value, now_iso(), int(aid)))
+        log_action(cur, "UPDATE_ANNEX", "contract_annexes", int(aid), f"Cập nhật phụ lục '{annex_name}' thuộc hợp đồng khung '{c_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -647,8 +670,13 @@ def handle_annex_delete_post(handler):
 
     conn = db_connect()
     try:
+        # Get annex name for log
+        a_row = conn.execute("SELECT annex_name FROM contract_annexes WHERE id=?", (int(aid),)).fetchone()
+        a_name = a_row["annex_name"] if a_row else f"ID {aid}"
+
         cur = conn.cursor()
         cur.execute("UPDATE contract_annexes SET is_active=0, deleted_at=?, updated_at=? WHERE id=?", (now_iso(), now_iso(), int(aid)))
+        log_action(cur, "DEACTIVATE_ANNEX", "contract_annexes", int(aid), f"Hủy kích hoạt phụ lục '{a_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -666,8 +694,13 @@ def handle_annex_restore_post(handler):
 
     conn = db_connect()
     try:
+        # Get annex name for log
+        a_row = conn.execute("SELECT annex_name FROM contract_annexes WHERE id=?", (int(aid),)).fetchone()
+        a_name = a_row["annex_name"] if a_row else f"ID {aid}"
+
         cur = conn.cursor()
         cur.execute("UPDATE contract_annexes SET is_active=1, deleted_at=NULL, updated_at=? WHERE id=?", (now_iso(), int(aid)))
+        log_action(cur, "RESTORE_ANNEX", "contract_annexes", int(aid), f"Khôi phục hoạt động phụ lục '{a_name}'")
         conn.commit()
     finally:
         conn.close()

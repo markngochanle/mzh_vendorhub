@@ -45,6 +45,7 @@ from invoices import (
 )
 
 from dashboard import page_dashboard
+from audit import page_audit_logs
 
 from vendors import (
     page_vendors_list,
@@ -118,6 +119,10 @@ class Handler(BaseHTTPRequestHandler):
             # ---------------- Invoices ----------------
             if path == "/dashboard":
                 page_dashboard(self)
+                return
+
+            if path == "/audit-logs":
+                page_audit_logs(self)
                 return
 
             if path == "/":
