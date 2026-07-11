@@ -12,8 +12,7 @@ def page_projects_list(error_msg: str | None = None, success_msg: str | None = N
     try:
         projects = conn.execute("""
             SELECT * FROM projects 
-            WHERE is_active = 1 
-            ORDER BY short_name ASC, id DESC
+            ORDER BY is_active DESC, short_name ASC, id DESC
         """).fetchall()
     finally:
         conn.close()
@@ -57,7 +56,7 @@ def page_projects_list(error_msg: str | None = None, success_msg: str | None = N
     </div>
 
     <div class="card">
-      <h3 style="margin-top: 0; margin-bottom: 16px;">Active Projects List</h3>
+      <h3 style="margin-top: 0; margin-bottom: 16px;">Projects List</h3>
       <table>
         <thead>
           <tr>
@@ -67,6 +66,7 @@ def page_projects_list(error_msg: str | None = None, success_msg: str | None = N
             <th>IT Outsourcing Budget</th>
             <th>OS Start Date</th>
             <th>OS End Date</th>
+            <th>Status</th>
             <th>Actions</th>
           </tr>
         </thead>
@@ -76,12 +76,31 @@ def page_projects_list(error_msg: str | None = None, success_msg: str | None = N
     if not projects:
       body += """
           <tr>
-            <td colspan="7" style="text-align: center; color: var(--text-muted);">No active projects found.</td>
+            <td colspan="8" style="text-align: center; color: var(--text-muted);">No projects found.</td>
           </tr>
       """
     else:
       for idx, p in enumerate(projects, 1):
           budget_str = f"{float(p['it_outsourcing_budget']):,.2f} VND" if p['it_outsourcing_budget'] is not None else "N/A"
+          is_active = int(p['is_active'] or 0) == 1
+          
+          if is_active:
+              status_badge = '<div class="tag" style="background:#e6f4ea; border-color:#b4e3be; color:#137333; margin:0;">Active</div>'
+              action_btn = f"""
+              <form method="POST" action="/project/delete" class="inline" onsubmit="return confirm('Are you sure you want to close project: {escape(p['short_name'])}?');" style="margin:0; display:inline-block;">
+                <input type="hidden" name="id" value="{p['id']}">
+                <button type="submit" class="btn-danger" style="font-size:12px; padding: 4px 8px; background:#f59e0b; border-color:#d97706;">Close</button>
+              </form>
+              """
+          else:
+              status_badge = '<div class="tag" style="background:#f1f5f9; border-color:#cbd5e1; color:#475569; margin:0;">Closed</div>'
+              action_btn = f"""
+              <form method="POST" action="/project/restore" class="inline" onsubmit="return confirm('Are you sure you want to reopen project: {escape(p['short_name'])}?');" style="margin:0; display:inline-block;">
+                <input type="hidden" name="id" value="{p['id']}">
+                <button type="submit" class="btn-primary" style="font-size:12px; padding: 4px 8px; background:#10b981; border-color:#059669;">Reopen</button>
+              </form>
+              """
+              
           body += f"""
           <tr>
             <td>{idx}</td>
@@ -90,11 +109,10 @@ def page_projects_list(error_msg: str | None = None, success_msg: str | None = N
             <td>{escape(budget_str)}</td>
             <td>{escape(p['os_start_date'] or 'N/A')}</td>
             <td>{escape(p['os_end_date'] or 'N/A')}</td>
+            <td>{status_badge}</td>
             <td>
-              <form method="POST" action="/project/delete" class="inline" onsubmit="return confirm('Are you sure you want to deactivate project: {escape(p['short_name'])}?');">
-                <input type="hidden" name="id" value="{p['id']}">
-                <button type="submit" class="btn-danger" style="font-size:12px; padding: 4px 8px;">Deactivate</button>
-              </form>
+              {action_btn}
+              <a href="/project/edit?id={p['id']}" class="btn" style="font-size:12px; padding: 4px 8px; margin-left: 4px; background:#4f46e5; border-color:#4f46e5; color:#fff;">Edit</a>
               <a href="/projects/assign?project_id={p['id']}" class="btn" style="font-size:12px; padding: 4px 8px; margin-left: 4px;">Assignments</a>
             </td>
           </tr>
@@ -180,7 +198,33 @@ def handle_project_delete_post(handler):
         
         cur = conn.cursor()
         cur.execute("UPDATE projects SET is_active = 0, updated_at = ? WHERE id = ?", (now_iso(), project_id))
-        log_action(cur, "DEACTIVATE_PROJECT", "projects", project_id, f"Hủy kích hoạt dự án '{p_name}'")
+        log_action(cur, "CLOSE_PROJECT", "projects", project_id, f"Đóng dự án '{p_name}'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    redirect(handler, "/projects")
+
+
+def handle_project_restore_post(handler):
+    form = read_post_form(handler)
+    project_id_raw = (form.get("id", [""])[0] or "").strip()
+
+    if not project_id_raw.isdigit():
+        send_html(handler, page_projects_list(error_msg="Invalid Project ID."), status=400)
+        return
+
+    project_id = int(project_id_raw)
+
+    conn = db_connect()
+    try:
+        # Get project name first for log
+        p_row = conn.execute("SELECT short_name FROM projects WHERE id=?", (project_id,)).fetchone()
+        p_name = p_row["short_name"] if p_row else f"ID {project_id}"
+        
+        cur = conn.cursor()
+        cur.execute("UPDATE projects SET is_active = 1, updated_at = ? WHERE id = ?", (now_iso(), project_id))
+        log_action(cur, "REOPEN_PROJECT", "projects", project_id, f"Mở lại dự án '{p_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -189,14 +233,15 @@ def handle_project_delete_post(handler):
 
 
 def page_projects_assign(selected_month: str | None = None, selected_project_id: str | None = None, selected_vendor_id: str | None = None, error_msg: str | None = None, success_msg: str | None = None):
+    js_staff_avail = "{}"
     # Default to current month if not specified
     if not selected_month:
         selected_month = datetime.now().strftime("%Y-%m")
 
     conn = db_connect()
     try:
-        # 1. Get active projects
-        projects_list = conn.execute("SELECT * FROM projects WHERE is_active=1 ORDER BY short_name ASC").fetchall()
+        # 1. Get projects (active first, then closed)
+        projects_list = conn.execute("SELECT * FROM projects ORDER BY is_active DESC, short_name ASC").fetchall()
         
         # 2. Get active vendor sellers (purchasing=0) for filtering
         vendors = conn.execute("""
@@ -206,10 +251,10 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
             ORDER BY company_name ASC, company_name_vi ASC
         """).fetchall()
 
-        # Check if project_id is valid
+        # Check if project_id is valid (including closed projects for historical assignments management)
         project_row = None
         if selected_project_id and str(selected_project_id).isdigit():
-            project_row = conn.execute("SELECT * FROM projects WHERE id=? AND is_active=1", (int(selected_project_id),)).fetchone()
+            project_row = conn.execute("SELECT * FROM projects WHERE id=?", (int(selected_project_id),)).fetchone()
 
         # Determine months, staffs and assignments for the selected project
         months = []
@@ -290,7 +335,7 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
                 avail_params.append(int(selected_vendor_id))
 
             available_staffs = conn.execute(f"""
-                SELECT cs.id, cs.full_name_vi,
+                SELECT cs.id, cs.full_name_vi, cs.joining_date, cs.tentative_leaving_date,
                        COALESCE(v.company_name, v.company_name_vi) AS vendor_name
                 FROM contract_staff cs
                 JOIN vendors v ON v.id = cs.vendor_id
@@ -298,6 +343,34 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
                 ORDER BY cs.full_name_vi ASC
             """, avail_params).fetchall()
 
+            # Query busy months of available staff
+            avail_ids = [s["id"] for s in available_staffs]
+            staff_busy_map = {}
+            if avail_ids:
+                placeholders = ",".join("?" for _ in avail_ids)
+                busy_rows = conn.execute(f"""
+                    SELECT psa.staff_id, psa.month, p.short_name AS project_name
+                    FROM project_staff_assignments psa
+                    JOIN projects p ON p.id = psa.project_id
+                    WHERE psa.staff_id IN ({placeholders})
+                """, avail_ids).fetchall()
+                for br in busy_rows:
+                    sid = br["staff_id"]
+                    if sid not in staff_busy_map:
+                        staff_busy_map[sid] = {}
+                    staff_busy_map[sid][br["month"]] = br["project_name"]
+
+            import json
+            client_avail_data = {}
+            for s in available_staffs:
+                sid = s["id"]
+                client_avail_data[sid] = {
+                    "joining_date": s["joining_date"],
+                    "leaving_date": s["tentative_leaving_date"],
+                    "busy": staff_busy_map.get(sid, {})
+                }
+            js_staff_avail = json.dumps(client_avail_data)
+            
     finally:
         conn.close()
 
@@ -308,7 +381,8 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
     project_opts = ['<option value="">-- select project --</option>']
     for p in projects_list:
         sel = "selected" if selected_project_id and str(p['id']) == str(selected_project_id) else ""
-        project_opts.append(f'<option value="{p["id"]}" {sel}>{escape(p["short_name"])} - {escape(p["full_name"])}</option>')
+        closed_suffix = " (Closed)" if int(p['is_active'] or 0) == 0 else ""
+        project_opts.append(f'<option value="{p["id"]}" {sel}>{escape(p["short_name"])}{closed_suffix} - {escape(p["full_name"])}</option>')
 
     # Build Vendor Options for Filtering
     vendor_opts = ['<option value="">-- all companies --</option>']
@@ -388,17 +462,44 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
         </div>
         """
     else:
+        # Filter available staff to only include those who have at least one month compatible/available in this project
+        filtered_available_staffs = []
+        for s in available_staffs:
+            is_any_month_available = False
+            for m in months:
+                try:
+                    yr, mn = map(int, m.split('-'))
+                    _, last_day_num = calendar.monthrange(yr, mn)
+                    first_day_str = f"{m}-01"
+                    last_day_str = f"{m}-{last_day_num:02d}"
+                except Exception:
+                    continue
+
+                # Check active range (onboard / offboard)
+                onboarded = s["joining_date"] <= last_day_str
+                not_left = not s["tentative_leaving_date"] or s["tentative_leaving_date"] >= first_day_str
+
+                # Check busy project in month m
+                is_busy = staff_busy_map.get(s["id"], {}).get(m) is not None
+
+                if onboarded and not_left and not is_busy:
+                    is_any_month_available = True
+                    break
+
+            if is_any_month_available:
+                filtered_available_staffs.append(s)
+
         # Build options for available staff
         avail_opts = ['<option value="">-- select staff member --</option>']
-        for s in available_staffs:
+        for s in filtered_available_staffs:
             avail_opts.append(f'<option value="{s["id"]}">{escape(s["full_name_vi"])} ({escape(s["vendor_name"])})</option>')
             
-        # Months checkbox for form
+        # Months checkbox for form (disabled by default until staff is selected)
         avail_months_checkboxes = []
         for m in months:
             avail_months_checkboxes.append(f"""
-            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer; background: #f1f5f9; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; font-weight: 500;">
-              <input type="checkbox" name="months" value="{m}" style="margin: 0;">
+            <label style="display: inline-flex; align-items: center; gap: 6px; cursor: not-allowed; opacity: 0.5; background: #f1f5f9; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px; font-weight: 500;" title="Please select a staff member first">
+              <input type="checkbox" name="months" value="{m}" style="margin: 0;" disabled>
               {m}
             </label>
             """)
@@ -410,7 +511,7 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
             <input type="hidden" name="project_id" value="{project_row["id"]}">
             <div style="margin-bottom: 16px;">
               <div class="label">Select Staff member to add</div>
-              <select name="staff_id" style="width: 100%;" required>
+              <select id="add_staff_select" name="staff_id" style="width: 100%;" required>
                 {''.join(avail_opts)}
               </select>
             </div>
@@ -589,6 +690,88 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
             }});
           }});
         }});
+
+        // Dynamic availability alignment for Add Staff form checkboxes
+        const staffSel = document.getElementById('add_staff_select');
+        const monthsCbs = document.querySelectorAll('input[name="months"]');
+        const availData = {js_staff_avail};
+
+        if (staffSel) {{
+          staffSel.addEventListener('change', function() {{
+            const sid = this.value;
+            if (!sid) {{
+              monthsCbs.forEach(cb => {{
+                cb.disabled = true;
+                cb.checked = false;
+                const lbl = cb.closest('label');
+                lbl.style.opacity = '0.5';
+                lbl.style.cursor = 'not-allowed';
+                lbl.title = 'Please select a staff member first';
+                const statusSpan = lbl.querySelector('.avail-status');
+                if (statusSpan) statusSpan.remove();
+              }});
+              return;
+            }}
+
+            const info = availData[sid];
+            if (!info) return;
+
+            const joining = info.joining_date;
+            const leaving = info.leaving_date;
+            const busy = info.busy || {{}};
+
+            monthsCbs.forEach(cb => {{
+              const m = cb.value;
+              let disableReason = "";
+
+              if (joining) {{
+                const jMonth = joining.substring(0, 7);
+                if (m < jMonth) {{
+                  disableReason = "Not onboarded";
+                }}
+              }}
+
+              if (!disableReason && leaving) {{
+                const lMonth = leaving.substring(0, 7);
+                if (m > lMonth) {{
+                  disableReason = "Contract expired";
+                }}
+              }}
+
+              if (!disableReason && busy[m]) {{
+                disableReason = "Busy: " + busy[m];
+              }}
+
+              const lbl = cb.closest('label');
+              let statusSpan = lbl.querySelector('.avail-status');
+              if (statusSpan) statusSpan.remove();
+
+              if (disableReason) {{
+                cb.disabled = true;
+                cb.checked = false;
+                lbl.style.opacity = '0.5';
+                lbl.style.cursor = 'not-allowed';
+                lbl.title = disableReason;
+                
+                const span = document.createElement('span');
+                span.className = 'avail-status';
+                span.style.fontSize = '10px';
+                span.style.color = '#ef4444';
+                span.style.marginLeft = '4px';
+                span.style.fontWeight = 'bold';
+                span.innerText = '(' + disableReason + ')';
+                lbl.appendChild(span);
+              }} else {{
+                cb.disabled = false;
+                lbl.style.opacity = '1';
+                lbl.style.cursor = 'pointer';
+                lbl.title = '';
+              }}
+            }});
+          }});
+          
+          staffSel.dispatchEvent(new Event('change'));
+        }}
       }})();
     </script>
     """
@@ -876,3 +1059,116 @@ def handle_project_toggle_assignment_ajax(handler):
         handler.wfile.write(json.dumps({"status": "error", "message": str(e)}).encode('utf-8'))
     finally:
         conn.close()
+
+
+def page_project_edit(project_id: int, error_msg: str | None = None):
+    conn = db_connect()
+    try:
+        project = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+    finally:
+        conn.close()
+
+    if not project:
+        return layout("Error", f"<div class='card danger'>Project ID={project_id} not found. <a href='/projects'>Back to Projects</a></div>")
+
+    error_html = f'<div class="card danger"><b>Error:</b> {escape(error_msg)}</div>' if error_msg else ""
+    
+    budget_val = f"{project['it_outsourcing_budget']:.2f}" if project['it_outsourcing_budget'] is not None else ""
+    start_val = project['os_start_date'] or ""
+    end_val = project['os_end_date'] or ""
+
+    body = f"""
+    <div style="margin-bottom: 24px;">
+      <a href="/projects">← Back to Projects</a>
+    </div>
+
+    <div class="card" style="max-width: 600px; margin: 0 auto; padding: 18px;">
+      <h3 style="margin-top: 0; margin-bottom: 16px;">Edit Project</h3>
+      {error_html}
+      <form method="POST" action="/project/update">
+        <input type="hidden" name="id" value="{project['id']}">
+        
+        <div style="margin-bottom: 12px;">
+          <div class="label">Short Name (required)</div>
+          <input type="text" name="short_name" value="{escape(project['short_name'] or '')}" style="width: 100%;" required>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <div class="label">Full Name (required)</div>
+          <input type="text" name="full_name" value="{escape(project['full_name'] or '')}" style="width: 100%;" required>
+        </div>
+
+        <div style="margin-bottom: 12px;">
+          <div class="label">IT Outsourcing Budget</div>
+          <input type="number" step="0.01" name="it_outsourcing_budget" value="{budget_val}" style="width: 100%;">
+        </div>
+
+        <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+          <div>
+            <div class="label">OS Start Date</div>
+            <input type="date" name="os_start_date" value="{start_val}" style="width: 100%;">
+          </div>
+          <div>
+            <div class="label">OS End Date</div>
+            <input type="date" name="os_end_date" value="{end_val}" style="width: 100%;">
+          </div>
+        </div>
+
+        <div class="actions" style="margin-top: 20px;">
+          <button type="submit" class="btn-primary">Save Changes</button>
+          <a href="/projects" class="btn btn-secondary" style="margin-left: 8px;">Cancel</a>
+        </div>
+      </form>
+    </div>
+    """
+    return layout(f"Edit Project: {escape(project['short_name'])}", body)
+
+
+def handle_project_update_post(handler):
+    form = read_post_form(handler)
+    project_id_raw = (form.get("id", [""])[0] or "").strip()
+    
+    if not project_id_raw.isdigit():
+        send_html(handler, layout("Error", "<div class='card danger'>Invalid Project ID</div>"), status=400)
+        return
+
+    project_id = int(project_id_raw)
+    short_name = (form.get("short_name", [""])[0] or "").strip()
+    full_name = (form.get("full_name", [""])[0] or "").strip()
+    it_outsourcing_budget_raw = (form.get("it_outsourcing_budget", [""])[0] or "").strip()
+    os_start_date = (form.get("os_start_date", [""])[0] or "").strip() or None
+    os_end_date = (form.get("os_end_date", [""])[0] or "").strip() or None
+
+    if not short_name or not full_name:
+        send_html(handler, page_project_edit(project_id, "Short Name and Full Name are required."), status=400)
+        return
+
+    it_outsourcing_budget = None
+    if it_outsourcing_budget_raw:
+        try:
+            it_outsourcing_budget = float(it_outsourcing_budget_raw.replace(",", ""))
+        except ValueError:
+            pass
+
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE projects
+            SET short_name = ?,
+                full_name = ?,
+                it_outsourcing_budget = ?,
+                os_start_date = ?,
+                os_end_date = ?,
+                updated_at = ?
+            WHERE id = ?
+        """, (short_name, full_name, it_outsourcing_budget, os_start_date, os_end_date, now_iso(), project_id))
+        log_action(cur, "UPDATE_PROJECT", "projects", project_id, f"Cập nhật thông tin dự án '{short_name}': {full_name}")
+        conn.commit()
+    except Exception as e:
+        send_html(handler, page_project_edit(project_id, f"Database error: {str(e)}"), status=500)
+        return
+    finally:
+        conn.close()
+
+    redirect(handler, "/projects")

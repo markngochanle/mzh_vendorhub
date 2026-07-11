@@ -277,8 +277,15 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         annexes = conn.execute("SELECT a.id, a.contract_id, a.annex_name, c.seller_vendor_id FROM contract_annexes a JOIN contracts c ON c.id = a.contract_id WHERE a.is_active=1 AND a.deleted_at IS NULL").fetchall()
 
         # Build SQL where
-        where = ["(s.status IS NULL OR s.status <> 'inactive')"]
-        params = []
+        first_day_str = f"{month_val}-01"
+        last_day_str = f"{month_val}-{num_days:02d}"
+
+        where = [
+            "(s.status IS NULL OR s.status <> 'inactive')",
+            "(s.joining_date IS NULL OR s.joining_date = '' OR s.joining_date <= ?)",
+            "(s.tentative_leaving_date IS NULL OR s.tentative_leaving_date = '' OR s.tentative_leaving_date >= ?)"
+        ]
+        params = [last_day_str, first_day_str]
 
         if vendor_filter is not None:
             where.append("s.vendor_id = ?")

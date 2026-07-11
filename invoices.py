@@ -535,10 +535,13 @@ def page_invoices_list(filters: dict, *, return_to: str):
     year_raw = filters.get("year")
     month_raw = filters.get("month")
     day_raw = filters.get("day")
+    vendor_id_raw = filters.get("vendor_id")
+    project_id_raw = filters.get("project_id")
+    mgs_status_raw = filters.get("mgs_status")
     q_raw = filters.get("q")
 
     # Default year only when first open "/" with no params at all
-    if year_raw is None and month_raw is None and day_raw is None and q_raw is None:
+    if year_raw is None and month_raw is None and day_raw is None and q_raw is None and vendor_id_raw is None and project_id_raw is None and mgs_status_raw is None:
         today = date.today()
         year_raw = str(today.year)
         month_raw = ""
@@ -547,34 +550,89 @@ def page_invoices_list(filters: dict, *, return_to: str):
     year = parse_int_or_none(year_raw)
     month = parse_int_or_none(month_raw)
     day = parse_int_or_none(day_raw)
+    vendor_id = parse_int_or_none(vendor_id_raw)
+    project_id = parse_int_or_none(project_id_raw)
+    mgs_status = (mgs_status_raw or "").strip()
     q = (q_raw or "").strip()
-
-    where = []
-    params = []
-
-    if year is not None:
-        where.append("service_year = ?")
-        params.append(year)
-    if month is not None:
-        where.append("service_month = ?")
-        params.append(month)
-    if day is not None:
-        where.append("service_day = ?")
-        params.append(day)
-
-    if q:
-        where.append("""(
-            khhdon LIKE ? OR shdon LIKE ? OR seller_name LIKE ? OR seller_mst LIKE ?
-            OR buyer_name LIKE ? OR buyer_mst LIKE ? OR contract_no LIKE ?
-        )""")
-        like = f"%{q}%"
-        params.extend([like, like, like, like, like, like, like])
-
-    where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
     conn = db_connect()
     try:
         buyer_vendor_set, seller_vendor_set = build_vendor_sets(conn)
+
+        # Load active vendor sellers (purchasing=0) for filter dropdown
+        vendors_list = conn.execute("""
+            SELECT id, company_name, company_name_vi, tax_id
+            FROM vendors
+            WHERE is_active = 1 AND purchasing = 0
+            ORDER BY company_name ASC, company_name_vi ASC
+        """).fetchall()
+
+        # Load projects for filter dropdown
+        projects_list = conn.execute("""
+            SELECT id, short_name, full_name, is_active
+            FROM projects
+            ORDER BY is_active DESC, short_name ASC
+        """).fetchall()
+
+        where = []
+        params = []
+
+        if year is not None:
+            where.append("service_year = ?")
+            params.append(year)
+        if month is not None:
+            where.append("service_month = ?")
+            params.append(month)
+        if day is not None:
+            where.append("service_day = ?")
+            params.append(day)
+
+        if vendor_id is not None:
+            v_row = conn.execute("SELECT tax_id FROM vendors WHERE id = ?", (vendor_id,)).fetchone()
+            if v_row and v_row["tax_id"]:
+                where.append("seller_mst = ?")
+                params.append(v_row["tax_id"].strip())
+            else:
+                where.append("1 = 0")
+
+        if project_id is not None:
+            contract_nos_rows = conn.execute("""
+                SELECT DISTINCT c.framework_no, a.annex_name
+                FROM contract_staff s
+                JOIN project_staff_assignments psa ON psa.staff_id = s.id
+                JOIN contracts c ON c.id = s.contract_id
+                LEFT JOIN contract_annexes a ON a.id = s.annex_id
+                WHERE psa.project_id = ?
+            """, (project_id,)).fetchall()
+            
+            nos = set()
+            for nr in contract_nos_rows:
+                if nr["framework_no"]:
+                    nos.add(nr["framework_no"].strip().lower())
+                if nr["annex_name"]:
+                    nos.add(nr["annex_name"].strip().lower())
+                    
+            if nos:
+                placeholders = ",".join("?" for _ in nos)
+                where.append(f"LOWER(TRIM(contract_no)) IN ({placeholders})")
+                params.extend(list(nos))
+            else:
+                where.append("1 = 0")
+
+        if mgs_status == "sent":
+            where.append("sent_to_mgs = 1")
+        elif mgs_status == "unsent":
+            where.append("sent_to_mgs = 0")
+
+        if q:
+            where.append("""(
+                khhdon LIKE ? OR shdon LIKE ? OR seller_name LIKE ? OR seller_mst LIKE ?
+                OR buyer_name LIKE ? OR buyer_mst LIKE ? OR contract_no LIKE ?
+            )""")
+            like = f"%{q}%"
+            params.extend([like, like, like, like, like, like, like])
+
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
         rows = conn.execute(f"""
             SELECT
@@ -588,7 +646,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
               sent_to_mgs, force_match
             FROM invoices
             {where_sql}
-            ORDER BY nlap DESC, id DESC
+            ORDER BY sent_to_mgs ASC, nlap DESC, id DESC
             LIMIT ?
         """, params + [LIST_LIMIT]).fetchall()
 
@@ -738,29 +796,65 @@ def page_invoices_list(filters: dict, *, return_to: str):
     finally:
         conn.close()
 
+    vendor_opts = ['<option value="">-- all companies --</option>']
+    for v in vendors_list:
+        v_name = v["company_name"] or v["company_name_vi"]
+        sel = "selected" if vendor_id == v["id"] else ""
+        vendor_opts.append(f'<option value="{v["id"]}" {sel}>{escape(v_name)}</option>')
+
+    project_opts = ['<option value="">-- all projects --</option>']
+    for p in projects_list:
+        sel = "selected" if project_id == p["id"] else ""
+        closed_suffix = " (Closed)" if int(p["is_active"] or 0) == 0 else ""
+        project_opts.append(f'<option value="{p["id"]}" {sel}>{escape(p["short_name"])}{closed_suffix}</option>')
+
+    mgs_opts = [
+        f'<option value="" {"selected" if not mgs_status else ""}>-- all MGS status --</option>',
+        f'<option value="unsent" {"selected" if mgs_status == "unsent" else ""}>Not Sent to MGS</option>',
+        f'<option value="sent" {"selected" if mgs_status == "sent" else ""}>Sent to MGS</option>'
+    ]
+
     filter_html = f"""
-    <form class="filters" method="GET" action="/">
+    <form class="filters" method="GET" action="/" style="gap: 12px; flex-wrap: wrap;">
       <div>
         <div class="label">Service Year</div>
-        <input type="number" name="year" placeholder="YYYY" value="{escape(val(year))}">
+        <input type="number" name="year" placeholder="YYYY" value="{escape(val(year))}" style="width: 80px;">
       </div>
       <div>
         <div class="label">Month</div>
-        <input type="number" name="month" placeholder="MM" value="{escape(val(month))}">
+        <input type="number" name="month" placeholder="MM" value="{escape(val(month))}" style="width: 60px;">
       </div>
       <div>
         <div class="label">Day</div>
-        <input type="number" name="day" placeholder="DD" value="{escape(val(day))}">
+        <input type="number" name="day" placeholder="DD" value="{escape(val(day))}" style="width: 60px;">
       </div>
-      <div style="min-width:320px;">
+      <div>
+        <div class="label">Company</div>
+        <select name="vendor_id" style="min-width: 150px; height: 32px; font-size: 13px;">
+          {"".join(vendor_opts)}
+        </select>
+      </div>
+      <div>
+        <div class="label">Project</div>
+        <select name="project_id" style="min-width: 150px; height: 32px; font-size: 13px;">
+          {"".join(project_opts)}
+        </select>
+      </div>
+      <div>
+        <div class="label">MGS Status</div>
+        <select name="mgs_status" style="min-width: 130px; height: 32px; font-size: 13px;">
+          {"".join(mgs_opts)}
+        </select>
+      </div>
+      <div style="flex-grow: 1; min-width: 200px;">
         <div class="label">Search (Series/Invoice No/Tax ID/Name/Contract)</div>
         <input type="text" name="q" placeholder="Enter keywords..." value="{escape(q)}" style="width:100%;">
       </div>
-      <div class="actions">
+      <div class="actions" style="margin-top: 18px; width: 100%; display: flex; align-items: center; justify-content: flex-start; gap: 10px;">
         <button type="submit">Filter</button>
         <a class="muted" href="/">This Year</a>
-        <a class="muted" href="/?year=&month=&day=&q=">Show All</a>
-        <a href="/invoice/new"><button class="btn-secondary" type="button">+ Import Invoice</button></a>
+        <a class="muted" href="/?year=&month=&day=&q=&vendor_id=&project_id=&mgs_status=">Show All</a>
+        <a href="/invoice/new" style="margin-left: auto;"><button class="btn-secondary" type="button">+ Import Invoice</button></a>
       </div>
     </form>
     """

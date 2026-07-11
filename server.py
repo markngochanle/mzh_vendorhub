@@ -98,11 +98,14 @@ from projects import (
     page_projects_list,
     handle_project_create_post,
     handle_project_delete_post,
+    handle_project_restore_post,
     page_projects_assign,
     handle_project_assign_create_post,
     handle_project_assign_delete_post,
     handle_available_staff_ajax,
     handle_project_toggle_assignment_ajax,
+    page_project_edit,
+    handle_project_update_post,
 )
 
 
@@ -131,6 +134,9 @@ class Handler(BaseHTTPRequestHandler):
                     "month": qs["month"][0] if "month" in qs else None,
                     "day": qs["day"][0] if "day" in qs else None,
                     "q": qs["q"][0] if "q" in qs else None,
+                    "vendor_id": qs["vendor_id"][0] if "vendor_id" in qs else None,
+                    "project_id": qs["project_id"][0] if "project_id" in qs else None,
+                    "mgs_status": qs["mgs_status"][0] if "mgs_status" in qs else None,
                 }
                 send_html(self, page_invoices_list(filters, return_to=self.path))
                 return
@@ -348,6 +354,14 @@ class Handler(BaseHTTPRequestHandler):
                 send_html(self, page_projects_assign(selected_month=m, selected_project_id=pid, selected_vendor_id=vid, error_msg=err, success_msg=succ))
                 return
 
+            if path == "/project/edit":
+                pid_raw = qs.get("id", [""])[0]
+                if not pid_raw.isdigit():
+                    send_html(self, layout("Error", "<div class='card danger'>Invalid Project ID</div>"), status=400)
+                    return
+                send_html(self, page_project_edit(int(pid_raw)))
+                return
+
             if path == "/api/projects/available-staff":
                 handle_available_staff_ajax(self)
                 return
@@ -489,6 +503,14 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/project/delete":
                 handle_project_delete_post(self)
+                return
+
+            if path == "/project/restore":
+                handle_project_restore_post(self)
+                return
+
+            if path == "/project/update":
+                handle_project_update_post(self)
                 return
 
             if path == "/project/assign/create":

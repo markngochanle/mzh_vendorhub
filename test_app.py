@@ -644,6 +644,8 @@ class TestAttendance(BaseTestCase):
     def test_page_attendance_totals(self):
         # 1. Thêm dữ liệu chấm công cho Nguyễn Văn An (ID: 1)
         cur = self.conn.cursor()
+        # Extend leaving date so he is active in June 2026
+        cur.execute("UPDATE contract_staff SET tentative_leaving_date = '2026-06-30' WHERE id = 1")
         cur.execute("""
             INSERT INTO attendance (staff_id, date, work_hours, ot_hours)
             VALUES (1, '2026-06-01', 8.0, 2.0)
@@ -1182,6 +1184,11 @@ class TestDashboard(BaseTestCase):
 # ==================== 11. Test Annex Filters ====================
 class TestAnnexFilters(BaseTestCase):
     def test_annex_filter_handling(self):
+        # Extend leaving date so Nguyễn Văn An is active in June 2026 for attendance tests
+        cur = self.conn.cursor()
+        cur.execute("UPDATE contract_staff SET tentative_leaving_date = '2026-06-30' WHERE id = ?", (self.staff_id,))
+        self.conn.commit()
+
         # 1. Test GET /staff with annex_id
         handler = StubHandler(f"/staff?annex_id={self.annex_id}", "GET")
         handler.do_GET()

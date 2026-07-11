@@ -129,20 +129,20 @@ def page_dashboard(handler):
         # Sort expiring contracts/annexes by days_left
         expiring_contracts.sort(key=lambda x: x["days_left"])
 
-        # 4. Project Budget Utilization data
+        # 4. Project Budget Utilization data (include closed projects for complete financial review)
         project_budget_data = conn.execute("""
             SELECT 
                 p.id AS project_id,
                 p.short_name,
                 p.full_name,
                 p.it_outsourcing_budget,
+                p.is_active,
                 COALESCE(SUM(mas.total_amount), 0) AS total_paid
             FROM projects p
             LEFT JOIN project_staff_assignments psa ON psa.project_id = p.id
             LEFT JOIN monthly_attendance_summary mas ON mas.staff_id = psa.staff_id AND mas.month = psa.month
-            WHERE p.is_active = 1
             GROUP BY p.id
-            ORDER BY p.short_name ASC
+            ORDER BY p.is_active DESC, p.short_name ASC
         """).fetchall()
 
         # 5. Vendor Cost Share data
@@ -211,6 +211,8 @@ def page_dashboard(handler):
     for pr in project_budget_data:
         budget = pr["it_outsourcing_budget"]
         paid = pr["total_paid"]
+        is_proj_active = int(pr["is_active"] or 0) == 1
+        display_short_name = pr["short_name"] + " (Closed)" if not is_proj_active else pr["short_name"]
         
         budget_txt = f"{fmt_money(budget, 'VND')}" if budget is not None else "N/A"
         paid_txt = f"{fmt_money(paid, 'VND')}"
@@ -221,7 +223,7 @@ def page_dashboard(handler):
             usage_pct = (paid / budget * 100) if budget > 0 else 0
             
             # Save for Chart
-            chart_proj_labels.append(pr["short_name"])
+            chart_proj_labels.append(display_short_name)
             chart_proj_budget.append(budget)
             chart_proj_paid.append(paid)
         else:
@@ -250,7 +252,7 @@ def page_dashboard(handler):
         project_rows_html.append(f"""
         <tr style="border-bottom: 1px solid var(--border);">
           <td style="padding: 10px 8px; border: none; background: transparent;">
-            <strong>{escape(pr['short_name'])}</strong>
+            <strong>{escape(display_short_name)}</strong>
             <div class="muted" style="font-size: 11px; margin-top: 1px;">{escape(pr['full_name'])}</div>
           </td>
           <td style="padding: 10px 8px; text-align: right; border: none; background: transparent; font-size: 13px; font-weight: 500;">{budget_txt}</td>

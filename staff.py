@@ -145,7 +145,7 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
         where.append("LOWER(TRIM(IFNULL(s.status,''))) = 'inactive'")
 
     if q:
-        where.append("(s.full_name_vi LIKE ? OR s.position LIKE ? OR s.project_name LIKE ?)")
+        where.append("(s.full_name_vi LIKE ? OR s.position LIKE ? OR p.short_name LIKE ?)")
         like = f"%{q}%"
         params.extend([like, like, like])
 
@@ -166,17 +166,22 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
               c.framework_no,
               a.annex_name,
               p.id AS assigned_project_id,
-              p.short_name AS assigned_project_name
+              p.short_name AS assigned_project_name,
+              latest_psa.max_month AS assigned_project_month
             FROM contract_staff s
             JOIN vendors v ON v.id = s.vendor_id
             JOIN contracts c ON c.id = s.contract_id
             LEFT JOIN contract_annexes a ON a.id = s.annex_id
-            LEFT JOIN project_staff_assignments psa ON psa.staff_id = s.id AND psa.month = ?
-            LEFT JOIN projects p ON p.id = psa.project_id
+            LEFT JOIN (
+                SELECT staff_id, project_id, MAX(month) AS max_month
+                FROM project_staff_assignments
+                GROUP BY staff_id
+            ) latest_psa ON latest_psa.staff_id = s.id
+            LEFT JOIN projects p ON p.id = latest_psa.project_id
             {where_sql}
             ORDER BY s.id DESC
             LIMIT ?
-        """, [current_month] + params + [LIST_LIMIT]).fetchall()
+        """, params + [LIST_LIMIT]).fetchall()
     finally:
         conn.close()
 
@@ -338,12 +343,17 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
 
         # Build Project column display with active assignment links
         if r["assigned_project_id"]:
-            project_td = f"""<a href="/projects/assign?project_id={r['assigned_project_id']}&vendor_id={r['vendor_id']}" style="font-weight: 600; color: var(--primary);">{escape(r['assigned_project_name'])}</a>"""
+            if r["assigned_project_month"] >= current_month:
+                project_td = f"""<a href="/projects/assign?project_id={r['assigned_project_id']}&vendor_id={r['vendor_id']}" style="font-weight: 600; color: var(--primary);">{escape(r['assigned_project_name'])}</a>"""
+            else:
+                project_td = f"""
+                <a href="/projects/assign?project_id={r['assigned_project_id']}&vendor_id={r['vendor_id']}" style="font-weight: 600; color: var(--text-muted);">{escape(r['assigned_project_name'])}</a>
+                <div class="muted" style="font-size: 10px; margin-top: 2px;">(Last: {escape(r['assigned_project_month'])})</div>
+                """
             assign_url = f"/projects/assign?project_id={r['assigned_project_id']}&vendor_id={r['vendor_id']}"
         else:
-            fallback_proj = r["project_name"] or ""
             project_td = f"""
-            <span class="muted">{escape(fallback_proj)}</span>
+            <span class="muted" style="font-size:11px;">(Not assigned)</span>
             <div style="margin-top: 2px;">
               <a href="/projects/assign?vendor_id={r['vendor_id']}" class="btn" style="font-size: 10px; padding: 2px 6px;">Assign Project</a>
             </div>
@@ -394,6 +404,65 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
         vendors = load_vendors_for_staff(conn)
         contracts = load_contracts(conn)
         annexes = load_annexes(conn)
+        
+        matrix_projects = []
+        active_months = []
+        month_to_project = {}
+        
+        if mode == "edit" and staff_row:
+            # 1. Calculate active months range
+            joining_date_str = staff_row["joining_date"]
+            leaving_date_str = staff_row["tentative_leaving_date"]
+            
+            if joining_date_str:
+                from datetime import datetime, timedelta
+                try:
+                    start_dt = datetime.strptime(joining_date_str[:7], "%Y-%m")
+                except Exception:
+                    start_dt = None
+                
+                if start_dt:
+                    if leaving_date_str:
+                        try:
+                            end_dt = datetime.strptime(leaving_date_str[:7], "%Y-%m")
+                        except Exception:
+                            end_dt = start_dt + timedelta(days=365)
+                    else:
+                        now = datetime.now()
+                        end_dt = datetime(now.year, now.month, 1) + timedelta(days=90)
+                        if end_dt < start_dt:
+                            end_dt = start_dt + timedelta(days=180)
+                    
+                    # Generate list of months (max 24)
+                    curr = datetime(start_dt.year, start_dt.month, 1)
+                    limit = datetime(end_dt.year, end_dt.month, 1)
+                    count = 0
+                    while curr <= limit and count < 24:
+                        active_months.append(curr.strftime("%Y-%m"))
+                        if curr.month == 12:
+                            curr = datetime(curr.year + 1, 1, 1)
+                        else:
+                            curr = datetime(curr.year, curr.month + 1, 1)
+                        count += 1
+            
+            # 2. Get ONLY projects (both active and closed) that this staff is or was assigned to
+            assigned_projects_rows = conn.execute("""
+                SELECT DISTINCT p.id, p.short_name, p.full_name, p.is_active
+                FROM project_staff_assignments a
+                JOIN projects p ON p.id = a.project_id
+                WHERE a.staff_id = ?
+                ORDER BY p.is_active DESC, p.short_name ASC
+            """, (staff_row["id"],)).fetchall()
+            matrix_projects = [dict(p) for p in assigned_projects_rows]
+            
+            # 3. Get all assignments of this staff
+            assign_rows = conn.execute("""
+                SELECT a.project_id, a.month, p.short_name AS project_name
+                FROM project_staff_assignments a
+                JOIN projects p ON p.id = a.project_id
+                WHERE a.staff_id = ?
+            """, (staff_row["id"],)).fetchall()
+            month_to_project = {r["month"]: (r["project_id"], r["project_name"]) for r in assign_rows}
     finally:
         conn.close()
 
@@ -451,6 +520,97 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
       <option value="8:30 - 17:30" {"selected" if work_shift_val=="8:30 - 17:30" else ""}>8:30 - 17:30</option>
     """
 
+    assigned_projects_html = ""
+    if mode == "edit" and active_months:
+        th_months = "".join(f'<th style="text-align:center; font-size:12px; width:90px; padding:10px 8px; color:var(--text-muted);">{m}</th>' for m in active_months)
+        
+        trs = []
+        for p in matrix_projects:
+            p_id = p["id"]
+            is_p_active = int(p["is_active"] or 0) == 1
+            
+            tds = []
+            for m in active_months:
+                assigned_info = month_to_project.get(m)
+                
+                if not is_p_active:
+                    # Closed Project
+                    if assigned_info and assigned_info[0] == p_id:
+                        tds.append('<td style="text-align:center; background:#f1f5f9; color:#475569; font-size:14px; font-weight:bold;">✓</td>')
+                    else:
+                        tds.append('<td style="text-align:center; background:#fafafa;"></td>')
+                else:
+                    # Active Project
+                    if assigned_info:
+                        assigned_pid, assigned_pname = assigned_info
+                        if assigned_pid == p_id:
+                            tds.append(f"""
+                            <td style="text-align: center; background: #ecfdf5; border-color: #bbf7d0;">
+                              <input type="checkbox" 
+                                     class="assign-matrix-cb" 
+                                     data-staff-id="{staff_row['id']}" 
+                                     data-project-id="{p_id}" 
+                                     data-month="{m}" 
+                                     checked
+                                     style="width: 18px; height: 18px; cursor: pointer; margin: 0;">
+                            </td>
+                            """)
+                        else:
+                            tds.append(f"""
+                            <td style="text-align: center; background: #fff1f2; color: #b91c1c; font-size: 11px; font-weight: 500;" title="Assigned to {escape(assigned_pname)}">
+                              {escape(assigned_pname)}
+                            </td>
+                            """)
+                    else:
+                        tds.append(f"""
+                        <td style="text-align: center;">
+                          <input type="checkbox" 
+                                 class="assign-matrix-cb" 
+                                 data-staff-id="{staff_row['id']}" 
+                                 data-project-id="{p_id}" 
+                                 data-month="{m}" 
+                                 style="width: 18px; height: 18px; cursor: pointer; margin: 0;">
+                        </td>
+                        """)
+            
+            p_label = f"{escape(p['short_name'])}"
+            if not is_p_active:
+                p_label += " <span class='muted' style='font-size:11px;'>(Closed)</span>"
+                
+            tds_str = "".join(tds)
+            trs.append(f"""
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:10px 8px; font-weight:600; color:var(--primary);">{p_label}</td>
+              <td style="padding:10px 8px;"><div class="muted" style="font-size:11.5px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{escape(p['full_name'])}</div></td>
+              {tds_str}
+            </tr>
+            """)
+            
+        assigned_projects_html = f"""
+        <div class="card" style="margin-top: 24px; padding:0; overflow-x:auto;">
+          <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: #f8fafc;">
+            <div>
+              <h3 style="margin: 0; color: var(--text-primary); font-size:16px;">Project Assignments Matrix</h3>
+              <p style="margin: 4px 0 0 0; font-size: 12px; color: var(--text-muted);">
+                Quản lý phân bổ dự án hàng tháng của nhân viên. Mỗi nhân viên chỉ được gán tối đa 1 dự án/tháng.
+              </p>
+            </div>
+          </div>
+          <table style="width:100%; border-collapse:collapse; margin:0; border:none; min-width:600px;">
+            <thead>
+              <tr style="background:#f8fafc; border-bottom:1px solid var(--border);">
+                <th style="text-align:left; padding:10px 8px; font-size:12px; color:var(--text-muted); width:120px;">Short Name</th>
+                <th style="text-align:left; padding:10px 8px; font-size:12px; color:var(--text-muted); width:180px;">Full Name</th>
+                {th_months}
+              </tr>
+            </thead>
+            <tbody>
+              {"".join(trs) if trs else '<tr><td colspan="3" style="text-align:center; padding:20px; color:var(--text-muted);">No projects configured.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+        """
+
     body = f"""
     {error_html}
 
@@ -476,10 +636,7 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
             </select>
           </div>
 
-          <div>
-            <div class="label">Project (free text)</div>
-            <input type="text" name="project_name" value="{escape(gv("project_name"))}" style="width:100%;">
-          </div>
+
 
           <div>
             <div class="label">Position</div>
@@ -562,6 +719,7 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
         </div>
       </form>
     </div>
+    {assigned_projects_html}
 
     <script>
       (function() {{
@@ -617,6 +775,52 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
         vendorSel.addEventListener('change', filterContract);
         contractSel.addEventListener('change', filterAnnex);
         filterContract();
+
+        // Attach change listener to staff edit page matrix checkboxes
+        document.querySelectorAll('.assign-matrix-cb').forEach(cb => {{
+          cb.addEventListener('change', function() {{
+            const staffId = this.getAttribute('data-staff-id');
+            const projectId = this.getAttribute('data-project-id');
+            const month = this.getAttribute('data-month');
+            const assign = this.checked ? 1 : 0;
+            
+            const originalDisabled = this.disabled;
+            this.disabled = true;
+            
+            const cell = this.closest('td');
+            const originalBackground = cell.style.background;
+            
+            cell.style.background = '#f1f5f9';
+            
+            fetch('/api/projects/toggle-assignment', {{
+              method: 'POST',
+              headers: {{
+                'Content-Type': 'application/x-www-form-urlencoded',
+              }},
+              body: 'project_id=' + encodeURIComponent(projectId) + 
+                    '&staff_id=' + encodeURIComponent(staffId) + 
+                    '&month=' + encodeURIComponent(month) + 
+                    '&assign=' + encodeURIComponent(assign)
+            }})
+            .then(res => res.json())
+            .then(data => {{
+              this.disabled = originalDisabled;
+              if (data.status === 'ok') {{
+                window.location.reload();
+              }} else {{
+                alert(data.message || 'Failed to update assignment.');
+                this.checked = !this.checked; // revert
+                cell.style.background = originalBackground;
+              }}
+            }})
+            .catch(err => {{
+              this.disabled = originalDisabled;
+              alert('Connection error: ' + err);
+              this.checked = !this.checked; // revert
+              cell.style.background = originalBackground;
+            }});
+          }});
+        }});
       }})();
     </script>
     """
@@ -626,7 +830,6 @@ def handle_staff_create_post(handler):
 
     full_name_vi = (form.get("full_name_vi", [""])[0] or "").strip()
     vendor_id = (form.get("vendor_id", [""])[0] or "").strip()
-    project_name = (form.get("project_name", [""])[0] or "").strip() or None
     position = (form.get("position", [""])[0] or "").strip() or None
 
     contract_id = (form.get("contract_id", [""])[0] or "").strip()
@@ -707,7 +910,7 @@ def handle_staff_create_post(handler):
 
         cur.execute("""
             INSERT INTO contract_staff (
-                full_name_vi, vendor_id, project_name, position,
+                full_name_vi, vendor_id, position,
                 contract_id, annex_id,
                 joining_date, tentative_leaving_date,
                 monthly_rate, manday_rate,
@@ -715,9 +918,9 @@ def handle_staff_create_post(handler):
                 ot, status, work_shift,
                 created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            full_name_vi, int(vendor_id), project_name, position,
+            full_name_vi, int(vendor_id), position,
             int(contract_id), annex_id_int,
             joining_date, leaving_date,
             monthly_rate, manday_rate,
@@ -746,7 +949,6 @@ def handle_staff_update_post(handler):
 
     full_name_vi = (form.get("full_name_vi", [""])[0] or "").strip()
     vendor_id = (form.get("vendor_id", [""])[0] or "").strip()
-    project_name = (form.get("project_name", [""])[0] or "").strip() or None
     position = (form.get("position", [""])[0] or "").strip() or None
 
     contract_id = (form.get("contract_id", [""])[0] or "").strip()
@@ -823,7 +1025,6 @@ def handle_staff_update_post(handler):
             UPDATE contract_staff
             SET full_name_vi=?,
                 vendor_id=?,
-                project_name=?,
                 position=?,
                 contract_id=?,
                 annex_id=?,
@@ -841,7 +1042,6 @@ def handle_staff_update_post(handler):
         """, (
             full_name_vi,
             int(vendor_id),
-            project_name,
             position,
             int(contract_id),
             annex_id_int,
@@ -868,13 +1068,23 @@ def handle_staff_update_post(handler):
 def page_staff_shifts():
     conn = db_connect()
     try:
+        current_month = datetime.now().strftime("%Y-%m")
         rows = conn.execute("""
-            SELECT s.id, s.full_name_vi, s.project_name, s.position, s.ot, s.work_shift,
+            SELECT s.id, s.full_name_vi, s.position, s.ot, s.work_shift,
                    COALESCE(v.company_name, v.company_name_vi) AS vendor_name,
-                   c.framework_no AS contract_no
+                   c.framework_no AS contract_no,
+                   p.short_name AS assigned_project_name,
+                   latest_psa.max_month AS assigned_project_month,
+                   p.id AS assigned_project_id
             FROM contract_staff s
             JOIN vendors v ON v.id=s.vendor_id
             JOIN contracts c ON c.id=s.contract_id
+            LEFT JOIN (
+                SELECT staff_id, project_id, MAX(month) AS max_month
+                FROM project_staff_assignments
+                GROUP BY staff_id
+            ) latest_psa ON latest_psa.staff_id = s.id
+            LEFT JOIN projects p ON p.id = latest_psa.project_id
             WHERE s.status IS NULL OR s.status <> 'inactive'
             ORDER BY s.id DESC
         """).fetchall()
@@ -904,7 +1114,10 @@ def page_staff_shifts():
           <td>{idx}</td>
           <td><b>{escape(r["full_name_vi"])}</b></td>
           <td>{escape(r["vendor_name"] or "")}</td>
-          <td>{escape(r["project_name"] or "")} <div class="muted">{escape(r["position"] or "")}</div></td>
+          <td>
+            {f'<b style="color: var(--primary);">{escape(r["assigned_project_name"])}</b>' if r["assigned_project_id"] and r["assigned_project_month"] >= current_month else f'<span style="font-weight: 600; color: var(--text-muted);">{escape(r["assigned_project_name"])}</span><span class="muted" style="font-size: 10px; display: block; margin-top: 2px;">(Last: {escape(r["assigned_project_month"])})</span>' if r["assigned_project_id"] else '<span class="muted" style="font-size: 11px;">(Not assigned)</span>'}
+            <div class="muted" style="margin-top:2px;">{escape(r["position"] or "")}</div>
+          </td>
           <td>{ot_label}</td>
           <td class="{shift_class}">{shift_display}</td>
           <td>
