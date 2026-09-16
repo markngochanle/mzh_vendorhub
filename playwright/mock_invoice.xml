@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<HDon>
+  <DLHDon>
+    <TTChung>
+      <KHHDon>1C26TUU</KHHDon>
+      <SHDon>0009999</SHDon>
+      <NLap>2026-01-31</NLap>
+      <DVTTe>VND</DVTTe>
+    </TTChung>
+    <NDHDon>
+      <NMua>
+        <Ten>NGÂN HÀNG MIZUHO</Ten>
+        <MST>0100234567</MST>
+      </NMua>
+      <NBan>
+        <Ten>FPT SOFTWARE</Ten>
+        <MST>0102135934</MST>
+      </NBan>
+      <TToan>
+        <TgTCThue>1000000000.0</TgTCThue>
+        <TgTThue>100000000.0</TgTThue>
+        <TgTTTBSo>1100000000.0</TgTTTBSo>
+      </TToan>
+    </NDHDon>
+  </DLHDon>
+</HDon>

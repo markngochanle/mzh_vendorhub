@@ -46,6 +46,8 @@ from invoices import (
 
 from dashboard import page_dashboard
 from audit import page_audit_logs
+from playwright_runner import page_playwright_runner, handle_run_tests_post, handle_get_test_log
+from unittest_runner import page_unittest_runner, handle_run_unittests_post, handle_get_unittest_log
 
 from vendors import (
     page_vendors_list,
@@ -71,6 +73,9 @@ from contracts import (
     page_contract_references,
     handle_save_reference_ajax,
     handle_toggle_reference_lock_ajax,
+    page_contract_assign_staff,
+    handle_contract_assign_staff_save_post,
+    handle_contract_remove_staff_link_post,
 )
 
 from staff import (
@@ -106,6 +111,7 @@ from projects import (
     handle_project_toggle_assignment_ajax,
     page_project_edit,
     handle_project_update_post,
+    handle_projects_assign_export_csv,
 )
 
 
@@ -126,6 +132,22 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/audit-logs":
                 page_audit_logs(self)
+                return
+
+            if path == "/playwright" or path == "/tests":
+                page_playwright_runner(self)
+                return
+
+            if path == "/api/tests/log":
+                handle_get_test_log(self)
+                return
+
+            if path == "/unit-tests":
+                page_unittest_runner(self)
+                return
+
+            if path == "/api/unit-tests/log":
+                handle_get_unittest_log(self)
                 return
 
             if path == "/":
@@ -211,7 +233,12 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/contracts/references":
-                send_html(self, page_contract_references())
+                vendor_id = qs.get("vendor_id", [""])[0]
+                contract_id = qs.get("contract_id", [""])[0]
+                annex_id = qs.get("annex_id", [""])[0]
+                month = qs.get("month", [""])[0]
+                sent_mgs = qs.get("sent_mgs", [""])[0]
+                send_html(self, page_contract_references(vendor_id=vendor_id, contract_id=contract_id, annex_id=annex_id, month=month, sent_mgs=sent_mgs))
                 return
 
             if path == "/contract/new":
@@ -243,6 +270,33 @@ class Handler(BaseHTTPRequestHandler):
                     return
 
                 send_html(self, page_contract_form("edit", c, annexes, None))
+                return
+
+            if path == "/contract/assign-staff":
+                cid = qs.get("contract_id", [""])[0]
+                aid = qs.get("annex_id", [""])[0]
+                if not cid.isdigit():
+                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai contract id</div>"), status=400)
+                    return
+                annex_id = int(aid) if aid.isdigit() else None
+                send_html(self, page_contract_assign_staff(contract_id=int(cid), annex_id=annex_id))
+                return
+
+            if path == "/contract/edit-staff-link":
+                lid = qs.get("id", [""])[0]
+                if not lid.isdigit():
+                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai link id</div>"), status=400)
+                    return
+                # Find contract_id and annex_id for this link
+                conn = db_connect()
+                try:
+                    link = conn.execute("SELECT contract_id, annex_id FROM contract_staff_links WHERE id = ?", (int(lid),)).fetchone()
+                finally:
+                    conn.close()
+                if not link:
+                    send_html(self, layout("Không tìm thấy", "<div class='card'>Không tìm thấy allocation</div>"), status=404)
+                    return
+                send_html(self, page_contract_assign_staff(contract_id=link["contract_id"], annex_id=link["annex_id"], link_id=int(lid)))
                 return
 
             if path == "/annex/new":
@@ -317,10 +371,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/attendance/monthly":
                 filters = {
-                    "month": qs.get("month", [""])[0],
-                    "vendor_id": qs.get("vendor_id", [""])[0],
-                    "contract_id": qs.get("contract_id", [""])[0],
-                    "annex_id": qs.get("annex_id", [""])[0],
+                    "month": qs.get("month", []),
+                    "vendor_id": qs.get("vendor_id", []),
+                    "contract_id": qs.get("contract_id", []),
+                    "annex_id": qs.get("annex_id", []),
                     "q": qs.get("q", [""])[0],
                 }
                 send_html(self, page_monthly_attendance(filters))
@@ -352,6 +406,10 @@ class Handler(BaseHTTPRequestHandler):
                 err = qs.get("error", [None])[0]
                 succ = qs.get("success", [None])[0]
                 send_html(self, page_projects_assign(selected_month=m, selected_project_id=pid, selected_vendor_id=vid, error_msg=err, success_msg=succ))
+                return
+
+            if path == "/projects/assign/export":
+                handle_projects_assign_export_csv(self)
                 return
 
             if path == "/project/edit":
@@ -433,6 +491,14 @@ class Handler(BaseHTTPRequestHandler):
                 handle_toggle_mgs_sent_ajax(self)
                 return
 
+            if path == "/api/tests/run":
+                handle_run_tests_post(self)
+                return
+
+            if path == "/api/unit-tests/run":
+                handle_run_unittests_post(self)
+                return
+
             if path == "/invoice/force-match":
                 handle_force_match_post(self)
                 return
@@ -477,6 +543,14 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/contracts/toggle-reference-lock":
                 handle_toggle_reference_lock_ajax(self)
+                return
+
+            if path == "/contract/assign-staff/save":
+                handle_contract_assign_staff_save_post(self)
+                return
+
+            if path == "/contract/remove-staff-link":
+                handle_contract_remove_staff_link_post(self)
                 return
 
             # ---------------- Annexes ----------------
@@ -575,6 +649,7 @@ def main():
     logger.info(f"Vendors:   http://{HOST}:{PORT}/vendors")
     logger.info(f"Contracts: http://{HOST}:{PORT}/contracts")
     logger.info(f"Staff:     http://{HOST}:{PORT}/staff")
+    logger.info(f"Unit Tests: http://{HOST}:{PORT}/unit-tests")
 
     httpd = HTTPServer((HOST, PORT), Handler)
     httpd.serve_forever()

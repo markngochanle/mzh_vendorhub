@@ -3,7 +3,7 @@
 from html import escape
 from common import (
     db_connect, layout, LIST_LIMIT, now_iso,
-    read_post_form, redirect, send_html, safe_return_to, log_action
+    read_post_form, redirect, send_html, safe_return_to, log_action, to_float_or_none
 )
 
 def vendor_label(row):
@@ -115,7 +115,7 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
         if int(r["is_active"]) == 1:
             actions += f"""
               <form class="inline" method="POST" action="/contract/delete"
-                    onsubmit="return confirm('Xóa logic hợp đồng #{r["id"]}?');"
+                    onsubmit="return confirm('Deactivate framework contract #{r["id"]}?');"
                     style="margin:0; display:inline-block;">
                 <input type="hidden" name="id" value="{r["id"]}">
                 <input type="hidden" name="return_to" value="{escape(return_to)}">
@@ -125,7 +125,7 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
         else:
             actions += f"""
               <form class="inline" method="POST" action="/contract/restore"
-                    onsubmit="return confirm('Restore hợp đồng #{r["id"]}?');"
+                    onsubmit="return confirm('Restore framework contract #{r["id"]}?');"
                     style="margin:0; display:inline-block;">
                 <input type="hidden" name="id" value="{r["id"]}">
                 <input type="hidden" name="return_to" value="{escape(return_to)}">
@@ -199,6 +199,28 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
 
     placeholder_val = f"Default (Annexes sum): {int(round(annex_sum))}" if annex_sum > 0 else "e.g. 5000000000"
 
+    allocated_staff = []
+    has_active_annex = False
+    if mode == "edit" and contract_row:
+        has_active_annex = any(int(a["is_active"]) == 1 for a in annex_rows)
+        conn = db_connect()
+        try:
+            allocated_staff = conn.execute("""
+                SELECT l.id AS link_id, l.staff_id, l.annex_id, l.monthly_rate, l.manday_rate, l.joining_date, l.tentative_leaving_date,
+                       s.full_name_vi, s.position
+                FROM contract_staff_links l
+                JOIN contract_staff s ON s.id = l.staff_id
+                WHERE l.contract_id = ?
+            """, (contract_row["id"],)).fetchall()
+        finally:
+            conn.close()
+
+    staff_for_contract = [s for s in allocated_staff if s["annex_id"] is None]
+    staff_by_annex = {}
+    for s in allocated_staff:
+        if s["annex_id"] is not None:
+            staff_by_annex.setdefault(s["annex_id"], []).append(s)
+
     def gv(key):
         if contract_row is None:
             return ""
@@ -228,24 +250,51 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
         annex_trs = []
         for idx, a in enumerate(annex_rows, 1):
             tag = "" if int(a["is_active"]) == 1 else '<span class="tag tag-deactive">Deleted</span>'
+            
+            # Fetch allocated staff for this annex
+            annex_staff = staff_by_annex.get(a["id"], [])
+            staff_list_html = ""
+            if annex_staff:
+                staff_items = []
+                for s in annex_staff:
+                    m_rate = f"{s['monthly_rate']:,.2f} VND" if s['monthly_rate'] is not None else "-"
+                    staff_items.append(f"""
+                    <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; background:#f1f5f9; padding:4px 8px; border-radius:4px; margin-top:4px;">
+                      <span>👤 <b>{escape(s['full_name_vi'])}</b> ({escape(s['joining_date'] or '')} → {escape(s['tentative_leaving_date'] or 'Present')})</span>
+                      <span style="color:var(--success); font-weight:600; margin-left:10px;">{m_rate}</span>
+                      <div style="display:inline-flex; gap:6px; margin-left:10px;">
+                        <a href="/contract/edit-staff-link?id={s['link_id']}" style="font-size:10px; color:var(--primary); text-decoration:none;">Edit</a>
+                        <form class="inline" method="POST" action="/contract/remove-staff-link" onsubmit="return confirm('Remove staff from annex?');" style="margin:0; display:inline;">
+                          <input type="hidden" name="link_id" value="{s['link_id']}">
+                          <input type="hidden" name="return_to" value="/contract/edit?id={contract_row['id']}">
+                          <button type="submit" style="background:none; border:none; color:var(--danger); font-size:10px; cursor:pointer; padding:0; display:inline;">Remove</button>
+                        </form>
+                      </div>
+                    </div>
+                    """)
+                staff_list_html = f"<div style='margin-top:6px;'>{''.join(staff_items)}</div>"
+
             actions = f'<a href="/annex/edit?id={a["id"]}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>'
             if int(a["is_active"]) == 1:
                 actions += f"""
+                  <a href="/contract/assign-staff?contract_id={contract_row['id']}&annex_id={a['id']}" style="text-decoration:none;">
+                    <button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px; color:var(--primary); border-color:var(--primary);">+ Allocate Staff</button>
+                  </a>
                   <form class="inline" method="POST" action="/annex/delete"
-                        onsubmit="return confirm('Xóa logic phụ lục #{a["id"]}?');"
+                        onsubmit="return confirm('Deactivate annex #{a["id"]}?');"
                         style="margin:0; display:inline-block;">
                     <input type="hidden" name="id" value="{a["id"]}">
-                    <input type="hidden" name="return_to" value="/contract/edit?id={contract_row["id"]}">
+                    <input type="hidden" name="return_to" value="/contract/edit?id={contract_row['id']}">
                     <button class="btn-danger" type="submit" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Delete</button>
                   </form>
                 """
             else:
                 actions += f"""
                   <form class="inline" method="POST" action="/annex/restore"
-                        onsubmit="return confirm('Restore phụ lục #{a["id"]}?');"
+                        onsubmit="return confirm('Restore annex #{a["id"]}?');"
                         style="margin:0; display:inline-block;">
                     <input type="hidden" name="id" value="{a["id"]}">
-                    <input type="hidden" name="return_to" value="/contract/edit?id={contract_row["id"]}">
+                    <input type="hidden" name="return_to" value="/contract/edit?id={contract_row['id']}">
                     <button type="submit" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Restore</button>
                   </form>
                 """
@@ -254,7 +303,10 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
             annex_trs.append(f"""
               <tr>
                 <td>{idx}</td>
-                <td>{escape(a["annex_name"] or "")} {tag}</td>
+                <td>
+                  <b>{escape(a["annex_name"] or "")}</b> {tag}
+                  {staff_list_html}
+                </td>
                 <td>{escape(a["start_date"] or "")} → {escape(a["end_date"] or "")}</td>
                 <td style="text-align:right; font-family:monospace;">{val_display}</td>
                 <td>
@@ -282,7 +334,69 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
 
           <div class="muted" style="margin-top:10px;">
             Validity rule: If there is an active annex, the annex's period takes precedence; otherwise, the framework contract's period is used.
+          </div>
+        </div>
         """
+
+    staff_block_html = ""
+    if mode == "edit":
+        if not has_active_annex:
+            staff_trs = []
+            for s_idx, s in enumerate(staff_for_contract, 1):
+                m_rate = f"{s['monthly_rate']:,.2f} VND" if s['monthly_rate'] is not None else "-"
+                d_rate = f"{s['manday_rate']:,.2f} VND" if s['manday_rate'] is not None else "-"
+                actions = f"""
+                  <a href="/contract/edit-staff-link?id={s['link_id']}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>
+                  <form class="inline" method="POST" action="/contract/remove-staff-link" onsubmit="return confirm('Remove staff from contract?');" style="margin:0; display:inline-block;">
+                    <input type="hidden" name="link_id" value="{s['link_id']}">
+                    <input type="hidden" name="return_to" value="/contract/edit?id={contract_row['id']}">
+                    <button class="btn-danger" type="submit" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Remove</button>
+                  </form>
+                """
+                staff_trs.append(f"""
+                <tr>
+                  <td>{s_idx}</td>
+                  <td><b>{escape(s['full_name_vi'])}</b><div class='muted'>{escape(s['position'] or '')}</div></td>
+                  <td>{escape(s['joining_date'] or '')} → {escape(s['tentative_leaving_date'] or 'Present')}</td>
+                  <td style="text-align:right;">{m_rate}</td>
+                  <td style="text-align:right;">{d_rate}</td>
+                  <td>{actions}</td>
+                </tr>
+                """)
+            
+            staff_block_html = f"""
+            <div class="card">
+              <div class="actions" style="margin-bottom:10px;">
+                <b>Allocated Staff to Contract</b>
+                <a href="/contract/assign-staff?contract_id={contract_row['id']}">
+                  <button class="btn-secondary" type="button">+ Allocate Staff to Contract</button>
+                </a>
+              </div>
+              <table style="width:100%; border-collapse:collapse; margin:0;">
+                <thead>
+                  <tr>
+                    <th>No.</th>
+                    <th>Staff Name</th>
+                    <th>Period</th>
+                    <th style="text-align:right;">Monthly Rate</th>
+                    <th style="text-align:right;">Man-day Rate</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {''.join(staff_trs) if staff_trs else '<tr><td colspan="6" class="muted" style="text-align:center; padding:15px;">No staff allocated directly to contract.</td></tr>'}
+                </tbody>
+              </table>
+            </div>
+            """
+        else:
+            staff_block_html = f"""
+            <div class="card" style="background:#f8fafc; border-color:#e2e8f0; padding:15px;">
+              <span class="muted" style="font-size:13px; font-weight:500; color:var(--text-secondary);">
+                ℹ️ This contract has annexes. Please allocate staff to each Annex below.
+              </span>
+            </div>
+            """
 
     body = f"""
     {error_html}
@@ -329,12 +443,12 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
           </div>
 
           <div>
-            <div class="label">Start date (HĐ khung)</div>
+            <div class="label">Start date (Framework)</div>
             <input type="date" name="start_date" value="{escape(gv("start_date"))}" style="width:100%;">
           </div>
 
           <div>
-            <div class="label">End date (HĐ khung)</div>
+            <div class="label">End date (Framework)</div>
             <input type="date" name="end_date" value="{escape(gv("end_date"))}" style="width:100%;">
           </div>
         </div>
@@ -346,6 +460,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
       </form>
     </div>
 
+    {staff_block_html}
     {annex_html}
     """
     return layout(title, body)
@@ -389,11 +504,11 @@ def page_annex_form(mode: str, annex_row, contract_id: int, error_msg: str | Non
             <input type="number" step="1" name="value" value="{escape(gv("value"))}" style="width:100%;" placeholder="e.g. 500000000">
           </div>
           <div>
-            <div class="label">Start date (Phụ lục)</div>
+            <div class="label">Start date (Annex)</div>
             <input type="date" name="start_date" value="{escape(gv("start_date"))}" style="width:100%;">
           </div>
           <div>
-            <div class="label">End date (Phụ lục)</div>
+            <div class="label">End date (Annex)</div>
             <input type="date" name="end_date" value="{escape(gv("end_date"))}" style="width:100%;">
           </div>
         </div>
@@ -449,7 +564,7 @@ def handle_contract_create_post(handler):
             VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
         """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, now_iso(), now_iso()))
         new_id = cur.lastrowid
-        log_action(cur, "CREATE_CONTRACT", "contracts", new_id, f"Tạo hợp đồng khung mới '{framework_no}' - {framework_name}")
+        log_action(cur, "CREATE_CONTRACT", "contracts", new_id, f"Created new framework contract '{framework_no}' - {framework_name}")
         conn.commit()
     finally:
         conn.close()
@@ -510,7 +625,7 @@ def handle_contract_update_post(handler):
                 updated_at=?
             WHERE id=?
         """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, now_iso(), int(cid)))
-        log_action(cur, "UPDATE_CONTRACT", "contracts", int(cid), f"Cập nhật hợp đồng khung '{framework_no}' - {framework_name}")
+        log_action(cur, "UPDATE_CONTRACT", "contracts", int(cid), f"Updated framework contract '{framework_no}' - {framework_name}")
         conn.commit()
     finally:
         conn.close()
@@ -534,7 +649,7 @@ def handle_contract_delete_post(handler):
 
         cur = conn.cursor()
         cur.execute("UPDATE contracts SET is_active=0, deleted_at=?, updated_at=? WHERE id=?", (now_iso(), now_iso(), int(cid)))
-        log_action(cur, "DEACTIVATE_CONTRACT", "contracts", int(cid), f"Hủy kích hoạt hợp đồng khung '{c_name}'")
+        log_action(cur, "DEACTIVATE_CONTRACT", "contracts", int(cid), f"Deactivated framework contract '{c_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -558,7 +673,7 @@ def handle_contract_restore_post(handler):
 
         cur = conn.cursor()
         cur.execute("UPDATE contracts SET is_active=1, deleted_at=NULL, updated_at=? WHERE id=?", (now_iso(), int(cid)))
-        log_action(cur, "RESTORE_CONTRACT", "contracts", int(cid), f"Khôi phục hoạt động hợp đồng khung '{c_name}'")
+        log_action(cur, "RESTORE_CONTRACT", "contracts", int(cid), f"Restored framework contract '{c_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -604,7 +719,7 @@ def handle_annex_create_post(handler):
             VALUES (?, ?, ?, ?, ?, 1, NULL, ?, ?)
         """, (int(contract_id), annex_name, start_date, end_date, value, now_iso(), now_iso()))
         new_annex_id = cur.lastrowid
-        log_action(cur, "CREATE_ANNEX", "contract_annexes", new_annex_id, f"Tạo phụ lục mới '{annex_name}' thuộc hợp đồng khung '{c_name}'")
+        log_action(cur, "CREATE_ANNEX", "contract_annexes", new_annex_id, f"Created new annex '{annex_name}' for framework contract '{c_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -652,7 +767,7 @@ def handle_annex_update_post(handler):
                 updated_at=?
             WHERE id=?
         """, (annex_name, start_date, end_date, value, now_iso(), int(aid)))
-        log_action(cur, "UPDATE_ANNEX", "contract_annexes", int(aid), f"Cập nhật phụ lục '{annex_name}' thuộc hợp đồng khung '{c_name}'")
+        log_action(cur, "UPDATE_ANNEX", "contract_annexes", int(aid), f"Updated annex '{annex_name}' for framework contract '{c_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -676,7 +791,7 @@ def handle_annex_delete_post(handler):
 
         cur = conn.cursor()
         cur.execute("UPDATE contract_annexes SET is_active=0, deleted_at=?, updated_at=? WHERE id=?", (now_iso(), now_iso(), int(aid)))
-        log_action(cur, "DEACTIVATE_ANNEX", "contract_annexes", int(aid), f"Hủy kích hoạt phụ lục '{a_name}'")
+        log_action(cur, "DEACTIVATE_ANNEX", "contract_annexes", int(aid), f"Deactivated annex '{a_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -700,7 +815,7 @@ def handle_annex_restore_post(handler):
 
         cur = conn.cursor()
         cur.execute("UPDATE contract_annexes SET is_active=1, deleted_at=NULL, updated_at=? WHERE id=?", (now_iso(), int(aid)))
-        log_action(cur, "RESTORE_ANNEX", "contract_annexes", int(aid), f"Khôi phục hoạt động phụ lục '{a_name}'")
+        log_action(cur, "RESTORE_ANNEX", "contract_annexes", int(aid), f"Restored annex '{a_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -786,26 +901,81 @@ def handle_save_reference_ajax(handler):
         conn.close()
 
 
-def page_contract_references():
+def page_contract_references(vendor_id="", contract_id="", annex_id="", month="", sent_mgs=""):
+    def month_in_range(start_date, end_date, m_str):
+        if not start_date or not m_str:
+            return False
+        s_m = start_date[:7]
+        e_m = end_date[:7] if end_date else "9999-12"
+        return s_m <= m_str <= e_m
+
     conn = db_connect()
     try:
-        # Load all active contracts
-        contracts_rows = conn.execute("""
+        # Load vendors for filter dropdown
+        vendors_filter = conn.execute("""
+            SELECT id, short_name, company_name, company_name_vi 
+            FROM vendors 
+            WHERE is_active=1 AND purchasing=0 
+            ORDER BY short_name ASC
+        """).fetchall()
+
+        # Load contracts for filter dropdown
+        contracts_filter = conn.execute("""
+            SELECT id, framework_no, seller_vendor_id 
+            FROM contracts 
+            WHERE is_active=1 
+            ORDER BY framework_no ASC
+        """).fetchall()
+
+        # Load annexes for filter dropdown
+        annexes_filter = conn.execute("""
+            SELECT a.id, a.annex_name, c.framework_no, a.contract_id, c.seller_vendor_id 
+            FROM contract_annexes a
+            JOIN contracts c ON c.id = a.contract_id
+            WHERE a.is_active=1 
+            ORDER BY a.annex_name ASC
+        """).fetchall()
+
+        # Load filtered active contracts
+        sql = """
             SELECT c.id, c.framework_no, c.framework_name, c.start_date, c.end_date,
-                   COALESCE(sv.company_name, sv.company_name_vi) AS seller_name
+                   COALESCE(sv.company_name, sv.company_name_vi) AS seller_name,
+                   c.seller_vendor_id
             FROM contracts c
             JOIN vendors sv ON sv.id = c.seller_vendor_id
             WHERE c.is_active = 1
-            ORDER BY c.framework_no ASC
-        """).fetchall()
+        """
+        params = []
+        if vendor_id:
+            sql += " AND c.seller_vendor_id = ?"
+            params.append(int(vendor_id))
+        if contract_id:
+            sql += " AND c.id = ?"
+            params.append(int(contract_id))
+        if annex_id:
+            sql += " AND c.id = (SELECT contract_id FROM contract_annexes WHERE id = ?)"
+            params.append(int(annex_id))
+        sql += " ORDER BY c.framework_no ASC"
+        contracts_rows = conn.execute(sql, params).fetchall()
 
-        # Load all active annexes
-        annexes_rows = conn.execute("""
+        # Load filtered active annexes
+        sql_a = """
             SELECT id, contract_id, annex_name, start_date, end_date
             FROM contract_annexes
             WHERE is_active = 1
-            ORDER BY id ASC
-        """).fetchall()
+        """
+        params_a = []
+        if annex_id:
+            sql_a += " AND id = ?"
+            params_a.append(int(annex_id))
+        if contract_id:
+            sql_a += " AND contract_id = ?"
+            params_a.append(int(contract_id))
+        if vendor_id:
+            sql_a += " AND contract_id IN (SELECT id FROM contracts WHERE seller_vendor_id = ?)"
+            params_a.append(int(vendor_id))
+        sql_a += " ORDER BY id ASC"
+        annexes_rows = conn.execute(sql_a, params_a).fetchall()
         
         # Nhóm các annex theo contract_id
         annexes_by_contract = {}
@@ -848,8 +1018,31 @@ def page_contract_references():
         
         if not c_annexes:
             # Trường hợp 1: Không có phụ lục -> Hiển thị chính hợp đồng khung
-            months = get_months_between(c["start_date"], c["end_date"])
-            
+            if month:
+                if month_in_range(c["start_date"], c["end_date"], month):
+                    months = [month]
+                else:
+                    months = []
+            else:
+                months = get_months_between(c["start_date"], c["end_date"])
+                
+            # Filter months list by sent_mgs
+            filtered_months = []
+            for m in months:
+                is_sent = c["framework_no"] and (c["framework_no"].lower().strip(), m) in sent_set
+                if sent_mgs == "yes":
+                    if is_sent:
+                        filtered_months.append(m)
+                elif sent_mgs == "no":
+                    if not is_sent:
+                        filtered_months.append(m)
+                else:
+                    filtered_months.append(m)
+            months = filtered_months
+
+            if not months:
+                continue
+
             inputs = []
             for m in months:
                 val, is_locked = refs_map.get((cid, 0, m)) or ("", 0)
@@ -878,17 +1071,17 @@ def page_contract_references():
                     </button>
                   </div>
                   <input type="text" class="ref-input" id="ref-input-{cid}-0-{m}" data-contract-id="{cid}" data-annex-id="0" data-month="{m}" value="{escape(val)}" {input_attrs}
-                         placeholder="Nhập Ref No..." style="width: 100%; padding: 6px 10px; font-size: 12px; border-radius: 6px; {input_style}">
+                         placeholder="Enter Ref No..." style="width: 100%; padding: 6px 10px; font-size: 12px; border-radius: 6px; {input_style}">
                 </div>
                 """)
 
-            inputs_html = "".join(inputs) if inputs else "<div class='muted' style='padding: 8px;'>Hợp đồng này chưa có start/end date hợp lệ.</div>"
+            inputs_html = "".join(inputs) if inputs else "<div class='muted' style='padding: 8px;'>This contract does not have a valid start/end date.</div>"
             
             cards_html.append(f"""
             <div class="card" style="margin-bottom: 20px; border-left: 4px solid var(--primary);">
               <div style="display: flex; justify-content: space-between; align-items: start; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 10px;">
                 <div>
-                  <h4 style="margin: 0 0 4px 0; color: var(--text-primary);">Hợp đồng khung: {escape(c["framework_no"])}</h4>
+                  <h4 style="margin: 0 0 4px 0; color: var(--text-primary);">Framework Contract: {escape(c["framework_no"])}</h4>
                   <span class="muted">{escape(c["framework_name"] or "")}</span>
                 </div>
                 <div style="text-align: right;">
@@ -904,12 +1097,35 @@ def page_contract_references():
         else:
             # Trường hợp 2: Có phụ lục -> Hiển thị từng phụ lục của hợp đồng đó
             for a in c_annexes:
-                annex_id = a["id"]
-                months = get_months_between(a["start_date"], a["end_date"])
+                a_id = a["id"]
+                if month:
+                    if month_in_range(a["start_date"], a["end_date"], month):
+                        months = [month]
+                    else:
+                        months = []
+                else:
+                    months = get_months_between(a["start_date"], a["end_date"])
                 
+                # Filter months list by sent_mgs
+                filtered_months = []
+                for m in months:
+                    is_sent = a["annex_name"] and (a["annex_name"].lower().strip(), m) in sent_set
+                    if sent_mgs == "yes":
+                        if is_sent:
+                            filtered_months.append(m)
+                    elif sent_mgs == "no":
+                        if not is_sent:
+                            filtered_months.append(m)
+                    else:
+                        filtered_months.append(m)
+                months = filtered_months
+                
+                if not months:
+                    continue
+
                 inputs = []
                 for m in months:
-                    val, is_locked = refs_map.get((cid, annex_id, m)) or ("", 0)
+                    val, is_locked = refs_map.get((cid, a_id, m)) or ("", 0)
                     m_parts = m.split("-")
                     m_display = f"{m_parts[1]}/{m_parts[0]}"
                     
@@ -927,26 +1143,26 @@ def page_contract_references():
                         input_style = "border: 1px solid var(--border);"
                     
                     inputs.append(f"""
-                    <div class="ref-input-group" id="ref-group-{cid}-{annex_id}-{m}" style="display: inline-block; margin: 8px; width: 140px; vertical-align: top;">
+                    <div class="ref-input-group" id="ref-group-{cid}-{a_id}-{m}" style="display: inline-block; margin: 8px; width: 140px; vertical-align: top;">
                       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
                         <div class="label" style="font-size: 11px; color: var(--text-secondary);">{m_display} {f'<span style="color:#10b981; font-weight:bold; font-size:9px;">(Sent MGS)</span>' if is_sent else ''}</div>
-                        <button type="button" class="lock-toggle-btn" data-contract-id="{cid}" data-annex-id="{annex_id}" data-month="{m}" data-locked="{is_locked}" title="{lock_title}" style="background:none; border:none; cursor:pointer; padding:0; font-size:12px; line-height:1;">
+                        <button type="button" class="lock-toggle-btn" data-contract-id="{cid}" data-annex-id="{a_id}" data-month="{m}" data-locked="{is_locked}" title="{lock_title}" style="background:none; border:none; cursor:pointer; padding:0; font-size:12px; line-height:1;">
                           {lock_icon}
                         </button>
                       </div>
-                      <input type="text" class="ref-input" id="ref-input-{cid}-{annex_id}-{m}" data-contract-id="{cid}" data-annex-id="{annex_id}" data-month="{m}" value="{escape(val)}" {input_attrs}
-                             placeholder="Nhập Ref No..." style="width: 100%; padding: 6px 10px; font-size: 12px; border-radius: 6px; {input_style}">
+                      <input type="text" class="ref-input" id="ref-input-{cid}-{a_id}-{m}" data-contract-id="{cid}" data-annex-id="{a_id}" data-month="{m}" value="{escape(val)}" {input_attrs}
+                             placeholder="Enter Ref No..." style="width: 100%; padding: 6px 10px; font-size: 12px; border-radius: 6px; {input_style}">
                     </div>
                     """)
 
-                inputs_html = "".join(inputs) if inputs else "<div class='muted' style='padding: 8px;'>Phụ lục này chưa có start/end date hợp lệ.</div>"
+                inputs_html = "".join(inputs) if inputs else "<div class='muted' style='padding: 8px;'>This annex does not have a valid start/end date.</div>"
 
                 cards_html.append(f"""
                 <div class="card" style="margin-bottom: 20px; border-left: 4px solid #06b6d4;">
                   <div style="display: flex; justify-content: space-between; align-items: start; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 10px;">
                     <div>
-                      <h4 style="margin: 0 0 4px 0; color: var(--text-primary);">Hợp đồng khung: {escape(c["framework_no"])}</h4>
-                      <span style="font-weight: 600; color: #0891b2; font-size: 13px;">➔ Phụ lục: {escape(a["annex_name"] or "")}</span>
+                      <h4 style="margin: 0 0 4px 0; color: var(--text-primary);">Framework Contract: {escape(c["framework_no"])}</h4>
+                      <span style="font-weight: 600; color: #0891b2; font-size: 13px;">➔ Annex: {escape(a["annex_name"] or "")}</span>
                     </div>
                     <div style="text-align: right;">
                       <div style="font-size: 12px; font-weight: 600;">{escape(c["seller_name"])}</div>
@@ -959,7 +1175,17 @@ def page_contract_references():
                 </div>
                 """)
 
-    cards_str = "".join(cards_html) if cards_html else "<div class='card muted'>Không có hợp đồng khung hoặc phụ lục nào hoạt động.</div>"
+    import json
+    contracts_json = json.dumps([
+        {"id": ct["id"], "framework_no": ct["framework_no"], "seller_vendor_id": ct["seller_vendor_id"]}
+        for ct in contracts_filter
+    ])
+    annexes_json = json.dumps([
+        {"id": ax["id"], "annex_name": ax["annex_name"], "framework_no": ax["framework_no"], "contract_id": ax["contract_id"], "seller_vendor_id": ax["seller_vendor_id"]}
+        for ax in annexes_filter
+    ])
+
+    cards_str = "".join(cards_html) if cards_html else "<div class='card muted'>No active framework contracts or annexes found.</div>"
 
     sub_nav = """
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
@@ -968,12 +1194,75 @@ def page_contract_references():
     </div>
     """
 
+    vendor_options = []
+    for v in vendors_filter:
+        selected = "selected" if vendor_id and str(v["id"]) == str(vendor_id) else ""
+        label = v["short_name"] or v["company_name"] or v["company_name_vi"]
+        vendor_options.append(f'<option value="{v["id"]}" {selected}>{escape(label)}</option>')
+
+    contract_options = []
+    for ct in contracts_filter:
+        selected = "selected" if contract_id and str(ct["id"]) == str(contract_id) else ""
+        contract_options.append(f'<option value="{ct["id"]}" {selected}>{escape(ct["framework_no"])}</option>')
+
+    annex_options = []
+    for ax in annexes_filter:
+        selected = "selected" if annex_id and str(ax["id"]) == str(annex_id) else ""
+        label = f"{ax['annex_name']} ({ax['framework_no']})"
+        annex_options.append(f'<option value="{ax["id"]}" {selected}>{escape(label)}</option>')
+
+    filter_form_html = f"""
+    <form method="GET" action="/contracts/references" autocomplete="off" class="card" style="margin-bottom: 20px; padding: 16px; background: #fff; border: 1px solid var(--border);">
+      <div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;">
+        <div style="flex: 1; min-width: 180px;">
+          <label style="font-weight: 600; font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Company (Seller)</label>
+          <select name="vendor_id" style="width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px;">
+            <option value="">-- all companies --</option>
+            {"".join(vendor_options)}
+          </select>
+        </div>
+        <div style="flex: 1; min-width: 180px;">
+          <label style="font-weight: 600; font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Framework Contract</label>
+          <select name="contract_id" style="width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px;">
+            <option value="">-- all contracts --</option>
+            {"".join(contract_options)}
+          </select>
+        </div>
+        <div style="flex: 1; min-width: 180px;">
+          <label style="font-weight: 600; font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Annex</label>
+          <select name="annex_id" style="width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px;">
+            <option value="">-- all annexes --</option>
+            {"".join(annex_options)}
+          </select>
+        </div>
+        <div style="flex: 1; min-width: 140px;">
+          <label style="font-weight: 600; font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Month</label>
+          <input type="month" name="month" value="{escape(month)}" style="width: 100%; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px;">
+        </div>
+        <div style="flex: 1; min-width: 140px;">
+          <label style="font-weight: 600; font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Sent MGS</label>
+          <select name="sent_mgs" style="width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px;">
+            <option value="">-- all --</option>
+            <option value="yes" {"selected" if sent_mgs == "yes" else ""}>Sent (Đã gửi)</option>
+            <option value="no" {"selected" if sent_mgs == "no" else ""}>Not Sent (Chưa gửi)</option>
+          </select>
+        </div>
+        <div style="display: flex; gap: 8px; margin-top: 8px;">
+          <button type="submit" class="btn" style="padding: 8px 16px; font-weight: 600; background: var(--primary); color: white; border-color: var(--primary);">Filter</button>
+          <a href="/contracts/references" class="btn btn-secondary" style="padding: 8px 16px; text-decoration: none; text-align: center; display: inline-block;">Clear</a>
+        </div>
+      </div>
+    </form>
+    """
+
     body_html = f"""
     {sub_nav}
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-      <h2 style="margin: 0;">Quản lý Reference Number theo tháng</h2>
-      <span class="muted">Dữ liệu được tự động lưu khi nhập xong. Sử dụng biểu tượng khóa để tránh thay đổi nhầm.</span>
+      <h2 style="margin: 0;">Manage Reference Numbers by Month</h2>
+      <span class="muted">Data is autosaved after entry. Use the lock icon to prevent accidental changes.</span>
     </div>
+    
+    {filter_form_html}
     
     <div class="references-container">
       {cards_str}
@@ -981,6 +1270,89 @@ def page_contract_references():
 
     <script>
       (function() {{
+        const contractsData = {contracts_json};
+        const annexesData = {annexes_json};
+
+        const companySel = document.querySelector('select[name="vendor_id"]');
+        const contractSel = document.querySelector('select[name="contract_id"]');
+        const annexSel = document.querySelector('select[name="annex_id"]');
+
+        function updateDropdowns() {{
+          if (!companySel || !contractSel || !annexSel) return;
+          const selectedCompany = companySel.value;
+          const selectedContract = contractSel.value;
+          const selectedAnnex = annexSel.value;
+
+          // 1. Update Contract options
+          const currentContractVal = contractSel.value;
+          contractSel.innerHTML = '<option value="">-- all contracts --</option>';
+          contractsData.forEach(ct => {{
+            if (!selectedCompany || String(ct.seller_vendor_id) === String(selectedCompany)) {{
+              const opt = document.createElement('option');
+              opt.value = ct.id;
+              opt.innerText = ct.framework_no;
+              if (String(ct.id) === String(currentContractVal)) {{
+                opt.selected = true;
+              }}
+              contractSel.appendChild(opt);
+            }}
+          }});
+          contractSel.value = currentContractVal;
+
+          // 2. Update Annex options
+          const currentAnnexVal = annexSel.value;
+          annexSel.innerHTML = '<option value="">-- all annexes --</option>';
+          annexesData.forEach(ax => {{
+            const matchCompany = !selectedCompany || String(ax.seller_vendor_id) === String(selectedCompany);
+            const matchContract = !selectedContract || String(ax.contract_id) === String(selectedContract);
+            if (matchCompany && matchContract) {{
+              const opt = document.createElement('option');
+              opt.value = ax.id;
+              opt.innerText = ax.annex_name + ' (' + ax.framework_no + ')';
+              if (String(ax.id) === String(currentAnnexVal)) {{
+                opt.selected = true;
+              }}
+              annexSel.appendChild(opt);
+            }}
+          }});
+          annexSel.value = currentAnnexVal;
+        }}
+
+        if (companySel && contractSel && annexSel) {{
+          companySel.addEventListener('change', function() {{
+            contractSel.value = "";
+            annexSel.value = "";
+            updateDropdowns();
+          }});
+
+          contractSel.addEventListener('change', function() {{
+            const contractId = this.value;
+            if (contractId) {{
+              const ct = contractsData.find(c => String(c.id) === String(contractId));
+              if (ct) {{
+                companySel.value = ct.seller_vendor_id;
+              }}
+            }}
+            annexSel.value = "";
+            updateDropdowns();
+          }});
+
+          annexSel.addEventListener('change', function() {{
+            const annexId = this.value;
+            if (annexId) {{
+              const ax = annexesData.find(a => String(a.id) === String(annexId));
+              if (ax) {{
+                contractSel.value = ax.contract_id;
+                companySel.value = ax.seller_vendor_id;
+              }}
+            }}
+            updateDropdowns();
+          }});
+
+          // Run initially to apply default server-side selections
+          updateDropdowns();
+        }}
+
         // Save reference number on input change
         document.querySelectorAll('.ref-input').forEach(input => {{
           input.addEventListener('change', function() {{
@@ -1009,7 +1381,7 @@ def page_contract_references():
             }})
             .then(res => {{
               if (!res.ok) {{
-                return res.json().then(err => {{ throw new Error(err.message || 'Lỗi khi lưu Reference Number'); }});
+                return res.json().then(err => {{ throw new Error(err.message || 'Error saving Reference Number'); }});
               }}
               return res.json();
             }})
@@ -1023,13 +1395,13 @@ def page_contract_references():
                   targetCell.style.background = '';
                 }}, 1000);
               }} else {{
-                throw new Error(data.message || 'Lỗi khi lưu');
+                throw new Error(data.message || 'Error saving');
               }}
             }})
             .catch(err => {{
               targetCell.style.borderColor = '#ef4444'; // Red border for error
               targetCell.style.background = '#fef2f2';
-              alert('Lỗi: ' + err.message);
+              alert('Error: ' + err.message);
               targetCell.value = originalVal;
               setTimeout(() => {{
                 targetCell.style.borderColor = '';
@@ -1084,11 +1456,11 @@ def page_contract_references():
                   }}
                 }}
               }} else {{
-                alert('Lỗi: ' + data.message);
+                alert('Error: ' + data.message);
               }}
             }})
             .catch(err => {{
-              alert('Lỗi kết nối: ' + err);
+              alert('Connection error: ' + err);
             }});
           }});
         }});
@@ -1155,3 +1527,211 @@ def handle_toggle_reference_lock_ajax(handler):
         send_html(handler, json.dumps({"status": "error", "message": str(e)}), status=500)
     finally:
         conn.close()
+
+
+def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, link_id: int | None = None, error_msg: str | None = None):
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        
+        # Load contract and vendor info
+        contract = cur.execute("SELECT * FROM contracts WHERE id = ?", (contract_id,)).fetchone()
+        if not contract:
+            return layout("Error", "<div class='card danger'>Contract not found</div>")
+            
+        vendor_id = contract["seller_vendor_id"]
+        vendor_row = cur.execute("SELECT company_name_vi, short_name FROM vendors WHERE id = ?", (vendor_id,)).fetchone()
+        vendor_name = vendor_row["company_name_vi"] if vendor_row else f"Vendor ID {vendor_id}"
+        
+        annex = None
+        if annex_id:
+            annex = cur.execute("SELECT * FROM contract_annexes WHERE id = ?", (annex_id,)).fetchone()
+            
+        link = None
+        if link_id:
+            link = cur.execute("SELECT * FROM contract_staff_links WHERE id = ?", (link_id,)).fetchone()
+            
+        # Get active staff of this vendor
+        staff_rows = cur.execute("""
+            SELECT id, full_name_vi, position
+            FROM contract_staff
+            WHERE vendor_id = ? AND (status IS NULL OR status <> 'inactive')
+            ORDER BY full_name_vi ASC
+        """, (vendor_id,)).fetchall()
+        
+    finally:
+        conn.close()
+        
+    # Build staff dropdown
+    staff_opts = ['<option value="">-- select staff --</option>']
+    selected_staff_id = link["staff_id"] if link else None
+    for s in staff_rows:
+        sel = "selected" if selected_staff_id and s["id"] == selected_staff_id else ""
+        staff_opts.append(f'<option value="{s["id"]}" {sel}>{escape(s["full_name_vi"])} ({escape(s["position"] or "")})</option>')
+        
+    def gv(key, default=""):
+        if link and link[key] is not None:
+            return str(link[key])
+        return default
+        
+    title = "Edit Staff Allocation" if link else "Allocate Staff"
+    header_lbl = f"Edit Staff Allocation to Contract No. {contract['framework_no']}" if link else f"Allocate Staff to Contract No. {contract['framework_no']}"
+    if annex:
+        header_lbl += f" (Annex: {annex['annex_name']})"
+        
+    error_html = f'<div class="card danger"><b>Error:</b> {escape(error_msg)}</div>' if error_msg else ""
+    
+    # If editing link, staff selection is disabled
+    staff_select_html = f"""
+        <select name="staff_id" style="width:100%;" required>
+          {"".join(staff_opts)}
+        </select>
+    """
+    if link:
+        # Find staff name
+        staff_name = ""
+        for s in staff_rows:
+            if s["id"] == link["staff_id"]:
+                staff_name = f"{s['full_name_vi']} ({s['position'] or ''})"
+                break
+        staff_select_html = f"""
+            <input type="hidden" name="staff_id" value="{link['staff_id']}">
+            <input type="text" value="{escape(staff_name)}" style="width:100%; background:#f1f5f9;" readonly>
+        """
+        
+    body = f"""
+    {error_html}
+    <div class="card">
+      <div class="actions" style="margin-bottom:10px;">
+        <a href="/contract/edit?id={contract_id}">← Back to Contract</a>
+      </div>
+      
+      <h2>{escape(header_lbl)}</h2>
+      <p class="muted">Vendor: <b>{escape(vendor_name)}</b></p>
+      
+      <form method="POST" action="/contract/assign-staff/save">
+        <input type="hidden" name="contract_id" value="{contract_id}">
+        <input type="hidden" name="annex_id" value="{annex_id or ''}">
+        <input type="hidden" name="link_id" value="{link_id or ''}">
+        
+        <div class="grid">
+          <div>
+            <div class="label">Contract Staff Name (required)</div>
+            {staff_select_html}
+          </div>
+          
+          <div>
+            <div class="label">Active Period - Onboarding Date (required)</div>
+            <input type="date" name="joining_date" value="{escape(gv('joining_date'))}" style="width:100%;" required>
+          </div>
+          
+          <div>
+            <div class="label">Active Period - Tentative Leaving Date</div>
+            <input type="date" name="tentative_leaving_date" value="{escape(gv('tentative_leaving_date'))}" style="width:100%;">
+          </div>
+          
+          <div>
+            <div class="label">Monthly Rate (VND)</div>
+            <input type="number" step="0.01" name="monthly_rate" value="{escape(gv('monthly_rate'))}" style="width:100%;" placeholder="e.g. 45000000">
+          </div>
+          
+          <div>
+            <div class="label">Man-day Rate (VND)</div>
+            <input type="number" step="0.01" name="manday_rate" value="{escape(gv('manday_rate'))}" style="width:100%;" placeholder="e.g. 2000000">
+          </div>
+        </div>
+        
+        <div class="actions" style="margin-top:14px;">
+          <button type="submit" class="btn-primary">Save Allocation</button>
+          <a class="muted" href="/contract/edit?id={contract_id}">Cancel</a>
+        </div>
+      </form>
+    </div>
+    """
+    return layout(title, body)
+
+
+def handle_contract_assign_staff_save_post(handler):
+    form = read_post_form(handler)
+    
+    contract_id = (form.get("contract_id", [""])[0] or "").strip()
+    annex_id = (form.get("annex_id", [""])[0] or "").strip()
+    link_id = (form.get("link_id", [""])[0] or "").strip()
+    staff_id = (form.get("staff_id", [""])[0] or "").strip()
+    joining_date = (form.get("joining_date", [""])[0] or "").strip()
+    tentative_leaving_date = (form.get("tentative_leaving_date", [""])[0] or "").strip() or None
+    
+    monthly_rate = to_float_or_none(form.get("monthly_rate", [""])[0])
+    manday_rate = to_float_or_none(form.get("manday_rate", [""])[0])
+    
+    if not contract_id.isdigit() or not staff_id.isdigit() or not joining_date:
+        send_html(handler, layout("Error", "<div class='card danger'>Invalid input parameters</div>"), status=400)
+        return
+        
+    annex_id_int = int(annex_id) if annex_id.isdigit() else None
+    link_id_int = int(link_id) if link_id.isdigit() else None
+    
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        
+        # Check overlap
+        from staff import check_no_overlap
+        ok, msg = check_no_overlap(
+            cur,
+            link_id_exclude=link_id_int,
+            staff_id=int(staff_id),
+            joining_date=joining_date,
+            leaving_date=tentative_leaving_date
+        )
+        if not ok:
+            send_html(handler, layout("Error", f"<div class='card danger'>{escape(msg)}</div>"), status=400)
+            return
+            
+        if link_id_int:
+            # Update existing link
+            cur.execute("""
+                UPDATE contract_staff_links
+                SET joining_date = ?,
+                    tentative_leaving_date = ?,
+                    monthly_rate = ?,
+                    manday_rate = ?,
+                    updated_at = ?
+                WHERE id = ?
+            """, (joining_date, tentative_leaving_date, monthly_rate, manday_rate, now_iso(), link_id_int))
+            log_action(cur, "UPDATE_CONTRACT_STAFF_LINK", "contract_staff_links", link_id_int, f"Updated staff allocation ID {staff_id} in contract ID {contract_id}")
+        else:
+            # Insert new link
+            cur.execute("""
+                INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (int(staff_id), int(contract_id), annex_id_int, monthly_rate, manday_rate, joining_date, tentative_leaving_date, now_iso(), now_iso()))
+            new_id = cur.lastrowid
+            log_action(cur, "CREATE_CONTRACT_STAFF_LINK", "contract_staff_links", new_id, f"Allocated staff ID {staff_id} to contract ID {contract_id}")
+            
+        conn.commit()
+    finally:
+        conn.close()
+        
+    redirect(handler, f"/contract/edit?id={contract_id}")
+
+
+def handle_contract_remove_staff_link_post(handler):
+    form = read_post_form(handler)
+    link_id = (form.get("link_id", [""])[0] or "").strip()
+    return_to = (form.get("return_to", ["/contracts"])[0] or "").strip()
+    
+    if not link_id.isdigit():
+        send_html(handler, layout("Error", "<div class='card danger'>Invalid allocation ID</div>"), status=400)
+        return
+        
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM contract_staff_links WHERE id = ?", (int(link_id),))
+        log_action(cur, "DELETE_CONTRACT_STAFF_LINK", "contract_staff_links", int(link_id), f"Removed staff allocation from contract/annex")
+        conn.commit()
+    finally:
+        conn.close()
+        
+    redirect(handler, return_to)

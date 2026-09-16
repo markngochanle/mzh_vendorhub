@@ -128,21 +128,32 @@ def check_invoice_payroll_reconciliation(conn, contract_no_str, year, month, inv
     month_str = f"{year:04d}-{month:02d}"
     contract_no_clean = contract_no_str.strip()
 
+    import calendar
+    num_days = calendar.monthrange(year, month)[1]
+    month_start_date = f"{year:04d}-{month:02d}-01"
+    month_end_date = f"{year:04d}-{month:02d}-{num_days:02d}"
+
     # Query staff belonging to a contract with this framework_no
     staff_by_contract = conn.execute("""
         SELECT s.id 
         FROM contract_staff s
-        JOIN contracts c ON c.id = s.contract_id
+        JOIN contract_staff_links l ON l.staff_id = s.id
+            AND l.joining_date <= ?
+            AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+        JOIN contracts c ON c.id = l.contract_id
         WHERE LOWER(TRIM(c.framework_no)) = ?
-    """, (contract_no_clean.lower(),)).fetchall()
+    """, (month_end_date, month_start_date, contract_no_clean.lower())).fetchall()
 
     # Query staff belonging to an annex with this annex_name
     staff_by_annex = conn.execute("""
         SELECT s.id 
         FROM contract_staff s
-        JOIN contract_annexes a ON a.id = s.annex_id
+        JOIN contract_staff_links l ON l.staff_id = s.id
+            AND l.joining_date <= ?
+            AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+        JOIN contract_annexes a ON a.id = l.annex_id
         WHERE LOWER(TRIM(a.annex_name)) = ?
-    """, (contract_no_clean.lower(),)).fetchall()
+    """, (month_end_date, month_start_date, contract_no_clean.lower())).fetchall()
 
     staff_ids = [r["id"] for r in (staff_by_contract + staff_by_annex)]
 
@@ -151,16 +162,22 @@ def check_invoice_payroll_reconciliation(conn, contract_no_str, year, month, inv
         staff_by_contract_like = conn.execute("""
             SELECT s.id 
             FROM contract_staff s
-            JOIN contracts c ON c.id = s.contract_id
+            JOIN contract_staff_links l ON l.staff_id = s.id
+                AND l.joining_date <= ?
+                AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+            JOIN contracts c ON c.id = l.contract_id
             WHERE c.framework_no LIKE ?
-        """, (f"%{contract_no_clean}%",)).fetchall()
+        """, (month_end_date, month_start_date, f"%{contract_no_clean}%")).fetchall()
 
         staff_by_annex_like = conn.execute("""
             SELECT s.id 
             FROM contract_staff s
-            JOIN contract_annexes a ON a.id = s.annex_id
+            JOIN contract_staff_links l ON l.staff_id = s.id
+                AND l.joining_date <= ?
+                AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+            JOIN contract_annexes a ON a.id = l.annex_id
             WHERE a.annex_name LIKE ?
-        """, (f"%{contract_no_clean}%",)).fetchall()
+        """, (month_end_date, month_start_date, f"%{contract_no_clean}%")).fetchall()
 
         staff_ids = [r["id"] for r in (staff_by_contract_like + staff_by_annex_like)]
 
@@ -600,8 +617,9 @@ def page_invoices_list(filters: dict, *, return_to: str):
                 SELECT DISTINCT c.framework_no, a.annex_name
                 FROM contract_staff s
                 JOIN project_staff_assignments psa ON psa.staff_id = s.id
-                JOIN contracts c ON c.id = s.contract_id
-                LEFT JOIN contract_annexes a ON a.id = s.annex_id
+                JOIN contract_staff_links l ON l.staff_id = s.id
+                JOIN contracts c ON c.id = l.contract_id
+                LEFT JOIN contract_annexes a ON a.id = l.annex_id
                 WHERE psa.project_id = ?
             """, (project_id,)).fetchall()
             
@@ -646,7 +664,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
               sent_to_mgs, force_match
             FROM invoices
             {where_sql}
-            ORDER BY sent_to_mgs ASC, nlap DESC, id DESC
+            ORDER BY sent_to_mgs ASC, service_year DESC, service_month DESC, service_day DESC, seller_name ASC, id DESC
             LIMIT ?
         """, params + [LIST_LIMIT]).fetchall()
 
@@ -1178,7 +1196,7 @@ def handle_edit_invoice_post(handler):
             SET service_year=?, service_month=?, service_day=?, contract_no=?
             WHERE id=?
         """, (sy, sm, sd, contract_no, invoice_id))
-        log_action(cur, "UPDATE_INVOICE", "invoices", invoice_id, f"Cập nhật thông tin hóa đơn '{inv_name}': Kỳ dịch vụ {sy}-{sm}-{sd}, Số hợp đồng: {contract_no}")
+        log_action(cur, "UPDATE_INVOICE", "invoices", invoice_id, f"Updated invoice '{inv_name}': Service period {sy}-{sm}-{sd}, Contract No: {contract_no}")
         conn.commit()
     finally:
         conn.close()
@@ -1216,7 +1234,7 @@ def handle_delete_invoice_post(handler):
         cur = conn.cursor()
         cur.execute("DELETE FROM invoice_tax_lines WHERE invoice_id=?", (invoice_id,))
         cur.execute("DELETE FROM invoices WHERE id=?", (invoice_id,))
-        log_action(cur, "DELETE_INVOICE", "invoices", invoice_id, f"Xóa hóa đơn '{inv_name}'")
+        log_action(cur, "DELETE_INVOICE", "invoices", invoice_id, f"Deleted invoice '{inv_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -1406,7 +1424,7 @@ def db_insert_or_duplicate(
         source_path, invoice["raw_xml"],
     ))
     invoice_id = cur.lastrowid
-    log_action(cur, "IMPORT_INVOICE", "invoices", invoice_id, f"Import hóa đơn mới '{invoice['khhdon']}/{invoice['shdon']}' của {invoice['seller_name']}")
+    log_action(cur, "IMPORT_INVOICE", "invoices", invoice_id, f"Imported new invoice '{invoice['khhdon']}/{invoice['shdon']}' from {invoice['seller_name']}")
     return invoice_id, False
 
 
@@ -1802,8 +1820,8 @@ def handle_toggle_mgs_sent_ajax(handler):
         cur = conn.cursor()
         cur.execute("UPDATE invoices SET sent_to_mgs = ?, updated_at = datetime('now') WHERE id = ?", (sent, invoice_id))
         
-        status_desc = "Đã gửi MGS" if sent == 1 else "Hủy gửi MGS"
-        log_action(cur, "TOGGLE_MGS_SENT", "invoices", invoice_id, f"Thay đổi trạng thái MGS: {status_desc} hóa đơn '{inv_name}'")
+        status_desc = "Sent to MGS" if sent == 1 else "Cancelled MGS sending"
+        log_action(cur, "TOGGLE_MGS_SENT", "invoices", invoice_id, f"Changed MGS status: {status_desc} for invoice '{inv_name}'")
         conn.commit()
         send_html(handler, json.dumps({"status": "ok"}), status=200)
     except Exception as e:
@@ -1834,8 +1852,8 @@ def handle_force_match_post(handler):
         cur = conn.cursor()
         cur.execute("UPDATE invoices SET force_match=?, updated_at=? WHERE id=?", (val, now_iso(), invoice_id))
         
-        status_desc = "Buộc khớp (Force Match)" if val == 1 else "Hủy buộc khớp (Unforce Match)"
-        log_action(cur, "TOGGLE_FORCE_MATCH", "invoices", invoice_id, f"Thực hiện: {status_desc} hóa đơn '{inv_name}'")
+        status_desc = "Force Match" if val == 1 else "Unforce Match"
+        log_action(cur, "TOGGLE_FORCE_MATCH", "invoices", invoice_id, f"Executed: {status_desc} for invoice '{inv_name}'")
         conn.commit()
     finally:
         conn.close()

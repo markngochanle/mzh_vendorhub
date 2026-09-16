@@ -1,10 +1,13 @@
 # projects.py
 import calendar
+import csv
+import io
+import urllib.parse
 from html import escape
 from datetime import datetime
 
 from common import (
-    db_connect, layout, read_post_form, redirect, send_html, now_iso, log_action
+    db_connect, layout, read_post_form, redirect, send_html, now_iso, log_action, fmt_money
 )
 
 def page_projects_list(error_msg: str | None = None, success_msg: str | None = None):
@@ -104,7 +107,7 @@ def page_projects_list(error_msg: str | None = None, success_msg: str | None = N
           body += f"""
           <tr>
             <td>{idx}</td>
-            <td style="font-weight: 600; color: var(--primary);">{escape(p['short_name'] or '')}</td>
+            <td style="font-weight: 600;"><a href="/projects/assign?project_id={p['id']}" style="color: var(--primary); font-weight: bold; text-decoration: underline;">{escape(p['short_name'] or '')}</a></td>
             <td>{escape(p['full_name'] or '')}</td>
             <td>{escape(budget_str)}</td>
             <td>{escape(p['os_start_date'] or 'N/A')}</td>
@@ -166,7 +169,7 @@ def handle_project_create_post(handler):
             VALUES (?, ?, ?, ?, ?, 1, ?, ?)
         """, (short_name, full_name, it_outsourcing_budget, os_start_date, os_end_date, now_iso(), now_iso()))
         new_project_id = cur.lastrowid
-        log_action(cur, "CREATE_PROJECT", "projects", new_project_id, f"Tạo dự án mới '{short_name}' - {full_name}")
+        log_action(cur, "CREATE_PROJECT", "projects", new_project_id, f"Created new project '{short_name}' - {full_name}")
         conn.commit()
     finally:
         conn.close()
@@ -198,7 +201,7 @@ def handle_project_delete_post(handler):
         
         cur = conn.cursor()
         cur.execute("UPDATE projects SET is_active = 0, updated_at = ? WHERE id = ?", (now_iso(), project_id))
-        log_action(cur, "CLOSE_PROJECT", "projects", project_id, f"Đóng dự án '{p_name}'")
+        log_action(cur, "CLOSE_PROJECT", "projects", project_id, f"Closed project '{p_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -224,7 +227,7 @@ def handle_project_restore_post(handler):
         
         cur = conn.cursor()
         cur.execute("UPDATE projects SET is_active = 1, updated_at = ? WHERE id = ?", (now_iso(), project_id))
-        log_action(cur, "REOPEN_PROJECT", "projects", project_id, f"Mở lại dự án '{p_name}'")
+        log_action(cur, "REOPEN_PROJECT", "projects", project_id, f"Reopened project '{p_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -304,10 +307,19 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
                 staff_params.append(int(selected_vendor_id))
 
             staffs = conn.execute(f"""
-                SELECT cs.id, cs.full_name_vi, cs.joining_date, cs.tentative_leaving_date,
+                SELECT cs.id, cs.full_name_vi, latest_link.joining_date, latest_link.tentative_leaving_date,
                        COALESCE(v.company_name, v.company_name_vi) AS vendor_name, cs.vendor_id
                 FROM contract_staff cs
                 JOIN vendors v ON v.id = cs.vendor_id
+                LEFT JOIN (
+                    SELECT staff_id, joining_date, tentative_leaving_date
+                    FROM contract_staff_links l1
+                    WHERE l1.joining_date = (
+                        SELECT MAX(l2.joining_date)
+                        FROM contract_staff_links l2
+                        WHERE l2.staff_id = l1.staff_id
+                    )
+                ) latest_link ON latest_link.staff_id = cs.id
                 WHERE {" AND ".join(staff_where)}
                 ORDER BY v.company_name ASC, cs.full_name_vi ASC
             """, staff_params).fetchall()
@@ -335,10 +347,19 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
                 avail_params.append(int(selected_vendor_id))
 
             available_staffs = conn.execute(f"""
-                SELECT cs.id, cs.full_name_vi, cs.joining_date, cs.tentative_leaving_date,
+                SELECT cs.id, cs.full_name_vi, latest_link.joining_date, latest_link.tentative_leaving_date,
                        COALESCE(v.company_name, v.company_name_vi) AS vendor_name
                 FROM contract_staff cs
                 JOIN vendors v ON v.id = cs.vendor_id
+                LEFT JOIN (
+                    SELECT staff_id, joining_date, tentative_leaving_date
+                    FROM contract_staff_links l1
+                    WHERE l1.joining_date = (
+                        SELECT MAX(l2.joining_date)
+                        FROM contract_staff_links l2
+                        WHERE l2.staff_id = l1.staff_id
+                    )
+                ) latest_link ON latest_link.staff_id = cs.id
                 WHERE {" AND ".join(avail_where)}
                 ORDER BY cs.full_name_vi ASC
             """, avail_params).fetchall()
@@ -359,6 +380,20 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
                     if sid not in staff_busy_map:
                         staff_busy_map[sid] = {}
                     staff_busy_map[sid][br["month"]] = br["project_name"]
+
+            # Query monthly attendance summaries for assigned staffs
+            summary_map = {}
+            if staffs and months:
+                assigned_staff_ids = [s["id"] for s in staffs]
+                s_placeholders = ",".join("?" for _ in assigned_staff_ids)
+                m_placeholders = ",".join("?" for _ in months)
+                sum_rows = conn.execute(f"""
+                    SELECT staff_id, month, total_amount, locked
+                    FROM monthly_attendance_summary
+                    WHERE staff_id IN ({s_placeholders}) AND month IN ({m_placeholders})
+                """, assigned_staff_ids + months).fetchall()
+                for sr in sum_rows:
+                    summary_map[(sr["staff_id"], sr["month"])] = (sr["locked"], sr["total_amount"])
 
             import json
             client_avail_data = {}
@@ -453,6 +488,7 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
     """
 
     add_staff_form_html = ""
+    payment_matrix_html = ""
     # Build Matrix Table
     if not project_row:
         matrix_html = f"""
@@ -476,7 +512,7 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
                     continue
 
                 # Check active range (onboard / offboard)
-                onboarded = s["joining_date"] <= last_day_str
+                onboarded = s["joining_date"] is not None and s["joining_date"] <= last_day_str
                 not_left = not s["tentative_leaving_date"] or s["tentative_leaving_date"] >= first_day_str
 
                 # Check busy project in month m
@@ -628,6 +664,111 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
           </table>
         </div>
         """
+        payment_th_months = "".join(f'<th style="text-align: right; min-width: 110px; font-size: 12px; font-weight: 600;">{m}</th>' for m in months)
+        payment_trs = []
+        month_totals = {m: 0.0 for m in months}
+        grand_total = 0.0
+
+        if not staffs:
+            colspan = 4 + len(months)
+            payment_trs.append(f'<tr><td colspan="{colspan}" style="text-align: center; color: var(--text-muted); padding: 20px;">No staff members found matching the filters.</td></tr>')
+        else:
+            for idx, s in enumerate(staffs, 1):
+                td_payments = []
+                staff_total = 0.0
+                for m in months:
+                    assigned_info = assignments_map.get((s["id"], m))
+                    if assigned_info and assigned_info[0] == project_row["id"]:
+                        sum_info = summary_map.get((s["id"], m))
+                        if sum_info:
+                            locked, amt = sum_info
+                            if locked == 1:
+                                amt_val = amt or 0.0
+                                staff_total += amt_val
+                                month_totals[m] += amt_val
+                                grand_total += amt_val
+                                td_payments.append(f"""
+                                <td style="text-align: right; font-weight: 600; color: #047857; background: #ecfdf5; font-size: 12px;">
+                                  🔒 {escape(fmt_money(amt_val))}
+                                </td>
+                                """)
+                            else:
+                                td_payments.append("""
+                                <td style="text-align: center; background: #fffbeb; color: #b45309; font-size: 11px;" title="Monthly Payroll & Payment is not locked yet">
+                                  ⚠️ Unlocked
+                                </td>
+                                """)
+                        else:
+                            td_payments.append('<td style="text-align: center; color: var(--text-muted); font-size: 11px;">-</td>')
+                    else:
+                        td_payments.append('<td style="text-align: center; color: var(--text-muted); font-size: 11px;">-</td>')
+
+                staff_total_str = fmt_money(staff_total) if staff_total > 0 else "-"
+                td_payments_str = "".join(td_payments)
+                payment_trs.append(f"""
+                <tr>
+                  <td>{idx}</td>
+                  <td style="font-weight: 600; color: var(--text-main);">{escape(s['full_name_vi'])}</td>
+                  <td><span class="muted" style="font-size: 12px;">{escape(s['vendor_name'])}</span></td>
+                  {td_payments_str}
+                  <td style="text-align: right; font-weight: 700; color: #047857; font-size: 12px; background: #f8fafc;">{escape(staff_total_str)}</td>
+                </tr>
+                """)
+
+        tfoot_month_tds = []
+        for m in months:
+            m_tot = month_totals[m]
+            m_tot_str = fmt_money(m_tot) if m_tot > 0 else "-"
+            tfoot_month_tds.append(f'<td style="text-align: right; font-weight: 700; color: #047857; font-size: 12px;">{escape(m_tot_str)}</td>')
+
+        grand_total_str = fmt_money(grand_total) if grand_total > 0 else "-"
+
+        export_url = f"/projects/assign/export?project_id={project_row['id']}" + (f"&vendor_id={selected_vendor_id}" if selected_vendor_id else "")
+        payment_matrix_html = f"""
+        <div class="card" style="padding: 0; overflow-x: auto; margin-top: 24px;">
+          <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: #f8fafc;">
+            <div>
+              <h4 style="margin: 0; font-size: 16px; color: var(--primary);">🔒 Locked Monthly Payroll & Payment Matrix (VND)</h4>
+              <p style="margin: 4px 0 0 0; font-size: 12px; color: var(--text-muted);">
+                Displays monthly payment amounts per staff for project <b>{escape(project_row['short_name'])}</b> based on locked monthly attendance & payroll records.
+              </p>
+            </div>
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <a href="{export_url}" 
+                 class="btn-secondary" 
+                 style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; text-decoration: none; padding: 5px 12px; background: #ffffff; border: 1px solid var(--border); border-radius: 6px; color: var(--text-main); font-weight: 500;" 
+                 title="Export Payment Matrix to CSV">
+                <svg style="width: 14px; height: 14px; fill: currentColor;" viewBox="0 0 24 24"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+                Export CSV
+              </a>
+              <div style="font-size: 12px; background: #ecfdf5; color: #047857; padding: 4px 10px; border-radius: 6px; font-weight: 500;">
+                Locked Records Only
+              </div>
+            </div>
+          </div>
+          <table style="width: 100%; border-collapse: collapse; margin: 0; min-width: 800px;">
+            <thead>
+              <tr style="background: #f8fafc; border-bottom: 1px solid var(--border);">
+                <th style="width: 50px;">No.</th>
+                <th>Staff Name</th>
+                <th>Company (Vendor)</th>
+                {payment_th_months}
+                <th style="text-align: right; min-width: 110px; font-size: 12px; font-weight: 700;">Total (VND)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {"".join(payment_trs)}
+            </tbody>
+            <tfoot>
+              <tr style="background: #f1f5f9; font-weight: bold; border-top: 2px solid var(--border);">
+                <td colspan="3" style="text-align: right; font-weight: 700;">Total Payment:</td>
+                {"".join(tfoot_month_tds)}
+                <td style="text-align: right; color: #047857; font-weight: 700; font-size: 13px; background: #e6fffa;">{escape(grand_total_str)}</td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+        """
 
     body = f"""
     {error_html}
@@ -636,6 +777,7 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
     {filters_html}
     {add_staff_form_html}
     {matrix_html}
+    {payment_matrix_html}
 
     <script>
       (function() {{
@@ -806,10 +948,11 @@ def handle_project_assign_create_post(handler):
 
             staff_ok = conn.execute("""
                 SELECT 1 FROM contract_staff s
+                JOIN contract_staff_links l ON l.staff_id = s.id
                 WHERE s.id = ? 
                   AND (s.status IS NULL OR TRIM(s.status) = '')
-                  AND s.joining_date <= ?
-                  AND (s.tentative_leaving_date IS NULL OR s.tentative_leaving_date = '' OR s.tentative_leaving_date >= ?)
+                  AND l.joining_date <= ?
+                  AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
             """, (staff_id, last_day_str, first_day_str)).fetchone()
 
             if not staff_ok:
@@ -844,7 +987,7 @@ def handle_project_assign_create_post(handler):
                 VALUES (?, ?, ?, ?, ?)
             """, (project_id, staff_id, month, now_iso(), now_iso()))
             new_assign_id = cur.lastrowid
-            log_action(cur, "ASSIGN_STAFF", "project_staff_assignments", new_assign_id, f"Gán nhân sự '{s_name}' vào dự án '{p_name}' tháng {month}")
+            log_action(cur, "ASSIGN_STAFF", "project_staff_assignments", new_assign_id, f"Assigned staff '{s_name}' to project '{p_name}' for month {month}")
         conn.commit()
     except Exception as e:
         send_html(handler, page_projects_assign(error_msg=f"Database error: {str(e)}"), status=500)
@@ -912,9 +1055,10 @@ def handle_available_staff_ajax(handler):
                        COALESCE(v.company_name, v.company_name_vi) AS vendor_name
                 FROM contract_staff s
                 JOIN vendors v ON v.id = s.vendor_id
+                JOIN contract_staff_links l ON l.staff_id = s.id
                 WHERE (s.status IS NULL OR TRIM(s.status) = '')
-                  AND s.joining_date <= ?
-                  AND (s.tentative_leaving_date IS NULL OR s.tentative_leaving_date = '' OR s.tentative_leaving_date >= ?)
+                  AND l.joining_date <= ?
+                  AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
                   AND s.id NOT IN (
                       SELECT staff_id FROM project_staff_assignments WHERE month = ?
                   )
@@ -988,10 +1132,11 @@ def handle_project_toggle_assignment_ajax(handler):
 
             staff_ok = conn.execute("""
                 SELECT 1 FROM contract_staff s
+                JOIN contract_staff_links l ON l.staff_id = s.id
                 WHERE s.id = ? 
                   AND (s.status IS NULL OR TRIM(s.status) = '')
-                  AND s.joining_date <= ?
-                  AND (s.tentative_leaving_date IS NULL OR s.tentative_leaving_date = '' OR s.tentative_leaving_date >= ?)
+                  AND l.joining_date <= ?
+                  AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
             """, (staff_id, last_day_str, first_day_str)).fetchone()
 
             if not staff_ok:
@@ -1028,7 +1173,7 @@ def handle_project_toggle_assignment_ajax(handler):
                 VALUES (?, ?, ?, ?, ?)
             """, (project_id, staff_id, month, now_iso(), now_iso()))
             new_assign_id = cur.lastrowid
-            log_action(cur, "ASSIGN_STAFF", "project_staff_assignments", new_assign_id, f"Gán nhân sự '{s_name}' vào dự án '{p_name}' tháng {month}")
+            log_action(cur, "ASSIGN_STAFF", "project_staff_assignments", new_assign_id, f"Assigned staff '{s_name}' to project '{p_name}' for month {month}")
             conn.commit()
             
         else:
@@ -1044,7 +1189,7 @@ def handle_project_toggle_assignment_ajax(handler):
                 DELETE FROM project_staff_assignments 
                 WHERE project_id = ? AND staff_id = ? AND month = ?
             """, (project_id, staff_id, month))
-            log_action(cur, "UNASSIGN_STAFF", "project_staff_assignments", None, f"Hủy gán nhân sự '{s_name}' khỏi dự án '{p_name}' tháng {month}")
+            log_action(cur, "UNASSIGN_STAFF", "project_staff_assignments", None, f"Unassigned staff '{s_name}' from project '{p_name}' for month {month}")
             conn.commit()
             
         handler.send_response(200)
@@ -1065,11 +1210,246 @@ def page_project_edit(project_id: int, error_msg: str | None = None):
     conn = db_connect()
     try:
         project = conn.execute("SELECT * FROM projects WHERE id = ?", (project_id,)).fetchone()
+        if not project:
+            return layout("Error", f"<div class='card danger'>Project ID={project_id} not found. <a href='/projects'>Back to Projects</a></div>")
+
+        # 1. Fetch assignments
+        assignments = conn.execute("""
+            SELECT staff_id, month 
+            FROM project_staff_assignments 
+            WHERE project_id = ?
+        """, (project_id,)).fetchall()
+
+        payroll_table_html = ""
+        if assignments:
+            staff_ids = list({a["staff_id"] for a in assignments})
+            
+            # Fetch links
+            placeholders = ",".join("?" for _ in staff_ids)
+            links = conn.execute(f"""
+                SELECT id, staff_id, contract_id, annex_id, joining_date, tentative_leaving_date
+                FROM contract_staff_links
+                WHERE staff_id IN ({placeholders})
+            """, staff_ids).fetchall()
+            
+            contract_ids = list({lnk["contract_id"] for lnk in links})
+            contracts_map = {}
+            if contract_ids:
+                c_placeholders = ",".join("?" for _ in contract_ids)
+                contracts_data = conn.execute(f"""
+                    SELECT id, framework_no, framework_name, start_date, end_date
+                    FROM contracts
+                    WHERE id IN ({c_placeholders})
+                """, contract_ids).fetchall()
+                contracts_map = {c["id"]: c for c in contracts_data}
+                
+            annex_ids = list({lnk["annex_id"] for lnk in links if lnk["annex_id"] is not None})
+            annexes_map = {}
+            if annex_ids:
+                a_placeholders = ",".join("?" for _ in annex_ids)
+                annexes_data = conn.execute(f"""
+                    SELECT id, contract_id, annex_name, start_date, end_date
+                    FROM contract_annexes
+                    WHERE id IN ({a_placeholders})
+                """, annex_ids).fetchall()
+                annexes_map = {a["id"]: a for a in annexes_data}
+                
+            summaries_rows = conn.execute(f"""
+                SELECT staff_id, month, total_amount
+                FROM monthly_attendance_summary
+                WHERE staff_id IN ({placeholders})
+            """, staff_ids).fetchall()
+            summaries_map = {(s["staff_id"], s["month"]): s["total_amount"] for s in summaries_rows}
+            
+            def get_active_link(staff_id, month_str):
+                try:
+                    yr, mn = map(int, month_str.split("-"))
+                    month_start = f"{yr:04d}-{mn:02d}-01"
+                    month_end = f"{yr:04d}-{mn:02d}-{calendar.monthrange(yr, mn)[1]:02d}"
+                except Exception:
+                    return None
+                
+                for lnk in links:
+                    if lnk["staff_id"] != staff_id:
+                        continue
+                    join_date = lnk["joining_date"] or "0000-00-00"
+                    if join_date == "":
+                        join_date = "0000-00-00"
+                    leave_date = lnk["tentative_leaving_date"] or "9999-12-31"
+                    if leave_date == "":
+                        leave_date = "9999-12-31"
+                    if join_date <= month_end and leave_date >= month_start:
+                        return lnk
+                return None
+                
+            def generate_months(start_date_str, end_date_str):
+                if not start_date_str:
+                    return []
+                try:
+                    s_yr, s_mn = map(int, start_date_str.split("-")[:2])
+                    if end_date_str:
+                        e_yr, e_mn = map(int, end_date_str.split("-")[:2])
+                    else:
+                        e_yr, e_mn = s_yr, s_mn + 11
+                except Exception:
+                    return []
+                res = []
+                curr_yr, curr_mn = s_yr, s_mn
+                while (curr_yr < e_yr) or (curr_yr == e_yr and curr_mn <= e_mn):
+                    res.append(f"{curr_yr:04d}-{curr_mn:02d}")
+                    curr_mn += 1
+                    if curr_mn > 12:
+                        curr_mn = 1
+                        curr_yr += 1
+                return res
+
+            # Determine all months in scope
+            all_months_set = set()
+            for a in assignments:
+                all_months_set.add(a["month"])
+            for c in contracts_map.values():
+                for m in generate_months(c["start_date"], c["end_date"]):
+                    all_months_set.add(m)
+            for a in annexes_map.values():
+                for m in generate_months(a["start_date"], a["end_date"]):
+                    all_months_set.add(m)
+            
+            sorted_all_months = sorted(list(all_months_set))
+            
+            # Populate grid data
+            grid_data = {} # (contract_id, annex_id) -> {month: amount}
+            row_names = {}
+            
+            for a in assignments:
+                sid = a["staff_id"]
+                m = a["month"]
+                lnk = get_active_link(sid, m)
+                if lnk:
+                    c_id = lnk["contract_id"]
+                    a_id = lnk["annex_id"]
+                else:
+                    c_id = "unknown"
+                    a_id = None
+                
+                key = (c_id, a_id)
+                if key not in grid_data:
+                    grid_data[key] = {mon: 0.0 for mon in sorted_all_months}
+                    if c_id == "unknown":
+                        row_names[key] = "Unknown Contract"
+                    else:
+                        c_info = contracts_map.get(c_id)
+                        c_no = c_info["framework_no"] if c_info else f"ID {c_id}"
+                        if a_id is not None:
+                            a_info = annexes_map.get(a_id)
+                            a_name = a_info["annex_name"] if a_info else f"PL ID {a_id}"
+                            row_names[key] = f"Annex: {a_name} (Contract: {c_no})"
+                        else:
+                            row_names[key] = f"Framework Contract: {c_no} (Main Section)"
+                
+                amt = summaries_map.get((sid, m), 0.0)
+                grid_data[key][m] += amt
+                
+            if grid_data:
+                col_totals = {mon: 0.0 for mon in sorted_all_months}
+                grand_total = 0.0
+                
+                th_elements = "".join(f"<th style='text-align:right; min-width:80px;'>{m}</th>" for m in sorted_all_months)
+                
+                trs = []
+                sorted_keys = sorted(grid_data.keys(), key=lambda k: row_names[k])
+                for key in sorted_keys:
+                    name = row_names[key]
+                    amounts = grid_data[key]
+                    row_total = sum(amounts.values())
+                    grand_total += row_total
+                    
+                    td_elements = []
+                    for m in sorted_all_months:
+                        val = amounts[m]
+                        col_totals[m] += val
+                        val_str = f"{int(round(val)):,}" if val > 0 else "-"
+                        td_elements.append(f"<td style='text-align:right; padding:10px 8px;'>{val_str}</td>")
+                        
+                    row_total_str = f"{int(round(row_total)):,}" if row_total > 0 else "0"
+                    trs.append(f"""
+                    <tr style="border-bottom:1px solid var(--border);">
+                      <td style="padding:10px 8px; font-weight:600; color:var(--primary);">{escape(name)}</td>
+                      {"".join(td_elements)}
+                      <td style="text-align:right; padding:10px 8px; font-weight:bold; background:#f8fafc;">{row_total_str}</td>
+                    </tr>
+                    """)
+                    
+                footer_tds = []
+                for m in sorted_all_months:
+                    val = col_totals[m]
+                    val_str = f"{int(round(val)):,}" if val > 0 else "0"
+                    footer_tds.append(f"<td style='text-align:right; padding:10px 8px; font-weight:bold;'>{val_str}</td>")
+                    
+                grand_total_str = f"{int(round(grand_total)):,}"
+                th_elements = "".join(f'<th style="text-align:right; font-size:12px; width:90px; padding:10px 8px; color:var(--text-muted);">{m}</th>' for m in sorted_all_months)
+                
+                payroll_table_html = f"""
+                <div class="card" style="margin-top: 24px; padding:0; overflow-x:auto;">
+                  <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); background: #f8fafc;">
+                    <h3 style="margin: 0; color: var(--text-primary); font-size:16px;">Payroll Report by Contract / Annex</h3>
+                    <p style="margin: 4px 0 0 0; font-size: 12px; color: var(--text-muted);">
+                      Summary of actual payments based on monthly attendance allocated to this project.
+                    </p>
+                  </div>
+                  <table style="width:100%; border-collapse:collapse; margin:0; border:none; min-width:600px;">
+                    <thead>
+                      <tr style="background:#f8fafc; border-bottom:1px solid var(--border);">
+                        <th style="text-align:left; padding:10px 8px; font-size:12px; color:var(--text-muted); width:200px;">Contract / Annex</th>
+                        {th_elements}
+                        <th style="text-align:right; padding:10px 8px; font-size:12px; color:var(--text-muted); width:100px; background:#f8fafc;">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {"".join(trs)}
+                    </tbody>
+                    <tfoot>
+                      <tr style="background:#f8fafc; border-top:1px solid var(--border); font-weight: bold;">
+                        <td style="padding:10px 8px; font-size:12px; color:var(--text-primary);">Monthly Total</td>
+                        {"".join(footer_tds)}
+                        <td style="text-align:right; padding:10px 8px; color:var(--primary); background:#f8fafc;">{grand_total_str}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                  <div style="padding: 16px 20px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; align-items: center; background: #f8fafc;">
+                    <span style="font-size:14px; font-weight:bold; color:var(--text-primary);">Total Paid Amount:&nbsp;<span style="color:var(--primary); font-size:16px;">{grand_total_str} VND</span></span>
+                  </div>
+                </div>
+                """
+            else:
+                payroll_table_html = f"""
+                <div class="card" style="margin-top: 24px; padding:0; overflow-x:auto;">
+                  <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); background: #f8fafc;">
+                    <h3 style="margin: 0; color: var(--text-primary); font-size:16px;">Payroll Report by Contract / Annex</h3>
+                    <p style="margin: 4px 0 0 0; font-size: 12px; color: var(--text-muted);">
+                      Summary of actual payments based on monthly attendance allocated to this project.
+                    </p>
+                  </div>
+                  <div style="text-align: center; padding: 20px; color: var(--text-muted);">
+                    No payroll or staff assignment data found for this project.
+                  </div>
+                </div>
+                """
+        else:
+            payroll_table_html = f"""
+            <div class="card" style="margin-top: 24px; padding:0; overflow-x:auto;">
+              <div style="padding: 16px 20px; border-bottom: 1px solid var(--border); background: #f8fafc;">
+                <h3 style="margin: 0; color: var(--text-primary); font-size:16px;">Payroll Report by Contract / Annex</h3>
+                <p style="margin: 4px 0 0 0; font-size: 12px; color: var(--text-muted);">
+                  Summary of actual payments based on monthly attendance allocated to this project.
+                </p>
+              </div>
+              <div style="text-align: center; padding: 20px; color: var(--text-muted);">
+                No payroll or staff assignment data found for this project.
+              </div>
+            </div>
+            """
     finally:
         conn.close()
-
-    if not project:
-        return layout("Error", f"<div class='card danger'>Project ID={project_id} not found. <a href='/projects'>Back to Projects</a></div>")
 
     error_html = f'<div class="card danger"><b>Error:</b> {escape(error_msg)}</div>' if error_msg else ""
     
@@ -1120,6 +1500,8 @@ def page_project_edit(project_id: int, error_msg: str | None = None):
         </div>
       </form>
     </div>
+    
+    {payroll_table_html}
     """
     return layout(f"Edit Project: {escape(project['short_name'])}", body)
 
@@ -1163,7 +1545,7 @@ def handle_project_update_post(handler):
                 updated_at = ?
             WHERE id = ?
         """, (short_name, full_name, it_outsourcing_budget, os_start_date, os_end_date, now_iso(), project_id))
-        log_action(cur, "UPDATE_PROJECT", "projects", project_id, f"Cập nhật thông tin dự án '{short_name}': {full_name}")
+        log_action(cur, "UPDATE_PROJECT", "projects", project_id, f"Updated project '{short_name}': {full_name}")
         conn.commit()
     except Exception as e:
         send_html(handler, page_project_edit(project_id, f"Database error: {str(e)}"), status=500)
@@ -1172,3 +1554,156 @@ def handle_project_update_post(handler):
         conn.close()
 
     redirect(handler, "/projects")
+
+
+def handle_projects_assign_export_csv(handler):
+    parsed = urllib.parse.urlparse(handler.path)
+    qs = urllib.parse.parse_qs(parsed.query)
+
+    project_id_raw = qs.get("project_id", [""])[0]
+    vendor_id_raw = qs.get("vendor_id", [""])[0]
+
+    if not project_id_raw.isdigit():
+        send_html(handler, layout("Error", "<div class='card danger'>Invalid or missing Project ID</div>"), status=400)
+        return
+
+    project_id = int(project_id_raw)
+    selected_vendor_id = vendor_id_raw if vendor_id_raw.isdigit() else None
+
+    conn = db_connect()
+    try:
+        project_row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not project_row:
+            send_html(handler, layout("Error", "<div class='card danger'>Project not found</div>"), status=404)
+            return
+
+        months = []
+        start_date_str = project_row["os_start_date"]
+        end_date_str = project_row["os_end_date"]
+        if start_date_str and end_date_str:
+            try:
+                start = datetime.strptime(start_date_str.strip(), "%Y-%m-%d")
+                end = datetime.strptime(end_date_str.strip(), "%Y-%m-%d")
+                current = datetime(start.year, start.month, 1)
+                limit = datetime(end.year, end.month, 1)
+                while current <= limit:
+                    months.append(current.strftime("%Y-%m"))
+                    if current.month == 12:
+                        current = datetime(current.year + 1, 1, 1)
+                    else:
+                        current = datetime(current.year, current.month + 1, 1)
+            except Exception:
+                pass
+
+        if not months:
+            now = datetime.now()
+            current = datetime(now.year, now.month, 1)
+            for _ in range(6):
+                months.append(current.strftime("%Y-%m"))
+                if current.month == 12:
+                    current = datetime(current.year + 1, 1, 1)
+                else:
+                    current = datetime(current.year, current.month + 1, 1)
+
+        staff_params = [project_id]
+        staff_where = [
+            "cs.id IN (SELECT DISTINCT staff_id FROM project_staff_assignments WHERE project_id = ?)",
+            "(cs.status IS NULL OR TRIM(cs.status) = '')"
+        ]
+        if selected_vendor_id:
+            staff_where.append("cs.vendor_id = ?")
+            staff_params.append(int(selected_vendor_id))
+
+        staffs = conn.execute(f"""
+            SELECT cs.id, cs.full_name_vi,
+                   COALESCE(v.company_name, v.company_name_vi) AS vendor_name
+            FROM contract_staff cs
+            JOIN vendors v ON v.id = cs.vendor_id
+            WHERE {" AND ".join(staff_where)}
+            ORDER BY v.company_name ASC, cs.full_name_vi ASC
+        """, staff_params).fetchall()
+
+        assignments_map = {}
+        if months:
+            placeholders = ",".join("?" for _ in months)
+            assign_rows = conn.execute(f"""
+                SELECT psa.staff_id, psa.month, psa.project_id
+                FROM project_staff_assignments psa
+                WHERE psa.month IN ({placeholders})
+            """, months).fetchall()
+            for ar in assign_rows:
+                assignments_map[(ar["staff_id"], ar["month"])] = ar["project_id"]
+
+        summary_map = {}
+        if staffs and months:
+            assigned_staff_ids = [s["id"] for s in staffs]
+            s_placeholders = ",".join("?" for _ in assigned_staff_ids)
+            m_placeholders = ",".join("?" for _ in months)
+            sum_rows = conn.execute(f"""
+                SELECT staff_id, month, total_amount, locked
+                FROM monthly_attendance_summary
+                WHERE staff_id IN ({s_placeholders}) AND month IN ({m_placeholders})
+            """, assigned_staff_ids + months).fetchall()
+            for sr in sum_rows:
+                summary_map[(sr["staff_id"], sr["month"])] = (sr["locked"], sr["total_amount"])
+
+    finally:
+        conn.close()
+
+    output = io.StringIO()
+    output.write('\ufeff')
+    writer = csv.writer(output, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+
+    writer.writerow(["Project Short Name", project_row["short_name"]])
+    writer.writerow(["Project Full Name", project_row["full_name"]])
+    writer.writerow(["OS Period", f"{project_row['os_start_date'] or 'N/A'} to {project_row['os_end_date'] or 'N/A'}"])
+    writer.writerow([])
+
+    header = ["No.", "Staff Name", "Company (Vendor)"] + months + ["Total Locked Payment (VND)"]
+    writer.writerow(header)
+
+    month_totals = {m: 0.0 for m in months}
+    grand_total = 0.0
+
+    for idx, s in enumerate(staffs, 1):
+        row = [idx, s["full_name_vi"], s["vendor_name"]]
+        staff_total = 0.0
+        for m in months:
+            assigned_pid = assignments_map.get((s["id"], m))
+            if assigned_pid == project_id:
+                sum_info = summary_map.get((s["id"], m))
+                if sum_info:
+                    locked, amt = sum_info
+                    if locked == 1:
+                        amt_val = amt or 0.0
+                        staff_total += amt_val
+                        month_totals[m] += amt_val
+                        grand_total += amt_val
+                        row.append(f"{amt_val:,.2f}")
+                    else:
+                        row.append("Unlocked")
+                else:
+                    row.append("-")
+            else:
+                row.append("-")
+        row.append(f"{staff_total:,.2f}" if staff_total > 0 else "-")
+        writer.writerow(row)
+
+    total_row = ["", "Total Locked Payment (VND)", ""]
+    for m in months:
+        m_tot = month_totals[m]
+        total_row.append(f"{m_tot:,.2f}" if m_tot > 0 else "-")
+    total_row.append(f"{grand_total:,.2f}" if grand_total > 0 else "-")
+    writer.writerow(total_row)
+
+    csv_bytes = output.getvalue().encode("utf-8")
+
+    clean_short_name = "".join(c for c in (project_row["short_name"] or "Project") if c.isalnum() or c in ("-", "_")).strip()
+    fn = f"Payroll_Matrix_{clean_short_name}_{months[0]}_to_{months[-1]}.csv"
+
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/csv; charset=utf-8")
+    handler.send_header("Content-Length", str(len(csv_bytes)))
+    handler.send_header("Content-Disposition", f'attachment; filename="{fn}"')
+    handler.end_headers()
+    handler.wfile.write(csv_bytes)

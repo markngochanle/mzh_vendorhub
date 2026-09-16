@@ -138,12 +138,18 @@ class BaseTestCase(unittest.TestCase):
         # 5. Insert Staff
         cur.execute("""
             INSERT INTO contract_staff (
-                full_name_vi, vendor_id, project_name, position, contract_id, annex_id,
-                joining_date, tentative_leaving_date, monthly_rate, manday_rate,
+                full_name_vi, vendor_id, position,
                 paid_leave_total_hours, paid_leave_used_hours, ot, status, work_shift
-            ) VALUES (?, ?, 'Core Banking', 'Developer', ?, ?, '2025-06-01', '2026-05-31', 45000000.0, 2000000.0, 12.0, 4.0, 1, NULL, '8:00 - 17:00')
-        """, ('Nguyễn Văn An', self.seller_id, self.contract_id, self.annex_id))
+            ) VALUES (?, ?, 'Developer', 12.0, 4.0, 1, NULL, '8:00 - 17:00')
+        """, ('Nguyễn Văn An', self.seller_id))
         self.staff_id = cur.lastrowid
+
+        # 6. Insert Contract Staff Link
+        cur.execute("""
+            INSERT INTO contract_staff_links (
+                staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, created_at, updated_at
+            ) VALUES (?, ?, ?, 45000000.0, 2000000.0, '2025-06-01', '2026-05-31', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        """, (self.staff_id, self.contract_id, self.annex_id))
 
         self.conn.commit()
 
@@ -350,19 +356,32 @@ class TestContracts(BaseTestCase):
 # ==================== 4. Test Staff / Shifts ====================
 class TestStaff(BaseTestCase):
     def test_check_no_overlap(self):
-        # 1. Same project overlap test
-        ok, msg = staff.check_no_overlap(self.conn, None, self.seller_id, "Nguyễn Văn An", "2025-07-01", "2025-08-01")
+        cur = self.conn.cursor()
+        # 1. Same staff overlap test
+        ok, msg = staff.check_no_overlap(cur, None, self.staff_id, "2025-07-01", "2025-08-01")
         self.assertFalse(ok)
         self.assertIn("Overlap with", msg)
 
-        # 2. Distinct name, no overlap issues
-        ok_diff, msg_diff = staff.check_no_overlap(self.conn, None, self.seller_id, "Trần Thị Bình", "2025-07-01", "2025-08-01")
+        # 2. Distinct staff_id, no overlap issues
+        ok_diff, msg_diff = staff.check_no_overlap(cur, None, 9999, "2025-07-01", "2025-08-01")
         self.assertTrue(ok_diff)
 
     def test_page_staff_shifts(self):
         html = staff.page_staff_shifts()
         self.assertIn("Nguyễn Văn An", html)
         self.assertIn("8:00 - 17:00", html)
+
+    def test_page_staff_list_locked_payroll(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-05', 21.0, 9.0, 0.0, 7.83, 2857142.85, 28510715.0, 1)
+        """, (self.staff_id,))
+        self.conn.commit()
+
+        html = staff.page_staff_list("", "", "", "", "all", return_to="/staff")
+        self.assertIn("Locked Payroll", html)
+        self.assertIn("28,510,715.00", html)
 
     def test_handle_staff_create_post(self):
         body = f"full_name_vi=Lê+Hoàng+Long&vendor_id={self.seller_id}&contract_id={self.contract_id}&joining_date=2026-01-01&ot=1&work_shift=8%3A30+-+17%3A30".encode()
@@ -373,6 +392,85 @@ class TestStaff(BaseTestCase):
         inserted = self.conn.execute("SELECT * FROM contract_staff WHERE full_name_vi='Lê Hoàng Long'").fetchone()
         self.assertIsNotNone(inserted)
         self.assertEqual(inserted["work_shift"], "8:30 - 17:30")
+        self.assertEqual(inserted["joining_date"], "2026-01-01")
+
+    def test_page_staff_form_with_none_values(self):
+        cur = self.conn.cursor()
+        # Insert a contract with None values
+        cur.execute("""
+            INSERT INTO contracts (buyer_vendor_id, seller_vendor_id, framework_no, framework_name, start_date, is_active)
+            VALUES (?, ?, NULL, NULL, '2026-01-01', 1)
+        """, (self.buyer_id, self.seller_id))
+        c_none_id = cur.lastrowid
+
+        # Insert an annex with None values
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, value, is_active)
+            VALUES (?, NULL, 100000000.0, 1)
+        """, (c_none_id,))
+        a_none_id = cur.lastrowid
+
+        # Insert link for the staff
+        cur.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, created_at, updated_at)
+            VALUES (?, ?, ?, 50000000.0, 2500000.0, '2026-01-01', '2026-12-31', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        """, (self.staff_id, c_none_id, a_none_id))
+        self.conn.commit()
+
+        # Load staff row
+        staff_row = self.conn.execute("SELECT * FROM contract_staff WHERE id=?", (self.staff_id,)).fetchone()
+        
+        # Render staff form in edit mode
+        html = staff.page_staff_form("edit", staff_row, None, return_to="/staff")
+        
+        # Verify render completes successfully and contains expected elements
+        self.assertIn("Contract & Annex Allocations History", html)
+
+    def test_page_staff_form_payroll(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, is_active)
+            VALUES ('TEST-STAFF-PROJ', 'Test Staff Project', 1)
+        """)
+        p_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO project_staff_assignments (project_id, staff_id, month)
+            VALUES (?, ?, '2026-05')
+        """, (p_id, self.staff_id))
+
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-05', 21.0, 9.0, 0.0, 7.83, 2857142.85, 28510715.0, 1)
+        """, (self.staff_id,))
+        self.conn.commit()
+
+        staff_row = self.conn.execute("SELECT * FROM contract_staff WHERE id=?", (self.staff_id,)).fetchone()
+        html = staff.page_staff_form("edit", staff_row, None, return_to="/staff")
+
+        self.assertIn("Payroll Report by Project", html)
+        self.assertIn("TEST-STAFF-PROJ", html)
+        self.assertIn("28,510,715", html)
+
+    def test_handle_staff_update_post(self):
+        # Insert a link first that does not overlap with the mock data (which is 2025-06-01 to 2026-05-31)
+        self.conn.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, created_at, updated_at)
+            VALUES (?, ?, NULL, 50000000.0, NULL, '2026-06-01', '2026-12-31', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        """, (self.staff_id, self.contract_id))
+        self.conn.commit()
+
+        body = f"id={self.staff_id}&full_name_vi=Nguyễn+Văn+An+Update&vendor_id={self.seller_id}&joining_date=2026-07-01&tentative_leaving_date=2026-11-30&paid_leave_total_hours=12&paid_leave_used_hours=2&ot=1&work_shift=8%3A30+-+17%3A30".encode()
+        handler = MockHandler(body=body, headers={"content-length": str(len(body))})
+        staff.handle_staff_update_post(handler)
+
+        self.assertEqual(handler.response_status, 302)
+        
+        # Verify staff info updated (joining_date and tentative_leaving_date are saved directly to contract_staff)
+        inserted = self.conn.execute("SELECT * FROM contract_staff WHERE id=?", (self.staff_id,)).fetchone()
+        self.assertEqual(inserted["full_name_vi"], "Nguyễn Văn An Update")
+        self.assertEqual(inserted["joining_date"], "2026-07-01")
+        self.assertEqual(inserted["tentative_leaving_date"], "2026-11-30")
 
 
 # ==================== 5. Test Invoices ====================
@@ -472,9 +570,11 @@ Content-Disposition: form-data; name="xml_content"
         self.assertIsNotNone(inserted)
 
     def test_invoice_payroll_reconciliation(self):
+        # Extend leaving date so Nguyễn Văn An is active in June 2026
+        cur = self.conn.cursor()
+        cur.execute("UPDATE contract_staff_links SET tentative_leaving_date = '2026-06-30' WHERE staff_id = ?", (self.staff_id,))
         # 1. Setup mock monthly attendance summary for self.staff_id (Nguyễn Văn An, contract id=self.contract_id)
         # Nguyễn Văn An belongs to contract self.contract_id (framework_no = 'MHB/FPT/2025/001')
-        cur = self.conn.cursor()
         cur.execute("""
             INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
             VALUES (?, '2026-06', 20.0, 20.0, 0.0, 0.0, 2500000.0, 50000000.0, 0)
@@ -569,6 +669,7 @@ Content-Disposition: form-data; name="xml_content"
 
     def test_force_match(self):
         cur = self.conn.cursor()
+        cur.execute("UPDATE contract_staff_links SET tentative_leaving_date = '2026-06-30' WHERE staff_id = 1")
         cur.execute("""
             INSERT INTO invoices (
                 service_year, service_month, service_day, contract_no,
@@ -645,7 +746,7 @@ class TestAttendance(BaseTestCase):
         # 1. Thêm dữ liệu chấm công cho Nguyễn Văn An (ID: 1)
         cur = self.conn.cursor()
         # Extend leaving date so he is active in June 2026
-        cur.execute("UPDATE contract_staff SET tentative_leaving_date = '2026-06-30' WHERE id = 1")
+        cur.execute("UPDATE contract_staff_links SET tentative_leaving_date = '2026-06-30' WHERE staff_id = 1")
         cur.execute("""
             INSERT INTO attendance (staff_id, date, work_hours, ot_hours)
             VALUES (1, '2026-06-01', 8.0, 2.0)
@@ -668,6 +769,8 @@ class TestAttendance(BaseTestCase):
     def test_monthly_auto_sync_from_daily_logs(self):
         # 1. Tạo summary cũ với actual_days = 2.5
         cur = self.conn.cursor()
+        cur.execute("UPDATE contract_staff_links SET tentative_leaving_date = '2026-06-30' WHERE staff_id = ?", (self.staff_id,))
+        self.conn.commit()
         cur.execute("""
             INSERT INTO monthly_attendance_summary (
                 staff_id, month, standard_days, actual_days, paid_leave_days,
@@ -748,6 +851,9 @@ class TestAttendance(BaseTestCase):
         self.assertEqual(unlocked["locked"], 0)
 
     def test_monthly_attendance_calculations_and_save(self):
+        cur = self.conn.cursor()
+        cur.execute("UPDATE contract_staff_links SET tentative_leaving_date = '2026-06-30' WHERE staff_id = ?", (self.staff_id,))
+        self.conn.commit()
         # 1. Lock attendance first so they appear in monthly summary
         handler_lock = MockHandler(path=f"/attendance/lock?staff_id={self.staff_id}&month=2026-06")
         attendance.handle_attendance_lock_get(handler_lock)
@@ -891,6 +997,14 @@ class TestAttendance(BaseTestCase):
             conn.close()
 
     def test_attendance_manual_totals(self):
+        # Extend leaving date so Nguyễn Văn An is active in June 2026
+        conn = attendance.db_connect()
+        try:
+            conn.execute("UPDATE contract_staff_links SET tentative_leaving_date = '2026-06-30' WHERE staff_id = ?", (self.staff_id,))
+            conn.commit()
+        finally:
+            conn.close()
+
         # Mock save post with manual totals
         body = f"month=2026-06&total_work_{self.staff_id}=164.0&total_ot_{self.staff_id}=10.0".encode('utf-8')
         handler = MockHandler()
@@ -1018,6 +1132,7 @@ class TestNewImprovements(BaseTestCase):
     def test_monthly_payroll_export_csv(self):
         # 1. Setup daily attendance lock so staff appears in monthly summary
         cur = self.conn.cursor()
+        cur.execute("UPDATE contract_staff_links SET tentative_leaving_date = '2026-06-30' WHERE staff_id = 1")
         cur.execute("INSERT INTO attendance_locks (staff_id, month, locked) VALUES (1, '2026-06', 1)")
         # Insert a mock summary row
         cur.execute("""
@@ -1065,7 +1180,44 @@ class TestReferences(BaseTestCase):
         
         html = contracts.page_contract_references()
         self.assertIn("REF-001", html)
-        self.assertIn("Hợp đồng khung", html)
+        self.assertIn("Framework Contract", html)
+
+    def test_page_contract_references_filters(self):
+        # Create a reference first
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contract_references (contract_id, annex_id, month, reference_number)
+            VALUES (?, ?, '2025-06', 'REF-FILTERED-001')
+        """, (self.contract_id, self.annex_id))
+        self.conn.commit()
+
+        # Test filtering by matching vendor/company
+        html = contracts.page_contract_references(vendor_id=str(self.seller_id))
+        self.assertIn("REF-FILTERED-001", html)
+
+        # Test filtering by matching contract
+        html_c = contracts.page_contract_references(contract_id=str(self.contract_id))
+        self.assertIn("REF-FILTERED-001", html_c)
+
+        # Test filtering by matching annex
+        html_a = contracts.page_contract_references(annex_id=str(self.annex_id))
+        self.assertIn("REF-FILTERED-001", html_a)
+
+        # Test filtering by matching month
+        html_m = contracts.page_contract_references(month="2025-06")
+        self.assertIn("REF-FILTERED-001", html_m)
+
+        # Test filtering by non-matching month (out of range)
+        html_none = contracts.page_contract_references(month="2025-08")
+        self.assertNotIn("REF-FILTERED-001", html_none)
+
+        # Test filtering by sent_mgs = "no" (should contain this month since no invoice is sent)
+        html_unsent = contracts.page_contract_references(sent_mgs="no")
+        self.assertIn("REF-FILTERED-001", html_unsent)
+
+        # Test filtering by sent_mgs = "yes" (should be empty since no invoice has been sent yet)
+        html_sent = contracts.page_contract_references(sent_mgs="yes")
+        self.assertNotIn("REF-FILTERED-001", html_sent)
 
     def test_handle_save_reference_ajax_success(self):
         import json
@@ -1180,13 +1332,44 @@ class TestDashboard(BaseTestCase):
         self.assertIn("Active Staff", output)
         self.assertIn("MHB/EXPIRING/2026", output)
 
+    def test_page_dashboard_filtering_and_payroll_trend(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, it_outsourcing_budget, is_active)
+            VALUES ('DASH-PROJ', 'Dashboard Filter Project', 500000000.0, 1)
+        """)
+        p_id = cur.lastrowid
+        
+        cur.execute("""
+            INSERT INTO project_staff_assignments (project_id, staff_id, month)
+            VALUES (?, ?, '2026-05')
+        """, (p_id, self.staff_id))
+        
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-05', 21.0, 9.0, 0.0, 7.83, 2857142.85, 28510715.0, 1)
+        """, (self.staff_id,))
+        self.conn.commit()
+        
+        handler = StubHandler("/dashboard", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+        self.assertIn("VND Payroll Trend (by Month)", output)
+        self.assertIn("28,510,715", output)
+        self.assertIn("DASH-PROJ", output)
+        
+        handler_f = StubHandler(f"/dashboard?project_id={p_id}&start_month=2026-01&end_month=2026-12&vendor_id={self.seller_id}", "GET")
+        handler_f.do_GET()
+        output_f = handler_f.get_output_text()
+        self.assertIn("DASH-PROJ", output_f)
+
 
 # ==================== 11. Test Annex Filters ====================
 class TestAnnexFilters(BaseTestCase):
     def test_annex_filter_handling(self):
         # Extend leaving date so Nguyễn Văn An is active in June 2026 for attendance tests
         cur = self.conn.cursor()
-        cur.execute("UPDATE contract_staff SET tentative_leaving_date = '2026-06-30' WHERE id = ?", (self.staff_id,))
+        cur.execute("UPDATE contract_staff_links SET tentative_leaving_date = '2026-06-30' WHERE staff_id = ?", (self.staff_id,))
         self.conn.commit()
 
         # 1. Test GET /staff with annex_id
@@ -1231,6 +1414,22 @@ class TestAnnexFilters(BaseTestCase):
         output = handler.get_output_text()
         self.assertNotIn("Nguyễn Văn An", output)
 
+    def test_monthly_multiselect_filters(self):
+        cur = self.conn.cursor()
+        cur.execute("INSERT OR REPLACE INTO attendance_locks (staff_id, month, locked) VALUES (?, '2026-05', 1)", (self.staff_id,))
+        cur.execute("INSERT OR REPLACE INTO attendance_locks (staff_id, month, locked) VALUES (?, '2026-06', 1)", (self.staff_id,))
+        self.conn.commit()
+
+        # Multi-month query
+        handler = StubHandler(f"/attendance/monthly?month=2026-05&month=2026-06&vendor_id={self.seller_id}", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+        self.assertIn("Nguyễn Văn An", output)
+        self.assertIn("ms-month", output)
+        self.assertIn("ms-vendor", output)
+        self.assertIn("ms-contract", output)
+        self.assertIn("ms-annex", output)
+
 
 # ==================== 12. Test Improvements ====================
 class TestDashboardAndReferencesImprovements(BaseTestCase):
@@ -1245,24 +1444,40 @@ class TestDashboardAndReferencesImprovements(BaseTestCase):
         cur = self.conn.cursor()
         # Clean current staff to have a clean count
         cur.execute("DELETE FROM contract_staff")
+        cur.execute("DELETE FROM contract_staff_links")
         
         # 1. Active staff (valid today)
         cur.execute("""
-            INSERT INTO contract_staff (full_name_vi, vendor_id, contract_id, joining_date, tentative_leaving_date, ot, status)
-            VALUES ('Staff Active 1', ?, ?, ?, ?, 1, 'active')
-        """, (self.seller_id, self.contract_id, past_join, future_leave))
+            INSERT INTO contract_staff (full_name_vi, vendor_id, ot, status)
+            VALUES ('Staff Active 1', ?, 1, 'active')
+        """, (self.seller_id,))
+        s1_id = cur.lastrowid
+        cur.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, joining_date, tentative_leaving_date, created_at, updated_at)
+            VALUES (?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        """, (s1_id, self.contract_id, past_join, future_leave))
         
         # 2. Staff active but joining date in the future
         cur.execute("""
-            INSERT INTO contract_staff (full_name_vi, vendor_id, contract_id, joining_date, tentative_leaving_date, ot, status)
-            VALUES ('Staff Future', ?, ?, ?, ?, 1, 'active')
-        """, (self.seller_id, self.contract_id, future_join, future_leave))
+            INSERT INTO contract_staff (full_name_vi, vendor_id, ot, status)
+            VALUES ('Staff Future', ?, 1, 'active')
+        """, (self.seller_id,))
+        s_fut_id = cur.lastrowid
+        cur.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, joining_date, tentative_leaving_date, created_at, updated_at)
+            VALUES (?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        """, (s_fut_id, self.contract_id, future_join, future_leave))
         
         # 3. Staff active but leaving date in the past
         cur.execute("""
-            INSERT INTO contract_staff (full_name_vi, vendor_id, contract_id, joining_date, tentative_leaving_date, ot, status)
-            VALUES ('Staff Past Leaving', ?, ?, ?, ?, 1, 'active')
-        """, (self.seller_id, self.contract_id, past_join, past_leave))
+            INSERT INTO contract_staff (full_name_vi, vendor_id, ot, status)
+            VALUES ('Staff Past Leaving', ?, 1, 'active')
+        """, (self.seller_id,))
+        s_past_id = cur.lastrowid
+        cur.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, joining_date, tentative_leaving_date, created_at, updated_at)
+            VALUES (?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        """, (s_past_id, self.contract_id, past_join, past_leave))
         
         # 4. Duplicate staff name (Staff Active 1) with another contract
         cur.execute("""
@@ -1271,9 +1486,9 @@ class TestDashboardAndReferencesImprovements(BaseTestCase):
         """, (self.buyer_id, self.seller_id))
         c2_id = cur.lastrowid
         cur.execute("""
-            INSERT INTO contract_staff (full_name_vi, vendor_id, contract_id, joining_date, tentative_leaving_date, ot, status)
-            VALUES ('Staff Active 1', ?, ?, ?, ?, 1, 'active')
-        """, (self.seller_id, c2_id, past_join, future_leave))
+            INSERT INTO contract_staff_links (staff_id, contract_id, joining_date, tentative_leaving_date, created_at, updated_at)
+            VALUES (?, ?, ?, ?, '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')
+        """, (s1_id, c2_id, past_join, future_leave))
         
         self.conn.commit()
         
@@ -1356,6 +1571,7 @@ class TestProjects(BaseTestCase):
         self.assertIn("TEST-PROJ", html)
         self.assertIn("Test Project Name", html)
         self.assertIn("12,345.67 VND", html)
+        self.assertIn("/projects/assign?project_id=", html)
 
     def test_handle_project_create_post(self):
         body = b"short_name=NEW-PROJ&full_name=New+Project+Full+Name&it_outsourcing_budget=54321.00&os_start_date=2026-01-01&os_end_date=2026-12-31"
@@ -1491,6 +1707,85 @@ class TestProjects(BaseTestCase):
         self.assertIn("2026-04", assigned_months)
         self.assertIn("2026-05", assigned_months)
         self.assertEqual(len(assigned_months), 2)
+
+    def test_page_project_edit_payroll(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, is_active)
+            VALUES ('PAYROLL-PROJ', 'Payroll Project', 1)
+        """)
+        p_id = cur.lastrowid
+        
+        cur.execute("""
+            INSERT INTO project_staff_assignments (project_id, staff_id, month)
+            VALUES (?, ?, '2026-05')
+        """, (p_id, self.staff_id))
+        
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-05', 21.0, 9.0, 0.0, 7.83, 2857142.85, 28510715.0, 1)
+        """, (self.staff_id,))
+        
+        self.conn.commit()
+        
+        html = projects.page_project_edit(p_id)
+        self.assertIn("Payroll Report by Contract / Annex", html)
+        self.assertIn("28,510,715", html)
+
+    def test_locked_payroll_payment_matrix(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, os_start_date, os_end_date, is_active)
+            VALUES ('LOCKED-PROJ', 'Locked Payment Matrix Project', '2026-01-01', '2026-12-31', 1)
+        """)
+        p_id = cur.lastrowid
+        
+        cur.execute("""
+            INSERT INTO project_staff_assignments (project_id, staff_id, month)
+            VALUES (?, ?, '2026-05')
+        """, (p_id, self.staff_id))
+        
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-05', 21.0, 21.0, 0.0, 0.0, 1845238.10, 38750000.0, 1)
+        """, (self.staff_id,))
+        
+        self.conn.commit()
+        
+        html = projects.page_projects_assign(selected_project_id=p_id)
+        self.assertIn("Locked Monthly Payroll & Payment Matrix (VND)", html)
+        self.assertIn("38,750,000.00", html)
+
+    def test_projects_assign_export_csv(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, os_start_date, os_end_date, is_active)
+            VALUES ('EXPORT-PROJ', 'Export Project Test', '2026-01-01', '2026-12-31', 1)
+        """)
+        p_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO project_staff_assignments (project_id, staff_id, month)
+            VALUES (?, ?, '2026-05')
+        """, (p_id, self.staff_id))
+
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-05', 21.0, 21.0, 0.0, 0.0, 1845238.10, 38750000.0, 1)
+        """, (self.staff_id,))
+
+        self.conn.commit()
+
+        handler = StubHandler(f"/projects/assign/export?project_id={p_id}", "GET")
+        projects.handle_projects_assign_export_csv(handler)
+
+        self.assertEqual(handler.response_headers.get("content-type"), "text/csv; charset=utf-8")
+        csv_bytes = handler.wfile.getvalue()
+        self.assertTrue(csv_bytes.startswith(b'\xef\xbb\xbf'))
+        csv_text = csv_bytes.decode("utf-8")
+        self.assertIn("EXPORT-PROJ", csv_text)
+        self.assertIn("Nguyễn Văn An", csv_text)
+        self.assertIn("38,750,000.00", csv_text)
 
 
 if __name__ == "__main__":

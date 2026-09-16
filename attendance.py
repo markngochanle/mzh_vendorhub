@@ -281,20 +281,19 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         last_day_str = f"{month_val}-{num_days:02d}"
 
         where = [
-            "(s.status IS NULL OR s.status <> 'inactive')",
-            "(s.joining_date IS NULL OR s.joining_date = '' OR s.joining_date <= ?)",
-            "(s.tentative_leaving_date IS NULL OR s.tentative_leaving_date = '' OR s.tentative_leaving_date >= ?)"
+            "(s.status IS NULL OR s.status <> 'inactive')"
         ]
-        params = [last_day_str, first_day_str]
+        join_params = [last_day_str, first_day_str]
+        params = []
 
         if vendor_filter is not None:
             where.append("s.vendor_id = ?")
             params.append(vendor_filter)
         if contract_filter is not None:
-            where.append("s.contract_id = ?")
+            where.append("l.contract_id = ?")
             params.append(contract_filter)
         if annex_filter is not None:
-            where.append("s.annex_id = ?")
+            where.append("l.annex_id = ?")
             params.append(annex_filter)
         if q_filter:
             where.append("s.full_name_vi LIKE ?")
@@ -310,32 +309,26 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
                    an.annex_name
             FROM contract_staff s
             JOIN vendors v ON v.id=s.vendor_id
-            JOIN contracts c ON c.id=s.contract_id
-            LEFT JOIN contract_annexes an ON an.id=s.annex_id
+            JOIN contract_staff_links l ON l.staff_id = s.id 
+                AND l.joining_date <= ? 
+                AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+            JOIN contracts c ON c.id=l.contract_id
+            LEFT JOIN contract_annexes an ON an.id=l.annex_id
             {where_sql}
-            ORDER BY s.full_name_vi ASC
-        """, params).fetchall()
+            ORDER BY vendor_name ASC, s.full_name_vi ASC
+        """, join_params + params).fetchall()
 
         # Load active staff và còn hạn hợp đồng trong tháng để hiển thị ở mục Import
-        month_start_date = f"{year:04d}-{month:02d}-01"
-        month_end_date = f"{year:04d}-{month:02d}-{num_days:02d}"
-        
-        import_where = list(where)
-        import_params = list(params)
-        import_where.append("(s.joining_date IS NULL OR s.joining_date <= ?)")
-        import_params.append(month_end_date)
-        import_where.append("(s.tentative_leaving_date IS NULL OR s.tentative_leaving_date >= ?)")
-        import_params.append(month_start_date)
-        
-        import_where_sql = "WHERE " + " AND ".join(import_where)
-        
         import_staff_list = conn.execute(f"""
             SELECT s.id, s.full_name_vi, s.work_shift, s.ot, COALESCE(v.company_name, v.company_name_vi) AS company_name
             FROM contract_staff s
             JOIN vendors v ON v.id = s.vendor_id
-            {import_where_sql}
-            ORDER BY s.full_name_vi ASC
-        """, import_params).fetchall()
+            JOIN contract_staff_links l ON l.staff_id = s.id 
+                AND l.joining_date <= ? 
+                AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+            {where_sql}
+            ORDER BY company_name ASC, s.full_name_vi ASC
+        """, join_params + params).fetchall()
 
         # Load locks for this month
         locks_rows = conn.execute("SELECT staff_id FROM attendance_locks WHERE month=? AND locked=1", (month_val,)).fetchall()
@@ -683,8 +676,8 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
                 </td>
                 <td style="padding: 6px 12px; border-right: none;">
                   {("" if (st["id"] in locked_staff_ids or st["id"] in monthly_locked_staff_ids)
-                    else (f'<a href="/attendance/clear?staff_id={st["id"]}&month={month_val}&vendor_id={vendor_filter or ""}&contract_id={contract_filter or ""}&annex_id={annex_filter or ""}&q={urllib.parse.quote(q_filter)}" class="btn btn-danger" style="font-size: 11px; padding: 4px 8px; line-height: 1;" onclick="return confirm(\'Xóa toàn bộ dữ liệu chấm công tháng {month_val} của {escape(st["full_name_vi"])}?\')">🗑️ Xóa công</a>'
-                          if st["id"] in att_map else '<span class="muted" style="font-size:11px;">Chưa có công</span>')
+                    else (f'<a href="/attendance/clear?staff_id={st["id"]}&month={month_val}&vendor_id={vendor_filter or ""}&contract_id={contract_filter or ""}&annex_id={annex_filter or ""}&q={urllib.parse.quote(q_filter)}" class="btn btn-danger" style="font-size: 11px; padding: 4px 8px; line-height: 1;" onclick="return confirm(\'Delete all daily logs for {escape(st["full_name_vi"])} in {month_val}?\')">🗑️ Clear Logs</a>'
+                          if st["id"] in att_map else '<span class="muted" style="font-size:11px;">No daily logs</span>')
                    )}
                 </td>
               </tr>
@@ -1101,11 +1094,15 @@ def handle_attendance_save_post(handler):
                 std_days_default = 22.0
 
             if month_start_date:
-                # Load staff rates
+                # Load staff rates for this month
                 staff_data = {}
                 staff_rows = conn.execute("""
-                    SELECT id, monthly_rate, manday_rate FROM contract_staff
-                """).fetchall()
+                    SELECT s.id, l.monthly_rate, l.manday_rate 
+                    FROM contract_staff s
+                    JOIN contract_staff_links l ON l.staff_id = s.id 
+                        AND l.joining_date <= ? 
+                        AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+                """, (month_end_date, month_start_date)).fetchall()
                 for s in staff_rows:
                     staff_data[s["id"]] = s
 
@@ -1393,58 +1390,180 @@ def get_attendance_actual_days_and_ot(conn, staff_id: int, month_val: str) -> tu
     return 0.0, 0.0
 
 
-def page_monthly_attendance(filters: dict, error_msg: str | None = None, success_msg: str | None = None):
-    month_val = filters.get("month") or ""
-    if not month_val:
-        today = date.today()
-        month_val = today.strftime("%Y-%m")
-        
-    try:
-        year = int(month_val.split("-")[0])
-        month = int(month_val.split("-")[1])
-    except Exception:
-        today = date.today()
-        year, month = today.year, today.month
-        month_val = today.strftime("%Y-%m")
+def parse_int_list(val) -> list[int]:
+    if not val:
+        return []
+    if isinstance(val, (int, str)):
+        val = [val]
+    res = []
+    for item in val:
+        if isinstance(item, int):
+            res.append(item)
+        elif isinstance(item, str):
+            for sub in item.split(","):
+                sub = sub.strip()
+                if sub.isdigit():
+                    res.append(int(sub))
+    return res
 
-    vendor_filter = parse_int_or_none(filters.get("vendor_id"))
-    contract_filter = parse_int_or_none(filters.get("contract_id"))
-    annex_filter = parse_int_or_none(filters.get("annex_id"))
+
+def parse_str_list(val) -> list[str]:
+    if not val:
+        return []
+    if isinstance(val, str):
+        val = [val]
+    res = []
+    for item in val:
+        if isinstance(item, str):
+            for sub in item.split(","):
+                sub = sub.strip()
+                if sub:
+                    res.append(sub)
+    return res
+
+
+def build_filter_qs(months: list[str], vendor_filters: list[int], contract_filters: list[int], annex_filters: list[int], q_filter: str) -> str:
+    parts = []
+    for m in months:
+        parts.append(f"month={urllib.parse.quote(m)}")
+    for v in vendor_filters:
+        parts.append(f"vendor_id={v}")
+    for c in contract_filters:
+        parts.append(f"contract_id={c}")
+    for a in annex_filters:
+        parts.append(f"annex_id={a}")
+    if q_filter:
+        parts.append(f"q={urllib.parse.quote(q_filter)}")
+    return "&".join(parts)
+
+
+def render_multiselect_dropdown(container_id: str, name: str, options: list[dict], selected_values: list, default_label: str, on_change_js: str = "") -> str:
+    """
+    options: list of dicts with keys: 'value', 'label', 'data_attrs' (dict)
+    selected_values: list of selected option values (as strings or ints)
+    """
+    str_selected = [str(v) for v in selected_values]
+    
+    selected_labels = []
+    for opt in options:
+        if str(opt['value']) in str_selected:
+            selected_labels.append(opt['label'])
+            
+    if not selected_labels:
+        button_text = default_label
+    elif len(selected_labels) == 1:
+        button_text = selected_labels[0]
+    else:
+        button_text = f"{len(selected_labels)} selected ({', '.join(selected_labels[:2])}{'...' if len(selected_labels) > 2 else ''})"
+
+    items_html = []
+    for opt in options:
+        val_str = str(opt['value'])
+        is_checked = "checked" if val_str in str_selected else ""
+        data_attrs_dict = opt.get('data_attrs', {})
+        data_attrs_str = " ".join([f'data-{k.replace("_", "-")}="{escape(str(v))}"' for k, v in data_attrs_dict.items()])
+        items_html.append(f"""
+        <div class="ms-option-item" {data_attrs_str}>
+          <input type="checkbox" name="{name}" value="{escape(val_str)}" {is_checked} data-label="{escape(opt['label'])}" onchange="updateMsText('{container_id}', '{escape(default_label)}'); {on_change_js}">
+          <span>{escape(opt['label'])}</span>
+        </div>
+        """)
+
+    return f"""
+    <div class="ms-container" id="{container_id}">
+      <div class="ms-button" tabindex="0" onclick="toggleMs('{container_id}', event)">
+        <span class="ms-label">{escape(button_text)}</span>
+        <span class="ms-arrow">▼</span>
+      </div>
+      <div class="ms-dropdown">
+        <div class="ms-actions">
+          <span onclick="selectAllMs('{container_id}', true, '{escape(default_label)}'); {on_change_js}">Select All</span>
+          <span onclick="selectAllMs('{container_id}', false, '{escape(default_label)}'); {on_change_js}">Clear All</span>
+        </div>
+        <div class="ms-options">
+          {''.join(items_html)}
+        </div>
+      </div>
+    </div>
+    """
+
+
+def page_monthly_attendance(filters: dict, error_msg: str | None = None, success_msg: str | None = None):
+    months = parse_str_list(filters.get("month"))
+    if not months:
+        today = date.today()
+        months = [today.strftime("%Y-%m")]
+
+    vendor_filters = parse_int_list(filters.get("vendor_id"))
+    contract_filters = parse_int_list(filters.get("contract_id"))
+    annex_filters = parse_int_list(filters.get("annex_id"))
     q_filter = (filters.get("q") or "").strip()
+
+    all_month_dates = []
+    for m_str in months:
+        try:
+            y, m = int(m_str.split("-")[0]), int(m_str.split("-")[1])
+            num_days = calendar.monthrange(y, m)[1]
+            all_month_dates.append((m_str, y, m, f"{y:04d}-{m:02d}-01", f"{y:04d}-{m:02d}-{num_days:02d}"))
+        except Exception:
+            continue
+
+    if not all_month_dates:
+        today = date.today()
+        m_str = today.strftime("%Y-%m")
+        y, m = today.year, today.month
+        num_days = calendar.monthrange(y, m)[1]
+        all_month_dates.append((m_str, y, m, f"{y:04d}-{m:02d}-01", f"{y:04d}-{m:02d}-{num_days:02d}"))
+        months = [m_str]
+
+    min_start = min(d[3] for d in all_month_dates)
+    max_end = max(d[4] for d in all_month_dates)
 
     conn = db_connect()
     try:
-        if vendor_filter is not None and contract_filter is not None:
-            c_row = conn.execute("SELECT 1 FROM contracts WHERE id=? AND seller_vendor_id=?", (contract_filter, vendor_filter)).fetchone()
-            if not c_row:
-                contract_filter = None
+        cur = conn.cursor()
 
-        if contract_filter is not None and annex_filter is not None:
-            a_row = conn.execute("SELECT 1 FROM contract_annexes WHERE id=? AND contract_id=?", (annex_filter, contract_filter)).fetchone()
-            if not a_row:
-                annex_filter = None
+        # Load vendors, contracts, and annexes
+        vendors = conn.execute("SELECT id, COALESCE(company_name, company_name_vi) AS company_name FROM vendors WHERE is_active=1 AND purchasing=0 ORDER BY company_name ASC").fetchall()
+        contracts = conn.execute("SELECT id, framework_no, seller_vendor_id FROM contracts WHERE is_active=1 ORDER BY framework_no ASC").fetchall()
+        annexes = conn.execute("SELECT a.id, a.contract_id, a.annex_name, c.seller_vendor_id FROM contract_annexes a JOIN contracts c ON c.id = a.contract_id WHERE a.is_active=1 AND a.deleted_at IS NULL ORDER BY a.annex_name ASC").fetchall()
 
-        # Load vendors and contracts for dropdowns
-        vendors = conn.execute("SELECT id, COALESCE(company_name, company_name_vi) AS company_name FROM vendors WHERE is_active=1 AND purchasing=0").fetchall()
-        if vendor_filter is not None:
-            contracts = conn.execute("SELECT id, framework_no FROM contracts WHERE is_active=1 AND seller_vendor_id=?", (vendor_filter,)).fetchall()
-        else:
-            contracts = conn.execute("SELECT id, framework_no FROM contracts WHERE is_active=1").fetchall()
-        annexes = conn.execute("SELECT a.id, a.contract_id, a.annex_name, c.seller_vendor_id FROM contract_annexes a JOIN contracts c ON c.id = a.contract_id WHERE a.is_active=1 AND a.deleted_at IS NULL").fetchall()
+        # Get all available months from DB for the month dropdown
+        db_months = conn.execute("""
+            SELECT DISTINCT month FROM attendance_locks
+            UNION
+            SELECT DISTINCT month FROM monthly_attendance_summary
+            UNION
+            SELECT DISTINCT strftime('%Y-%m', date) FROM attendance
+            ORDER BY month DESC
+        """).fetchall()
+        available_months = sorted(list(set([r[0] for r in db_months if r[0]] + months)), reverse=True)
+        if not available_months:
+            available_months = [date.today().strftime("%Y-%m")]
 
-        # Build SQL to load staff WHOSE ATTENDANCE IS LOCKED for this month
-        where = ["(s.status IS NULL OR s.status <> 'inactive')", "l.month = ?", "l.locked = 1"]
-        params = [month_val]
+        # Build SQL to load staff WHOSE ATTENDANCE IS LOCKED for selected months
+        where = ["(s.status IS NULL OR s.status <> 'inactive')", "l.locked = 1"]
+        params = []
 
-        if vendor_filter is not None:
-            where.append("s.vendor_id = ?")
-            params.append(vendor_filter)
-        if contract_filter is not None:
-            where.append("s.contract_id = ?")
-            params.append(contract_filter)
-        if annex_filter is not None:
-            where.append("s.annex_id = ?")
-            params.append(annex_filter)
+        m_placeholders = ", ".join(["?"] * len(months))
+        where.append(f"l.month IN ({m_placeholders})")
+        params.extend(months)
+
+        if vendor_filters:
+            v_placeholders = ", ".join(["?"] * len(vendor_filters))
+            where.append(f"s.vendor_id IN ({v_placeholders})")
+            params.extend(vendor_filters)
+
+        if contract_filters:
+            c_placeholders = ", ".join(["?"] * len(contract_filters))
+            where.append(f"lnk.contract_id IN ({c_placeholders})")
+            params.extend(contract_filters)
+
+        if annex_filters:
+            a_placeholders = ", ".join(["?"] * len(annex_filters))
+            where.append(f"lnk.annex_id IN ({a_placeholders})")
+            params.extend(annex_filters)
+
         if q_filter:
             where.append("s.full_name_vi LIKE ?")
             params.append(f"%{q_filter}%")
@@ -1452,92 +1571,89 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
         where_sql = "WHERE " + " AND ".join(where)
 
         locked_staff = conn.execute(f"""
-            SELECT s.id, s.full_name_vi, s.ot, s.work_shift, s.monthly_rate, s.manday_rate,
+            SELECT s.id, s.full_name_vi, s.ot, s.work_shift, lnk.monthly_rate, lnk.manday_rate,
                    s.paid_leave_total_hours, s.paid_leave_used_hours,
                    COALESCE(v.company_name, v.company_name_vi) AS vendor_name,
                    c.framework_no AS contract_no,
-                   an.annex_name
+                   an.annex_name,
+                   l.month AS lock_month
             FROM contract_staff s
             JOIN vendors v ON v.id=s.vendor_id
-            JOIN contracts c ON c.id=s.contract_id
+            JOIN contract_staff_links lnk ON lnk.staff_id = s.id
+                AND lnk.joining_date <= ?
+                AND (lnk.tentative_leaving_date IS NULL OR lnk.tentative_leaving_date = '' OR lnk.tentative_leaving_date >= ?)
+            JOIN contracts c ON c.id=lnk.contract_id
             JOIN attendance_locks l ON l.staff_id=s.id
-            LEFT JOIN contract_annexes an ON an.id=s.annex_id
+            LEFT JOIN contract_annexes an ON an.id=lnk.annex_id
             {where_sql}
-            ORDER BY s.full_name_vi ASC
-        """, params).fetchall()
-
-        # Month standard days
-        std_days_default = get_standard_working_days(year, month)
-
-        # Month start/end dates
-        month_start = f"{year:04d}-{month:02d}-01"
-        month_end = f"{year:04d}-{month:02d}-{calendar.monthrange(year, month)[1]:02d}"
+            ORDER BY l.month DESC, vendor_name ASC, s.full_name_vi ASC
+        """, [max_end, min_start] + params).fetchall()
 
         # Load raw work & OT hours from daily logs
         raw_hours_rows = conn.execute("""
-            SELECT staff_id, SUM(work_hours) AS sum_w, SUM(ot_hours) AS sum_ot
+            SELECT staff_id, strftime('%Y-%m', date) AS month_str, SUM(work_hours) AS sum_w, SUM(ot_hours) AS sum_ot
             FROM attendance
             WHERE date >= ? AND date <= ?
-            GROUP BY staff_id
-        """, (month_start, month_end)).fetchall()
-        raw_hours_map = {r["staff_id"]: (r["sum_w"] or 0.0, r["sum_ot"] or 0.0) for r in raw_hours_rows}
+            GROUP BY staff_id, strftime('%Y-%m', date)
+        """, (min_start, max_end)).fetchall()
+        raw_hours_map = {(r["staff_id"], r["month_str"]): (r["sum_w"] or 0.0, r["sum_ot"] or 0.0) for r in raw_hours_rows}
 
-        # For each staff, load or initialize summary
         summaries = {}
-        cur = conn.cursor()
-        
         for s in locked_staff:
             sid = s["id"]
+            m_val = s["lock_month"]
+            try:
+                y_val, m_val_int = int(m_val.split("-")[0]), int(m_val.split("-")[1])
+            except Exception:
+                y_val, m_val_int = date.today().year, date.today().month
+
+            std_days_default = get_standard_working_days(y_val, m_val_int)
             row = conn.execute("""
                 SELECT standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked, manual_work_hours, manual_ot_hours
                 FROM monthly_attendance_summary
                 WHERE staff_id=? AND month=?
-            """, (sid, month_val)).fetchone()
+            """, (sid, m_val)).fetchone()
 
-            sum_w, sum_ot = raw_hours_map.get(sid, (0.0, 0.0))
+            sum_w, sum_ot = raw_hours_map.get((sid, m_val), (0.0, 0.0))
             calc_actual_days = sum_w / 8.0
             calc_ot_converted = sum_ot * 1.5
 
             if row:
                 summary_data = dict(row)
                 if summary_data["locked"] == 0:
-                    # Auto update calculations from daily logs if not locked
                     std_days = summary_data["standard_days"]
                     pl_days = summary_data["paid_leave_days"]
-                    
                     manual_w = summary_data.get("manual_work_hours")
                     manual_ot = summary_data.get("manual_ot_hours")
-                    
                     actual_days = (manual_w if manual_w is not None else sum_w) / 8.0
                     ot_converted = (manual_ot if manual_ot is not None else sum_ot) * 1.5
-                    
+
                     if s["manday_rate"] is not None and s["manday_rate"] > 0:
                         daily_rate = s["manday_rate"]
                     elif s["monthly_rate"] is not None and s["monthly_rate"] > 0:
                         daily_rate = s["monthly_rate"] / std_days if std_days > 0 else 0.0
                     else:
                         daily_rate = 0.0
-                        
+
                     total_days = actual_days + pl_days
                     work_amt = round(total_days * daily_rate)
                     ot_rate = daily_rate / 8.0
                     ot_amt = round(ot_converted * ot_rate)
                     total_amount = work_amt + ot_amt
-                    
+
                     cur.execute("""
                         UPDATE monthly_attendance_summary
                         SET actual_days = ?, ot_converted_hours = ?, daily_rate = ?, total_amount = ?, updated_at = datetime('now')
                         WHERE staff_id = ? AND month = ?
-                    """, (actual_days, ot_converted, daily_rate, total_amount, sid, month_val))
-                    
+                    """, (actual_days, ot_converted, daily_rate, total_amount, sid, m_val))
+
                     summary_data["actual_days"] = actual_days
                     summary_data["ot_converted_hours"] = ot_converted
                     summary_data["daily_rate"] = daily_rate
                     summary_data["total_amount"] = total_amount
-                
-                summaries[sid] = summary_data
+
+                summaries[(sid, m_val)] = summary_data
             else:
-                # Calculate defaults
                 actual_days = calc_actual_days
                 ot_converted = calc_ot_converted
                 paid_leave_days = 0.0
@@ -1560,9 +1676,9 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
                         staff_id, month, standard_days, actual_days, paid_leave_days,
                         ot_converted_hours, daily_rate, total_amount, locked, created_at, updated_at
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, datetime('now'), datetime('now'))
-                """, (sid, month_val, std_days_default, actual_days, paid_leave_days, ot_converted, daily_rate, total_amount))
-                
-                summaries[sid] = {
+                """, (sid, m_val, std_days_default, actual_days, paid_leave_days, ot_converted, daily_rate, total_amount))
+
+                summaries[(sid, m_val)] = {
                     "standard_days": std_days_default,
                     "actual_days": actual_days,
                     "paid_leave_days": paid_leave_days,
@@ -1573,36 +1689,39 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
                     "manual_work_hours": None,
                     "manual_ot_hours": None
                 }
-        
+
         conn.commit()
     finally:
         conn.close()
 
-    # Dropdowns HTML
-    vendor_opts = ['<option value="">-- All Vendors --</option>']
-    for v in vendors:
-        sel = "selected" if vendor_filter == v["id"] else ""
-        vendor_opts.append(f'<option value="{v["id"]}" {sel}>{escape(v["company_name"])}</option>')
+    # Build options for multi-select dropdowns
+    month_options = [{"value": m_str, "label": f"Month {m_str[5:7]}/{m_str[:4]}"} for m_str in available_months]
+    month_dropdown_html = render_multiselect_dropdown("ms-month", "month", month_options, months, "-- All Months --")
 
-    contract_opts = ['<option value="">-- All Contracts --</option>']
-    for c in contracts:
-        sel = "selected" if contract_filter == c["id"] else ""
-        contract_opts.append(f'<option value="{c["id"]}" {sel}>{escape(c["framework_no"])}</option>')
+    vendor_options = [{"value": v["id"], "label": v["company_name"]} for v in vendors]
+    vendor_dropdown_html = render_multiselect_dropdown("ms-vendor", "vendor_id", vendor_options, vendor_filters, "-- All Vendors --", "filterCascadingDropdowns()")
 
-    # Rows HTML
+    contract_options = [{"value": c["id"], "label": c["framework_no"], "data_attrs": {"vendor_id": c["seller_vendor_id"] if "seller_vendor_id" in c.keys() else ""}} for c in contracts]
+    contract_dropdown_html = render_multiselect_dropdown("ms-contract", "contract_id", contract_options, contract_filters, "-- All Contracts --", "filterCascadingDropdowns()")
+
+    annex_options = [{"value": a["id"], "label": a["annex_name"], "data_attrs": {"contract_id": a["contract_id"], "vendor_id": a["seller_vendor_id"]}} for a in annexes]
+    annex_dropdown_html = render_multiselect_dropdown("ms-annex", "annex_id", annex_options, annex_filters, "-- All Annexes --")
+
+    # Build table rows
     trs = []
     total_billing_all = 0.0
+    filter_qs = build_filter_qs(months, vendor_filters, contract_filters, annex_filters, q_filter)
 
     for idx, s in enumerate(locked_staff, 1):
         sid = s["id"]
-        sum_data = summaries[sid]
-        
+        m_val = s["lock_month"]
+        sum_data = summaries[(sid, m_val)]
+
         is_m_locked = sum_data.get("locked", 0) == 1
         disabled_attr = "disabled" if is_m_locked else ""
-        
-        # Lock/unlock URL parameters
-        act_qs = f"staff_id={sid}&month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={urllib.parse.quote(q_filter)}"
-        
+
+        act_qs = f"staff_id={sid}&month={m_val}&" + filter_qs
+
         if is_m_locked:
             m_lock_label = '🔒 <b style="color:#b00020;">Locked</b>'
             m_lock_action_html = f"""
@@ -1618,7 +1737,6 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
             </div>
             """
 
-        # Rate Label
         if s["manday_rate"] is not None and s["manday_rate"] > 0:
             rate_label = f"Daily: {fmt_money(s['manday_rate'])}"
         elif s["monthly_rate"] is not None and s["monthly_rate"] > 0:
@@ -1626,74 +1744,73 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
         else:
             rate_label = '<span class="muted">Not configured</span>'
 
-        # Annual Leave Remaining
         tot_pl = s["paid_leave_total_hours"] or 0.0
         used_pl = s["paid_leave_used_hours"] or 0.0
         rem_pl_hours = tot_pl - used_pl
         rem_pl_days = rem_pl_hours / 8.0
 
-        # Calculations
         pl = sum_data["paid_leave_days"]
         act = sum_data["actual_days"]
         daily_rate = sum_data["daily_rate"]
         ot_hours = sum_data["ot_converted_hours"]
-        
-        # Get raw hours for display
-        raw_w, raw_ot = raw_hours_map.get(sid, (0.0, 0.0))
 
-        # Check for manual overrides to display
+        raw_w, raw_ot = raw_hours_map.get((sid, m_val), (0.0, 0.0))
+
         manual_w = sum_data.get("manual_work_hours")
         manual_ot = sum_data.get("manual_ot_hours")
-        
+
         display_w = manual_w if manual_w is not None else raw_w
         display_ot = manual_ot if manual_ot is not None else raw_ot
-        
-        w_style = "color:#0369a1; font-weight:bold; background:#e0f2fe; padding:1px 3px; border-radius:3px; display:inline-block;" if manual_w is not None else "color:inherit;"
-        ot_style = "color:#b45309; font-weight:bold; background:#fef3c7; padding:1px 3px; border-radius:3px; display:inline-block;" if manual_ot is not None else "color:#666;"
+
+        w_style = "color:#0b57d0; font-weight:bold;" if manual_w is not None else "color:#333;"
+        ot_style = "color:#b00020; font-weight:bold;" if manual_ot is not None else "color:#333;"
 
         work_pay = round((act + pl) * daily_rate)
         ot_pay = round(ot_hours * (daily_rate / 8.0))
         total_pay = sum_data["total_amount"]
-
         total_billing_all += total_pay
+
+        contract_info = escape(s["contract_no"])
+        if s["annex_name"]:
+            contract_info += f" / {escape(s['annex_name'])}"
+
+        m_badge = f"{m_val[5:7]}/{m_val[:4]}"
 
         trs.append(f"""
         <tr>
-          <td>{idx}</td>
+          <td style="text-align:center;">{idx}</td>
           <td>
-            <b>{escape(s["full_name_vi"])}</b>
-            <div class="muted" style="font-size:9px;">{escape(s["contract_no"])}{f' - {escape(s["annex_name"])}' if s["annex_name"] else ''}</div>
+            <div style="font-weight:600;">{escape(s['full_name_vi'])}</div>
+            <div style="font-size:11px; color:#666; margin-top:2px;">
+              OT Eligible: <b>{'Yes' if s['ot'] == 1 else 'No'}</b>
+            </div>
             {m_lock_action_html}
           </td>
+          <td>{escape(s['vendor_name'])}</td>
+          <td><span class="tag" style="background:#e0e7ff; color:#3730a3; font-weight:bold;">{m_badge}</span></td>
           <td>
-            {escape(s["vendor_name"] or "")}
+            <div style="font-size:12px;">{contract_info}</div>
+            <div style="font-size:11px; color:#666; margin-top:2px;">{rate_label}</div>
           </td>
-          <td style="font-size:11px;">
-            {escape(s["work_shift"] or "Not set")}
-            <div class="muted" style="font-size:10px;">{rate_label}</div>
-            <div style="margin-top:2px;">{m_lock_label}</div>
-          </td>
-          <!-- Standard days (editable) -->
-          <td>
-            <input type="number" step="0.5" name="std_{sid}" value="{sum_data['standard_days']:.1f}" {disabled_attr}
+          <td style="text-align:center;">
+            <input type="number" step="0.5" min="0" name="std_{sid}_{m_val}" value="{sum_data['standard_days']:.1f}" {disabled_attr}
                    style="width: 55px; padding: 4px; font-size:12px; text-align:center;">
           </td>
-          <!-- Actual days (read-only) -->
-          <td style="text-align:center; font-weight:bold;">
-            {sum_data['actual_days']:.2f}
+          <td style="text-align:center; font-family:monospace; font-size:13px; font-weight:bold; color:#0b57d0;">
+            {act:.2f}
           </td>
-          <!-- Paid leave days (editable) -->
-          <td>
-            <input type="number" step="0.5" name="pl_{sid}" value="{sum_data['paid_leave_days']:.1f}" {disabled_attr}
-                   style="width: 55px; padding: 4px; font-size:12px; text-align:center;">
-            <div class="muted" style="font-size: 9px; margin-top:2px;">Remaining: {rem_pl_days:.2f} days</div>
+          <td style="text-align:center;">
+            <input type="number" step="0.5" min="0" name="pl_{sid}_{m_val}" value="{pl:.1f}" {disabled_attr}
+                   style="width: 55px; padding: 4px; font-size:12px; text-align:center;"
+                   title="Remaining balance: {rem_pl_days:.2f} days ({rem_pl_hours:.1f}h)">
+            <div style="font-size:9px; color:#666; margin-top:2px;" title="Total: {tot_pl:.1f}h, Used: {used_pl:.1f}h">
+              Rem: {rem_pl_days:.1f}d
+            </div>
           </td>
-          <!-- OT converted hours (editable) -->
-          <td>
-            <input type="number" step="0.01" name="ot_{sid}" value="{sum_data['ot_converted_hours']:.2f}" {disabled_attr}
+          <td style="text-align:center;">
+            <input type="number" step="0.1" min="0" name="ot_{sid}_{m_val}" value="{ot_hours:.2f}" {disabled_attr}
                    style="width: 65px; padding: 4px; font-size:12px; text-align:center;">
           </td>
-          <!-- Hours Worked (Work / OT) -->
           <td style="text-align:center; font-size:11px; font-family:monospace; line-height:1.3; vertical-align:middle;">
             <div style="margin-bottom: 2px;">
               <span style="{w_style}" title="{f'Raw log: {raw_w:.2f}h' if manual_w is not None else ''}">Work: {display_w:.2f}h{f' *' if manual_w is not None else ''}</span>
@@ -1702,11 +1819,9 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
               <span style="{ot_style}" title="{f'Raw log: {raw_ot:.2f}h' if manual_ot is not None else ''}">OT: {display_ot:.2f}h{f' *' if manual_ot is not None else ''}</span>
             </div>
           </td>
-          <!-- Daily rate (display) -->
           <td style="text-align:right; font-family:monospace;">
             {int(round(sum_data['daily_rate'])):,}
           </td>
-          <!-- Total billing amount (display breakdown) -->
           <td style="text-align:right; font-family:monospace; line-height:1.3; font-size:11px;">
             <div style="color: #666;">Work: {int(work_pay):,}</div>
             <div style="color: #666;">OT: {int(ot_pay):,}</div>
@@ -1722,17 +1837,120 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
 
     sub_nav = f"""
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
-      <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
-      <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💵 Monthly Payroll & Payment</a>
+      <a href="/attendance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
+      <a href="/attendance/monthly?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💵 Monthly Payroll & Payment</a>
     </div>
     """
 
-    annex_opts = ['<option value="">-- All Annexes --</option>']
-    for a in annexes:
-        sel = "selected" if annex_filter == a["id"] else ""
-        annex_opts.append(f'<option value="{a["id"]}" data-contract-id="{a["contract_id"]}" data-vendor-id="{a["seller_vendor_id"]}" {sel}>{escape(a["annex_name"])}</option>')
-
     body = f"""
+    <style>
+      .ms-container {{
+        position: relative;
+        display: inline-block;
+        min-width: 170px;
+      }}
+      .ms-button {{
+        padding: 8px 12px;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        background: var(--bg-card);
+        color: var(--text-primary);
+        font-size: 14px;
+        font-family: inherit;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        user-select: none;
+        min-height: 38px;
+        transition: all 0.15s ease;
+      }}
+      .ms-button:hover {{
+        border-color: #cbd5e1;
+      }}
+      .ms-button:focus {{
+        outline: none;
+        border-color: var(--primary);
+        box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.12);
+      }}
+      .ms-label {{
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        max-width: 180px;
+        font-size: 13px;
+        font-weight: 500;
+      }}
+      .ms-arrow {{
+        font-size: 10px;
+        color: var(--text-muted);
+        transition: transform 0.2s;
+      }}
+      .ms-container.open .ms-arrow {{
+        transform: rotate(180deg);
+      }}
+      .ms-dropdown {{
+        display: none;
+        position: absolute;
+        top: calc(100% + 4px);
+        left: 0;
+        z-index: 1000;
+        min-width: 230px;
+        max-width: 340px;
+        background: #ffffff;
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        box-shadow: var(--shadow-md);
+        padding: 6px 0;
+        max-height: 260px;
+        overflow-y: auto;
+      }}
+      .ms-container.open .ms-dropdown {{
+        display: block;
+      }}
+      .ms-option-item {{
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 12px;
+        font-size: 13px;
+        color: var(--text-primary);
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.1s;
+      }}
+      .ms-option-item:hover {{
+        background: #f1f5f9;
+      }}
+      .ms-option-item input[type="checkbox"] {{
+        min-width: auto;
+        width: 15px;
+        height: 15px;
+        cursor: pointer;
+      }}
+      .ms-option-item[hidden] {{
+        display: none !important;
+      }}
+      .ms-actions {{
+        padding: 4px 12px 6px 12px;
+        border-bottom: 1px solid var(--border);
+        margin-bottom: 4px;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 12px;
+      }}
+      .ms-actions span {{
+        color: var(--primary);
+        font-weight: 600;
+        cursor: pointer;
+      }}
+      .ms-actions span:hover {{
+        text-decoration: underline;
+      }}
+    </style>
+
     {sub_nav}
     {error_html}
     {success_html}
@@ -1742,25 +1960,19 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
       <form method="GET" action="/attendance/monthly" class="filters" style="margin: 0;">
         <div>
           <div class="label">Payment Month</div>
-          <input type="month" name="month" value="{month_val}" onchange="this.form.submit()">
+          {month_dropdown_html}
         </div>
         <div>
           <div class="label">Vendor</div>
-          <select id="vendor_id" name="vendor_id" onchange="this.form.submit()">
-            {''.join(vendor_opts)}
-          </select>
+          {vendor_dropdown_html}
         </div>
         <div>
           <div class="label">Framework Contract</div>
-          <select id="contract_id" name="contract_id" onchange="this.form.submit()">
-            {''.join(contract_opts)}
-          </select>
+          {contract_dropdown_html}
         </div>
         <div>
           <div class="label">Annex (filtered by Framework)</div>
-          <select id="annex_id" name="annex_id" onchange="this.form.submit()">
-            {''.join(annex_opts)}
-          </select>
+          {annex_dropdown_html}
         </div>
         <div>
           <div class="label">Search staff</div>
@@ -1775,10 +1987,10 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
 
     <!-- 2. Summary sheet form -->
     <form method="POST" action="/attendance/monthly/save">
-      <input type="hidden" name="month" value="{month_val}">
-      <input type="hidden" name="vendor_id" value="{vendor_filter or ''}">
-      <input type="hidden" name="contract_id" value="{contract_filter or ''}">
-      <input type="hidden" name="annex_id" value="{annex_filter or ''}">
+      {''.join([f'<input type="hidden" name="month" value="{escape(m)}">' for m in months])}
+      {''.join([f'<input type="hidden" name="vendor_id" value="{v}">' for v in vendor_filters])}
+      {''.join([f'<input type="hidden" name="contract_id" value="{c}">' for c in contract_filters])}
+      {''.join([f'<input type="hidden" name="annex_id" value="{a}">' for a in annex_filters])}
       <input type="hidden" name="q" value="{escape(q_filter)}">
 
       <div class="card" style="padding:0; overflow-x:auto;">
@@ -1788,6 +2000,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
               <th>No.</th>
               <th>Full Name</th>
               <th>Vendor</th>
+              <th>Month</th>
               <th>Shift / Baseline Rate</th>
               <th style="width:75px; text-align:center;">Standard Days</th>
               <th style="width:75px; text-align:center;">Actual Days</th>
@@ -1799,7 +2012,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
             </tr>
           </thead>
           <tbody>
-            {''.join(trs) if trs else '<tr><td colspan="11" class="muted" style="padding:15px;">No staff with locked daily attendance matches the filter for this month. Please lock daily attendance first.</td></tr>'}
+            {''.join(trs) if trs else '<tr><td colspan="12" class="muted" style="padding:15px;">No staff with locked daily attendance matches the filter for the selected month(s). Please lock daily attendance first.</td></tr>'}
           </tbody>
         </table>
       </div>
@@ -1808,7 +2021,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">
         <div class="actions">
           <button type="submit" style="background:#0b57d0; color:#fff; border-color:#0b57d0; font-weight:600; padding:10px 24px;">Save Calculations</button>
-          <a href="/attendance/monthly/export?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" class="btn btn-secondary" style="padding:10px 20px;">Export to Excel (CSV)</a>
+          <a href="/attendance/monthly/export?{filter_qs}" class="btn btn-secondary" style="padding:10px 20px;">Export to Excel (CSV)</a>
         </div>
         <div style="font-size:18px; font-weight:bold; color:#111;">
           Total Monthly Payment: <span style="color:#0b57d0; font-size:20px;">{int(round(total_billing_all)):,} VND</span>
@@ -1818,52 +2031,116 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
     </form>
 
     <script>
-      (function() {{
-        const vendorSel = document.getElementById('vendor_id');
-        const contractSel = document.getElementById('contract_id');
-        const annexSel = document.getElementById('annex_id');
-
-        function filterAnnex() {{
-          if (!vendorSel || !contractSel || !annexSel) return;
-          const vId = vendorSel.value;
-          const cId = contractSel.value;
-          const opts = annexSel.querySelectorAll('option');
-          let hasSelectedVisible = false;
-
-          opts.forEach((opt) => {{
-            const optContract = opt.getAttribute('data-contract-id');
-            const optVendor = opt.getAttribute('data-vendor-id');
-            if (!optContract && !optVendor) {{
-              opt.hidden = false;
-              return;
-            }}
-
-            let show = true;
-            if (vId && optVendor && optVendor !== vId) {{
-              show = false;
-            }}
-            if (cId && optContract && optContract !== cId) {{
-              show = false;
-            }}
-
-            opt.hidden = !show;
-            if (show && opt.selected) {{
-              hasSelectedVisible = true;
-            }}
-          }});
-
-          if (!hasSelectedVisible) {{
-            annexSel.value = "";
-          }}
+      function toggleMs(id, event) {{
+        if (event) event.stopPropagation();
+        const el = document.getElementById(id);
+        const isOpen = el.classList.contains('open');
+        document.querySelectorAll('.ms-container').forEach(c => c.classList.remove('open'));
+        if (!isOpen) {{
+          el.classList.add('open');
         }}
+      }}
 
-        if (contractSel) contractSel.addEventListener('change', filterAnnex);
-        filterAnnex();
-      }})();
+      document.addEventListener('click', function(e) {{
+        if (!e.target.closest('.ms-container')) {{
+          document.querySelectorAll('.ms-container').forEach(c => c.classList.remove('open'));
+        }}
+      }});
+
+      function updateMsText(id, defaultText) {{
+        const container = document.getElementById(id);
+        if (!container) return;
+        const items = container.querySelectorAll('.ms-options .ms-option-item');
+        const checked = [];
+        items.forEach(item => {{
+          if (!item.hidden && item.style.display !== 'none') {{
+            const cb = item.querySelector('input[type="checkbox"]');
+            if (cb && cb.checked) {{
+              checked.push(cb);
+            }}
+          }}
+        }});
+        const labelSpan = container.querySelector('.ms-label');
+        if (checked.length === 0) {{
+          labelSpan.innerText = defaultText;
+        }} else if (checked.length === 1) {{
+          labelSpan.innerText = checked[0].dataset.label || checked[0].value;
+        }} else {{
+          const labels = checked.map(cb => cb.dataset.label || cb.value);
+          labelSpan.innerText = checked.length + ' selected (' + labels.slice(0, 2).join(', ') + (labels.length > 2 ? '...' : '') + ')';
+        }}
+      }}
+
+      function selectAllMs(id, selectAll, defaultText) {{
+        const container = document.getElementById(id);
+        if (!container) return;
+        const items = container.querySelectorAll('.ms-option-item');
+        items.forEach(item => {{
+          if (item.style.display !== 'none' && !item.hidden) {{
+            const cb = item.querySelector('input[type="checkbox"]');
+            if (cb) cb.checked = selectAll;
+          }}
+        }});
+        updateMsText(id, defaultText);
+        if (id === 'ms-contract' || id === 'ms-vendor') {{
+          filterCascadingDropdowns();
+        }}
+      }}
+
+      function filterCascadingDropdowns() {{
+        const vendorCbs = document.querySelectorAll('#ms-vendor .ms-options input[type="checkbox"]:checked');
+        const selectedVendors = Array.from(vendorCbs).map(cb => cb.value);
+
+        // 1. Filter Framework Contracts based on selected Vendor(s)
+        const contractItems = document.querySelectorAll('#ms-contract .ms-option-item');
+        contractItems.forEach(item => {{
+          const optVendor = item.getAttribute('data-vendor-id');
+          let show = true;
+          if (selectedVendors.length > 0 && optVendor && !selectedVendors.includes(optVendor)) {{
+            show = false;
+          }}
+          item.hidden = !show;
+          item.style.display = show ? 'flex' : 'none';
+          if (!show) {{
+            const cb = item.querySelector('input[type="checkbox"]');
+            if (cb) cb.checked = false;
+          }}
+        }});
+        updateMsText('ms-contract', '-- All Contracts --');
+
+        // 2. Filter Annexes based on selected Vendor(s) and Framework Contract(s)
+        const contractCbs = document.querySelectorAll('#ms-contract .ms-options input[type="checkbox"]:checked');
+        const selectedContracts = Array.from(contractCbs).map(cb => cb.value);
+
+        const annexItems = document.querySelectorAll('#ms-annex .ms-option-item');
+        annexItems.forEach(item => {{
+          const optVendor = item.getAttribute('data-vendor-id');
+          const optContract = item.getAttribute('data-contract-id');
+          
+          let show = true;
+          if (selectedVendors.length > 0 && optVendor && !selectedVendors.includes(optVendor)) {{
+            show = false;
+          }}
+          if (selectedContracts.length > 0 && optContract && !selectedContracts.includes(optContract)) {{
+            show = false;
+          }}
+          
+          item.hidden = !show;
+          item.style.display = show ? 'flex' : 'none';
+          if (!show) {{
+            const cb = item.querySelector('input[type="checkbox"]');
+            if (cb) cb.checked = false;
+          }}
+        }});
+        updateMsText('ms-annex', '-- All Annexes --');
+      }}
+      
+      document.addEventListener('DOMContentLoaded', filterCascadingDropdowns);
     </script>
     """
     
-    return layout(f"Monthly Payroll - Month {month:02d}/{year:04d}", body)
+    first_month = months[0] if months else f"{date.today().month:02d}/{date.today().year:04d}"
+    return layout(f"Monthly Payroll - Month {first_month}", body)
 
 
 def handle_attendance_monthly_save_post(handler):
@@ -1900,12 +2177,21 @@ def handle_attendance_monthly_save_post(handler):
 
         cur = conn.cursor()
         
+        # Fetch month start/end to resolve rates
+        import calendar
+        year_val, month_val_int = map(int, month_val.split("-"))
+        month_start_date = f"{year_val:04d}-{month_val_int:02d}-01"
+        month_end_date = f"{year_val:04d}-{month_val_int:02d}-{calendar.monthrange(year_val, month_val_int)[1]:02d}"
+
         # Load staff rates and paid leave balances
         staff_data = {}
         staff_rows = conn.execute("""
-            SELECT id, full_name_vi, monthly_rate, manday_rate, paid_leave_total_hours, paid_leave_used_hours
-            FROM contract_staff
-        """).fetchall()
+            SELECT s.id, s.full_name_vi, l.monthly_rate, l.manday_rate, s.paid_leave_total_hours, s.paid_leave_used_hours
+            FROM contract_staff s
+            JOIN contract_staff_links l ON l.staff_id = s.id
+                AND l.joining_date <= ?
+                AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+        """, (month_end_date, month_start_date)).fetchall()
         for s in staff_rows:
             staff_data[s["id"]] = s
 
@@ -1916,10 +2202,17 @@ def handle_attendance_monthly_save_post(handler):
             s = staff_data[sid]
             pl_days = vals.get("pl", 0.0)
             
-            # Annual Leave remaining validation
+            # Annual Leave remaining validation (sum other months' paid leave days and exclude current month)
             tot_pl = s["paid_leave_total_hours"] or 0.0
-            used_pl = s["paid_leave_used_hours"] or 0.0
-            rem_pl_hours = tot_pl - used_pl
+            used_other = conn.execute("""
+                SELECT SUM(paid_leave_days) AS total_days 
+                FROM monthly_attendance_summary
+                WHERE staff_id = ? AND month <> ?
+            """, (sid, month_val)).fetchone()
+            used_pl_other_days = (used_other["total_days"] or 0.0) if used_other else 0.0
+            used_pl_other_hours = used_pl_other_days * 8.0
+            
+            rem_pl_hours = tot_pl - used_pl_other_hours
             
             pl_hours_input = pl_days * 8.0
             if pl_hours_input > rem_pl_hours:
@@ -1973,6 +2266,21 @@ def handle_attendance_monthly_save_post(handler):
                 SET standard_days=?, paid_leave_days=?, ot_converted_hours=?, daily_rate=?, total_amount=?, updated_at=datetime('now')
                 WHERE staff_id=? AND month=?
             """, (std, pl, ot, daily_rate, total_amount, sid, month_val))
+
+            # Recalculate and update total used paid leave hours in contract_staff table across all months
+            used_all = cur.execute("""
+                SELECT SUM(paid_leave_days) AS total_days 
+                FROM monthly_attendance_summary
+                WHERE staff_id = ?
+            """, (sid,)).fetchone()
+            total_used_days = (used_all["total_days"] or 0.0) if used_all else 0.0
+            total_used_hours = total_used_days * 8.0
+            
+            cur.execute("""
+                UPDATE contract_staff
+                SET paid_leave_used_hours = ?, updated_at = datetime('now')
+                WHERE id = ?
+            """, (total_used_hours, sid))
 
         conn.commit()
     finally:
@@ -2146,38 +2454,59 @@ def handle_attendance_monthly_export_get(handler):
     parsed = urllib.parse.urlparse(handler.path)
     qs = urllib.parse.parse_qs(parsed.query)
     
-    month_val = qs.get("month", [""])[0].strip()
-    if not month_val:
-        month_val = date.today().strftime("%Y-%m")
-        
-    try:
-        year = int(month_val.split("-")[0])
-        month = int(month_val.split("-")[1])
-    except Exception:
-        today = date.today()
-        year, month = today.year, today.month
-        month_val = today.strftime("%Y-%m")
+    months = parse_str_list(qs.get("month", []))
+    if not months:
+        months = [date.today().strftime("%Y-%m")]
 
-    vendor_filter = parse_int_or_none(qs.get("vendor_id", [""])[0])
-    contract_filter = parse_int_or_none(qs.get("contract_id", [""])[0])
-    annex_filter = parse_int_or_none(qs.get("annex_id", [""])[0])
-    q_filter = qs.get("q", [""])[0].strip()
+    vendor_filters = parse_int_list(qs.get("vendor_id", []))
+    contract_filters = parse_int_list(qs.get("contract_id", []))
+    annex_filters = parse_int_list(qs.get("annex_id", []))
+    q_filter = (qs.get("q", [""])[0] or "").strip()
+
+    all_month_dates = []
+    for m_str in months:
+        try:
+            y, m = int(m_str.split("-")[0]), int(m_str.split("-")[1])
+            num_days = calendar.monthrange(y, m)[1]
+            all_month_dates.append((m_str, y, m, f"{y:04d}-{m:02d}-01", f"{y:04d}-{m:02d}-{num_days:02d}"))
+        except Exception:
+            continue
+
+    if not all_month_dates:
+        today = date.today()
+        m_str = today.strftime("%Y-%m")
+        y, m = today.year, today.month
+        num_days = calendar.monthrange(y, m)[1]
+        all_month_dates.append((m_str, y, m, f"{y:04d}-{m:02d}-01", f"{y:04d}-{m:02d}-{num_days:02d}"))
+        months = [m_str]
+
+    min_start = min(d[3] for d in all_month_dates)
+    max_end = max(d[4] for d in all_month_dates)
 
     conn = db_connect()
     try:
-        # Build SQL where clause
-        where = ["(s.status IS NULL OR s.status <> 'inactive')", "l.month = ?", "l.locked = 1"]
-        params = [month_val]
+        where = ["(s.status IS NULL OR s.status <> 'inactive')", "l.locked = 1"]
+        params = []
 
-        if vendor_filter is not None:
-            where.append("s.vendor_id = ?")
-            params.append(vendor_filter)
-        if contract_filter is not None:
-            where.append("s.contract_id = ?")
-            params.append(contract_filter)
-        if annex_filter is not None:
-            where.append("s.annex_id = ?")
-            params.append(annex_filter)
+        m_placeholders = ", ".join(["?"] * len(months))
+        where.append(f"l.month IN ({m_placeholders})")
+        params.extend(months)
+
+        if vendor_filters:
+            v_placeholders = ", ".join(["?"] * len(vendor_filters))
+            where.append(f"s.vendor_id IN ({v_placeholders})")
+            params.extend(vendor_filters)
+
+        if contract_filters:
+            c_placeholders = ", ".join(["?"] * len(contract_filters))
+            where.append(f"lnk.contract_id IN ({c_placeholders})")
+            params.extend(contract_filters)
+
+        if annex_filters:
+            a_placeholders = ", ".join(["?"] * len(annex_filters))
+            where.append(f"lnk.annex_id IN ({a_placeholders})")
+            params.extend(annex_filters)
+
         if q_filter:
             where.append("s.full_name_vi LIKE ?")
             params.append(f"%{q_filter}%")
@@ -2185,54 +2514,50 @@ def handle_attendance_monthly_export_get(handler):
         where_sql = "WHERE " + " AND ".join(where)
 
         locked_staff = conn.execute(f"""
-            SELECT s.id, s.full_name_vi, s.ot, s.work_shift, s.monthly_rate, s.manday_rate,
+            SELECT s.id, s.full_name_vi, s.ot, s.work_shift, lnk.monthly_rate, lnk.manday_rate,
                    COALESCE(v.company_name, v.company_name_vi) AS vendor_name,
-                   c.framework_no AS contract_no
+                   c.framework_no AS contract_no,
+                   l.month AS lock_month
             FROM contract_staff s
             JOIN vendors v ON v.id=s.vendor_id
-            JOIN contracts c ON c.id=s.contract_id
+            JOIN contract_staff_links lnk ON lnk.staff_id = s.id
+                AND lnk.joining_date <= ?
+                AND (lnk.tentative_leaving_date IS NULL OR lnk.tentative_leaving_date = '' OR lnk.tentative_leaving_date >= ?)
+            JOIN contracts c ON c.id=lnk.contract_id
             JOIN attendance_locks l ON l.staff_id=s.id
             {where_sql}
-            ORDER BY s.full_name_vi ASC
-        """, params).fetchall()
+            ORDER BY l.month DESC, s.full_name_vi ASC
+        """, [max_end, min_start] + params).fetchall()
 
-        # Get summaries
         summaries = {}
         for s in locked_staff:
             sid = s["id"]
+            m_val = s["lock_month"]
             row = conn.execute("""
                 SELECT standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked, manual_work_hours, manual_ot_hours
                 FROM monthly_attendance_summary
                 WHERE staff_id=? AND month=?
-            """, (sid, month_val)).fetchone()
+            """, (sid, m_val)).fetchone()
             if row:
-                summaries[sid] = dict(row)
+                summaries[(sid, m_val)] = dict(row)
 
-        # Get raw work and OT hours
-        num_days = calendar.monthrange(year, month)[1]
-        month_start = f"{year:04d}-{month:02d}-01"
-        month_end = f"{year:04d}-{month:02d}-{num_days:02d}"
-        
         raw_hours_rows = conn.execute("""
-            SELECT staff_id, SUM(work_hours) AS sum_w, SUM(ot_hours) AS sum_ot
+            SELECT staff_id, strftime('%Y-%m', date) AS month_str, SUM(work_hours) AS sum_w, SUM(ot_hours) AS sum_ot
             FROM attendance
             WHERE date >= ? AND date <= ?
-            GROUP BY staff_id
-        """, (month_start, month_end)).fetchall()
-        raw_hours_map = {r["staff_id"]: (r["sum_w"] or 0.0, r["sum_ot"] or 0.0) for r in raw_hours_rows}
+            GROUP BY staff_id, strftime('%Y-%m', date)
+        """, (min_start, max_end)).fetchall()
+        raw_hours_map = {(r["staff_id"], r["month_str"]): (r["sum_w"] or 0.0, r["sum_ot"] or 0.0) for r in raw_hours_rows}
 
     finally:
         conn.close()
 
-    # Generate CSV content
     output = io.StringIO()
-    # Write UTF-8 BOM
     output.write('\ufeff')
     writer = csv.writer(output, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
     
-    # Headers
     writer.writerow([
-        "Staff ID", "Full Name", "Vendor", "Contract No", "Shift", "OT (Yes/No)",
+        "Staff ID", "Full Name", "Vendor", "Contract No", "Month", "Shift", "OT (Yes/No)",
         "Standard Days", "Actual Days", "Paid Leave Days", "Converted OT Hours (x1.5)",
         "Work Hours", "OT Hours", "Daily Rate (VND)", "Work Wage (VND)",
         "OT Wage (VND)", "Total Wage (VND)", "Status"
@@ -2240,7 +2565,8 @@ def handle_attendance_monthly_export_get(handler):
     
     for s in locked_staff:
         sid = s["id"]
-        sum_data = summaries.get(sid)
+        m_val = s["lock_month"]
+        sum_data = summaries.get((sid, m_val))
         if not sum_data:
             continue
             
@@ -2251,9 +2577,8 @@ def handle_attendance_monthly_export_get(handler):
         total_pay = sum_data["total_amount"]
         is_locked = "Locked" if sum_data["locked"] == 1 else "Unlocked"
         
-        raw_w, raw_ot = raw_hours_map.get(sid, (0.0, 0.0))
+        raw_w, raw_ot = raw_hours_map.get((sid, m_val), (0.0, 0.0))
         
-        # Check for manual overrides
         manual_w = sum_data.get("manual_work_hours")
         manual_ot = sum_data.get("manual_ot_hours")
         w_hours = manual_w if manual_w is not None else raw_w
@@ -2267,6 +2592,7 @@ def handle_attendance_monthly_export_get(handler):
             s["full_name_vi"],
             s["vendor_name"],
             s["contract_no"],
+            m_val,
             s["work_shift"] or "",
             "Yes" if s["ot"] == 1 else "No",
             f"{sum_data['standard_days']:.1f}",
@@ -2284,10 +2610,11 @@ def handle_attendance_monthly_export_get(handler):
         
     csv_bytes = output.getvalue().encode("utf-8")
     
+    fn_month = "_".join(months[:2]) if len(months) <= 2 else f"{months[0]}_plus_{len(months)-1}_months"
     handler.send_response(200)
     handler.send_header("Content-Type", "text/csv; charset=utf-8")
     handler.send_header("Content-Length", str(len(csv_bytes)))
-    handler.send_header("Content-Disposition", f'attachment; filename="Monthly_Payroll_{month_val}.csv"')
+    handler.send_header("Content-Disposition", f'attachment; filename="Monthly_Payroll_{fn_month}.csv"')
     handler.end_headers()
     handler.wfile.write(csv_bytes)
 

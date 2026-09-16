@@ -301,7 +301,7 @@ def handle_vendor_create_post(handler):
             now_iso(), now_iso()
         ))
         new_id = cur.lastrowid
-        log_action(cur, "CREATE_VENDOR", "vendors", new_id, f"Tạo nhà cung cấp mới: {data['short_name']} ({data['company_name_vi']})")
+        log_action(cur, "CREATE_VENDOR", "vendors", new_id, f"Created new vendor: {data['short_name']} ({data['company_name_vi']})")
         conn.commit()
     finally:
         conn.close()
@@ -354,7 +354,7 @@ def handle_vendor_update_post(handler):
             purchasing,
             now_iso(), vendor_id
         ))
-        log_action(cur, "UPDATE_VENDOR", "vendors", vendor_id, f"Cập nhật thông tin nhà cung cấp '{data['short_name']}'")
+        log_action(cur, "UPDATE_VENDOR", "vendors", vendor_id, f"Updated vendor info for '{data['short_name']}'")
         conn.commit()
     finally:
         conn.close()
@@ -386,7 +386,7 @@ def handle_vendor_deactivate_post(handler):
                 updated_at=?
             WHERE id=?
         """, (now_iso(), now_iso(), vendor_id))
-        log_action(cur, "DEACTIVATE_VENDOR", "vendors", vendor_id, f"Hủy kích hoạt nhà cung cấp '{v_name}'")
+        log_action(cur, "DEACTIVATE_VENDOR", "vendors", vendor_id, f"Deactivated vendor '{v_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -416,7 +416,7 @@ def handle_vendor_restore_post(handler):
                 updated_at=?
             WHERE id=?
         """, (now_iso(), vendor_id))
-        log_action(cur, "RESTORE_VENDOR", "vendors", vendor_id, f"Khôi phục hoạt động nhà cung cấp '{v_name}'")
+        log_action(cur, "RESTORE_VENDOR", "vendors", vendor_id, f"Restored vendor '{v_name}'")
         conn.commit()
     finally:
         conn.close()

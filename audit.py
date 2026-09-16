@@ -96,23 +96,23 @@ def page_audit_logs(handler):
     body = f"""
     <div style="margin-bottom: 24px;">
       <h2 style="margin: 0 0 6px 0; color: var(--text-primary);">Audit Logs</h2>
-      <p style="margin: 0; color: var(--text-muted); font-size: 14px;">Nhật ký ghi nhận lịch sử các hành động thay đổi dữ liệu trên hệ thống.</p>
+      <p style="margin: 0; color: var(--text-muted); font-size: 14px;">History of all data modification activities recorded in the system.</p>
     </div>
 
     <div class="card" style="margin-bottom: 20px; padding: 16px;">
       <form method="GET" action="/audit-logs" class="filters" style="display:flex; gap:16px; flex-wrap:wrap; align-items:flex-end;">
         <div style="flex:1; min-width:200px;">
-          <div class="label">Tìm kiếm nội dung</div>
-          <input type="text" name="search" placeholder="Nhập từ khóa cần tìm..." value="{escape(search_query)}" style="width:100%;">
+          <div class="label">Search Details</div>
+          <input type="text" name="search" placeholder="Enter keywords to search..." value="{escape(search_query)}" style="width:100%;">
         </div>
         <div style="width:200px;">
-          <div class="label">Hành động (Action)</div>
+          <div class="label">Action</div>
           <select name="action" style="width:100%;">
             {''.join(action_opts)}
           </select>
         </div>
         <div>
-          <button type="submit" class="btn-primary">Tìm kiếm</button>
+          <button type="submit" class="btn-primary">Search</button>
           <a href="/audit-logs" class="btn btn-secondary">Reset</a>
         </div>
       </form>
@@ -122,24 +122,24 @@ def page_audit_logs(handler):
       <table style="width:100%; border-collapse:collapse; margin:0; border:none;">
         <thead>
           <tr style="background:#f8fafc; border-bottom:1px solid var(--border);">
-            <th style="width:160px; text-align:left; padding:12px 16px;">Thời gian</th>
-            <th style="width:140px; text-align:left; padding:12px 16px;">Hành động</th>
-            <th style="width:160px; text-align:left; padding:12px 16px;">Bảng & ID</th>
-            <th style="text-align:left; padding:12px 16px;">Chi tiết hoạt động</th>
+            <th style="width:160px; text-align:left; padding:12px 16px;">Timestamp</th>
+            <th style="width:140px; text-align:left; padding:12px 16px;">Action</th>
+            <th style="width:160px; text-align:left; padding:12px 16px;">Table & Record ID</th>
+            <th style="text-align:left; padding:12px 16px;">Activity Details</th>
           </tr>
         </thead>
         <tbody>
-          {"".join(rows_html) if rows_html else '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">Không tìm thấy nhật ký hoạt động nào.</td></tr>'}
+          {"".join(rows_html) if rows_html else '<tr><td colspan="4" style="text-align:center; padding:30px; color:var(--text-muted);">No audit logs found.</td></tr>'}
         </tbody>
       </table>
     </div>
 
     <div style="display:flex; justify-content:space-between; align-items:center; margin-top:16px; font-size:13.5px;">
-      <div class="muted">Hiển thị từ {(page-1)*limit + 1 if total_count > 0 else 0} đến {min(page*limit, total_count)} trong tổng số <b>{total_count}</b> dòng</div>
+      <div class="muted">Showing {(page-1)*limit + 1 if total_count > 0 else 0} to {min(page*limit, total_count)} of <b>{total_count}</b> logs</div>
       <div style="display:flex; gap:8px;">
-        <a href="{prev_url}" class="btn" {prev_disabled}>← Trang trước</a>
-        <span style="display:inline-flex; align-items:center; padding:0 8px; font-weight:600;">Trang {page} / {total_pages}</span>
-        <a href="{next_url}" class="btn" {next_disabled}>Trang sau →</a>
+        <a href="{prev_url}" class="btn" {prev_disabled}>← Prev Page</a>
+        <span style="display:inline-flex; align-items:center; padding:0 8px; font-weight:600;">Page {page} / {total_pages}</span>
+        <a href="{next_url}" class="btn" {next_disabled}>Next Page →</a>
       </div>
     </div>
     """

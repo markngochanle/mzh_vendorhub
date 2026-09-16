@@ -7,10 +7,11 @@ from html import escape
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = str(Path(__file__).resolve().with_name("db.sqlite3"))
+import os
+DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().with_name("db.sqlite3")))
 
 HOST = "127.0.0.1"
-PORT = 8800
+PORT = int(os.environ.get("PORT", "8800"))
 LIST_LIMIT = 2000
 
 
@@ -140,17 +141,9 @@ def init_db():
                 full_name_vi TEXT NOT NULL,
                 vendor_id INTEGER NOT NULL,        -- vendor (purchasing=0)
 
-                project_name TEXT NULL,            -- free text (Project)
                 position TEXT NULL,
-
-                contract_id INTEGER NOT NULL,      -- framework contract
-                annex_id INTEGER NULL,             -- optional; must belong to contract_id if set
-
-                joining_date TEXT NULL,            -- YYYY-MM-DD (required by app to check overlap)
-                tentative_leaving_date TEXT NULL,  -- YYYY-MM-DD (nullable)
-
-                monthly_rate REAL NULL,
-                manday_rate REAL NULL,
+                joining_date TEXT NULL,
+                tentative_leaving_date TEXT NULL,
 
                 paid_leave_total_hours REAL NULL,
                 paid_leave_used_hours REAL NULL,
@@ -161,9 +154,7 @@ def init_db():
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
 
-                FOREIGN KEY(vendor_id) REFERENCES vendors(id),
-                FOREIGN KEY(contract_id) REFERENCES contracts(id),
-                FOREIGN KEY(annex_id) REFERENCES contract_annexes(id)
+                FOREIGN KEY(vendor_id) REFERENCES vendors(id)
             )
         """)
         conn.commit()
@@ -326,11 +317,25 @@ def init_db():
         """)
         conn.commit()
 
-        # migrations for existing DBs
-        ensure_column(conn, "contract_staff", "project_name", "TEXT")
-        ensure_column(conn, "contract_staff", "work_shift", "TEXT")
-        ensure_column(conn, "invoices", "sent_to_mgs", "INTEGER NOT NULL DEFAULT 0")
-        ensure_column(conn, "contract_references", "locked", "INTEGER NOT NULL DEFAULT 0")
+        # -------- contract staff contract links --------
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS contract_staff_links (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                staff_id INTEGER NOT NULL,
+                contract_id INTEGER NOT NULL,
+                annex_id INTEGER NULL,
+                monthly_rate REAL NULL,
+                manday_rate REAL NULL,
+                joining_date TEXT NULL,
+                tentative_leaving_date TEXT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(staff_id) REFERENCES contract_staff(id),
+                FOREIGN KEY(contract_id) REFERENCES contracts(id),
+                FOREIGN KEY(annex_id) REFERENCES contract_annexes(id)
+            )
+        """)
+        conn.commit()
 
         # -------- projects --------
         cur.execute("""
@@ -377,6 +382,118 @@ def init_db():
         """)
         conn.commit()
 
+        # -------- migrations & column checks for existing DBs --------
+        ensure_column(conn, "vendors", "company_name_vi", "TEXT")
+        ensure_column(conn, "vendors", "address_vi", "TEXT")
+        ensure_column(conn, "vendors", "short_name", "TEXT")
+        ensure_column(conn, "vendors", "account_currency", "TEXT")
+        ensure_column(conn, "vendors", "purchasing", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "vendors", "is_active", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(conn, "vendors", "deleted_at", "TEXT")
+
+        ensure_column(conn, "contracts", "contract_value", "REAL")
+        ensure_column(conn, "contracts", "is_active", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(conn, "contracts", "deleted_at", "TEXT")
+
+        ensure_column(conn, "contract_annexes", "value", "REAL")
+        ensure_column(conn, "contract_annexes", "is_active", "INTEGER NOT NULL DEFAULT 1")
+        ensure_column(conn, "contract_annexes", "deleted_at", "TEXT")
+
+        ensure_column(conn, "contract_staff", "work_shift", "TEXT")
+        ensure_column(conn, "contract_staff", "joining_date", "TEXT")
+        ensure_column(conn, "contract_staff", "tentative_leaving_date", "TEXT")
+        ensure_column(conn, "contract_staff", "paid_leave_total_hours", "REAL")
+        ensure_column(conn, "contract_staff", "paid_leave_used_hours", "REAL")
+        ensure_column(conn, "contract_staff", "ot", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "contract_staff", "status", "TEXT")
+
+        ensure_column(conn, "contract_staff_links", "joining_date", "TEXT")
+        ensure_column(conn, "contract_staff_links", "tentative_leaving_date", "TEXT")
+
+        ensure_column(conn, "monthly_attendance_summary", "locked", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "monthly_attendance_summary", "manual_work_hours", "REAL")
+        ensure_column(conn, "monthly_attendance_summary", "manual_ot_hours", "REAL")
+
+        ensure_column(conn, "invoices", "sent_to_mgs", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "invoices", "force_match", "INTEGER NOT NULL DEFAULT 0")
+        ensure_column(conn, "invoices", "note", "TEXT")
+
+        ensure_column(conn, "contract_references", "locked", "INTEGER NOT NULL DEFAULT 0")
+
+        ensure_column(conn, "projects", "it_outsourcing_budget", "REAL")
+        ensure_column(conn, "projects", "os_start_date", "TEXT")
+        ensure_column(conn, "projects", "os_end_date", "TEXT")
+        ensure_column(conn, "projects", "is_active", "INTEGER NOT NULL DEFAULT 1")
+
+        # Indexes for query speed
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_psa_proj_staff ON project_staff_assignments(project_id, staff_id)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_psa_month ON project_staff_assignments(month)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_mas_staff_month ON monthly_attendance_summary(staff_id, month)")
+        cur.execute("CREATE INDEX IF NOT EXISTS idx_csl_staff ON contract_staff_links(staff_id)")
+        conn.commit()
+
+        # Check table columns of contract_staff to see if migration is needed
+        table_cols = [r["name"] for r in cur.execute("PRAGMA table_info(contract_staff)").fetchall()]
+        if "contract_id" in table_cols:
+            # First ensure contract_staff_links count
+            links_count = cur.execute("SELECT COUNT(*) AS c FROM contract_staff_links").fetchone()["c"]
+            if links_count == 0:
+                # Migrate old staff contracts data to contract_staff_links
+                old_rows = cur.execute("SELECT id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, created_at, updated_at FROM contract_staff").fetchall()
+                for r in old_rows:
+                    if r["contract_id"] is not None:
+                        cur.execute("""
+                            INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, created_at, updated_at)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """, (r["id"], r["contract_id"], r["annex_id"], r["monthly_rate"], r["manday_rate"], r["joining_date"], r["tentative_leaving_date"], r["created_at"], r["updated_at"]))
+                conn.commit()
+
+            # Safely rebuild the contract_staff table to drop the legacy columns (to avoid foreign key constraint check failures on ALTER TABLE DROP COLUMN)
+            try:
+                cur.execute("PRAGMA foreign_keys = OFF;")
+                cur.execute("ALTER TABLE contract_staff RENAME TO contract_staff_old;")
+                cur.execute("""
+                    CREATE TABLE contract_staff (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        full_name_vi TEXT NOT NULL,
+                        vendor_id INTEGER NOT NULL,        -- vendor (purchasing=0)
+                        position TEXT NULL,
+                        joining_date TEXT NULL,
+                        tentative_leaving_date TEXT NULL,
+                        paid_leave_total_hours REAL NULL,
+                        paid_leave_used_hours REAL NULL,
+                        ot INTEGER NOT NULL DEFAULT 0,     -- 1=Yes, 0=No
+                        status TEXT NULL,                  -- NULL/"" or "inactive"
+                        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                        work_shift TEXT,
+                        FOREIGN KEY(vendor_id) REFERENCES vendors(id)
+                    );
+                """)
+                cur.execute("""
+                    INSERT INTO contract_staff (
+                        id, full_name_vi, vendor_id, position, joining_date, tentative_leaving_date,
+                        paid_leave_total_hours, paid_leave_used_hours,
+                        ot, status, created_at, updated_at, work_shift
+                    )
+                    SELECT 
+                        id, full_name_vi, vendor_id, position, joining_date, tentative_leaving_date,
+                        paid_leave_total_hours, paid_leave_used_hours,
+                        ot, status, created_at, updated_at, work_shift
+                    FROM contract_staff_old;
+                """)
+                cur.execute("DROP TABLE contract_staff_old;")
+                conn.commit()
+            except Exception as e:
+                conn.rollback()
+                print(f"Error rebuilding contract_staff table: {e}")
+                raise e
+            finally:
+                try:
+                    cur.execute("PRAGMA foreign_keys = ON;")
+                except:
+                    pass
+
     finally:
         conn.close()
 
@@ -409,6 +526,8 @@ def layout(title: str, body_html: str):
       <a href="/projects" class="nav-link">Projects</a>
       <a href="/attendance" class="nav-link">Attendance</a>
       <a href="/audit-logs" class="nav-link">Audit Logs</a>
+      <a href="/playwright" class="nav-link">UAT Runner</a>
+      <a href="/unit-tests" class="nav-link">Unit Tests</a>
     </div>
     """
     return f"""<!doctype html>
@@ -1138,6 +1257,19 @@ def parse_int_or_none(s):
         return None
     try:
         return int(s)
+    except ValueError:
+        return None
+
+
+def to_float_or_none(s: str | None):
+    if s is None:
+        return None
+    s = str(s).strip()
+    if s == "":
+        return None
+    s = s.replace(",", "")
+    try:
+        return float(s)
     except ValueError:
         return None
 
