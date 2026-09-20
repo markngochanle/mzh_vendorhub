@@ -98,6 +98,8 @@ from attendance import (
     handle_attendance_monthly_unlock_get,
     handle_attendance_save_cell_post,
     handle_attendance_monthly_export_get,
+    page_attendance_timesheet_report,
+    page_attendance_acceptance,
 )
 from projects import (
     page_projects_list,
@@ -390,6 +392,28 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/attendance/monthly/export":
                 handle_attendance_monthly_export_get(self)
+                return
+
+            if path == "/attendance/acceptance":
+                filters = {
+                    "month": qs.get("month", []),
+                    "vendor_id": qs.get("vendor_id", []),
+                    "contract_id": qs.get("contract_id", []),
+                    "annex_id": qs.get("annex_id", []),
+                    "q": qs.get("q", [""])[0],
+                }
+                send_html(self, page_attendance_acceptance(filters))
+                return
+
+            if path == "/attendance/timesheet":
+                filters = {
+                    "month": qs.get("month", []),
+                    "vendor_id": qs.get("vendor_id", []),
+                    "contract_id": qs.get("contract_id", []),
+                    "annex_id": qs.get("annex_id", []),
+                    "q": qs.get("q", [""])[0],
+                }
+                send_html(self, page_attendance_timesheet_report(filters))
                 return
 
             # ---------------- Projects ----------------

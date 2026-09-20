@@ -1553,7 +1553,7 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
             
         # Get active staff of this vendor
         staff_rows = cur.execute("""
-            SELECT id, full_name_vi, position
+            SELECT id, full_name_vi, position, paid_leave_total_hours, paid_leave_used_hours
             FROM contract_staff
             WHERE vendor_id = ? AND (status IS NULL OR status <> 'inactive')
             ORDER BY full_name_vi ASC
@@ -1567,7 +1567,11 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
     selected_staff_id = link["staff_id"] if link else None
     for s in staff_rows:
         sel = "selected" if selected_staff_id and s["id"] == selected_staff_id else ""
-        staff_opts.append(f'<option value="{s["id"]}" {sel}>{escape(s["full_name_vi"])} ({escape(s["position"] or "")})</option>')
+        tot_h = s["paid_leave_total_hours"] or 0.0
+        used_h = s["paid_leave_used_hours"] or 0.0
+        rem_h = tot_h - used_h
+        rem_lbl = f"{rem_h/8.0:.1f}d remaining"
+        staff_opts.append(f'<option value="{s["id"]}" {sel}>{escape(s["full_name_vi"])} ({escape(s["position"] or "")} - {rem_lbl})</option>')
         
     def gv(key, default=""):
         if link and link[key] is not None:
@@ -1592,7 +1596,10 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
         staff_name = ""
         for s in staff_rows:
             if s["id"] == link["staff_id"]:
-                staff_name = f"{s['full_name_vi']} ({s['position'] or ''})"
+                tot_h = s["paid_leave_total_hours"] or 0.0
+                used_h = s["paid_leave_used_hours"] or 0.0
+                rem_h = tot_h - used_h
+                staff_name = f"{s['full_name_vi']} ({s['position'] or ''} - {rem_h/8.0:.1f}d remaining)"
                 break
         staff_select_html = f"""
             <input type="hidden" name="staff_id" value="{link['staff_id']}">
@@ -1639,6 +1646,12 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
             <div class="label">Man-day Rate (VND)</div>
             <input type="number" step="0.01" name="manday_rate" value="{escape(gv('manday_rate'))}" style="width:100%;" placeholder="e.g. 2000000">
           </div>
+
+          <div>
+            <div class="label">Paid Leave Hours (for this Annex)</div>
+            <input type="number" step="0.5" name="paid_leave_total_hours" value="{escape(gv('paid_leave_total_hours', '0'))}" style="width:100%;" placeholder="e.g. 16.0">
+            <div class="muted" style="font-size:11px; margin-top:2px;">Saved paid leave hours allocated for this specific Annex link.</div>
+          </div>
         </div>
         
         <div class="actions" style="margin-top:14px;">
@@ -1663,6 +1676,9 @@ def handle_contract_assign_staff_save_post(handler):
     
     monthly_rate = to_float_or_none(form.get("monthly_rate", [""])[0])
     manday_rate = to_float_or_none(form.get("manday_rate", [""])[0])
+    paid_leave_total_hours = to_float_or_none(form.get("paid_leave_total_hours", [""])[0])
+    if paid_leave_total_hours is None:
+        paid_leave_total_hours = to_float_or_none(form.get("add_paid_leave_hours", [""])[0]) or 0.0
     
     if not contract_id.isdigit() or not staff_id.isdigit() or not joining_date:
         send_html(handler, layout("Error", "<div class='card danger'>Invalid input parameters</div>"), status=400)
@@ -1696,18 +1712,29 @@ def handle_contract_assign_staff_save_post(handler):
                     tentative_leaving_date = ?,
                     monthly_rate = ?,
                     manday_rate = ?,
+                    paid_leave_total_hours = ?,
                     updated_at = ?
                 WHERE id = ?
-            """, (joining_date, tentative_leaving_date, monthly_rate, manday_rate, now_iso(), link_id_int))
+            """, (joining_date, tentative_leaving_date, monthly_rate, manday_rate, paid_leave_total_hours, now_iso(), link_id_int))
             log_action(cur, "UPDATE_CONTRACT_STAFF_LINK", "contract_staff_links", link_id_int, f"Updated staff allocation ID {staff_id} in contract ID {contract_id}")
         else:
             # Insert new link
             cur.execute("""
-                INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (int(staff_id), int(contract_id), annex_id_int, monthly_rate, manday_rate, joining_date, tentative_leaving_date, now_iso(), now_iso()))
+                INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, paid_leave_total_hours, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (int(staff_id), int(contract_id), annex_id_int, monthly_rate, manday_rate, joining_date, tentative_leaving_date, paid_leave_total_hours, now_iso(), now_iso()))
             new_id = cur.lastrowid
             log_action(cur, "CREATE_CONTRACT_STAFF_LINK", "contract_staff_links", new_id, f"Allocated staff ID {staff_id} to contract ID {contract_id}")
+
+        # Recalculate and sync total paid leave hours on contract_staff from all links
+        cur.execute("""
+            UPDATE contract_staff
+            SET paid_leave_total_hours = COALESCE((
+                SELECT SUM(paid_leave_total_hours) FROM contract_staff_links WHERE staff_id = ?
+            ), 0.0),
+            updated_at = ?
+            WHERE id = ?
+        """, (int(staff_id), now_iso(), int(staff_id)))
             
         conn.commit()
     finally:

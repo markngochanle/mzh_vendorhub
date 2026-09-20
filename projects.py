@@ -364,6 +364,19 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
                 ORDER BY cs.full_name_vi ASC
             """, avail_params).fetchall()
 
+            # Query all contract links for listed staff and available staff
+            staff_ids = set([s["id"] for s in staffs] + [s["id"] for s in available_staffs])
+            staff_links_map = {}
+            if staff_ids:
+                placeholders = ",".join("?" for _ in staff_ids)
+                links_rows = conn.execute(f"""
+                    SELECT staff_id, joining_date, tentative_leaving_date
+                    FROM contract_staff_links
+                    WHERE staff_id IN ({placeholders})
+                """, list(staff_ids)).fetchall()
+                for lr in links_rows:
+                    staff_links_map.setdefault(lr["staff_id"], []).append(lr)
+
             # Query busy months of available staff
             avail_ids = [s["id"] for s in available_staffs]
             staff_busy_map = {}
@@ -512,13 +525,20 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
                     continue
 
                 # Check active range (onboard / offboard)
-                onboarded = s["joining_date"] is not None and s["joining_date"] <= last_day_str
-                not_left = not s["tentative_leaving_date"] or s["tentative_leaving_date"] >= first_day_str
+                s_links = staff_links_map.get(s["id"], [])
+                if s_links:
+                    onboarded_and_not_left = any(
+                        (not lr["joining_date"] or lr["joining_date"] <= last_day_str) and
+                        (not lr["tentative_leaving_date"] or lr["tentative_leaving_date"] >= first_day_str)
+                        for lr in s_links
+                    )
+                else:
+                    onboarded_and_not_left = (not s["joining_date"] or s["joining_date"] <= last_day_str) and (not s["tentative_leaving_date"] or s["tentative_leaving_date"] >= first_day_str)
 
                 # Check busy project in month m
                 is_busy = staff_busy_map.get(s["id"], {}).get(m) is not None
 
-                if onboarded and not_left and not is_busy:
+                if onboarded_and_not_left and not is_busy:
                     is_any_month_available = True
                     break
 
@@ -588,7 +608,20 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
                         td_months.append('<td style="text-align: center;">-</td>')
                         continue
 
-                    is_active = (s["joining_date"] <= last_day_str) and (not s["tentative_leaving_date"] or s["tentative_leaving_date"] >= first_day_str)
+                    s_links = staff_links_map.get(s["id"], [])
+                    if s_links:
+                        is_active = any(
+                            (not lr["joining_date"] or lr["joining_date"] <= last_day_str) and
+                            (not lr["tentative_leaving_date"] or lr["tentative_leaving_date"] >= first_day_str)
+                            for lr in s_links
+                        )
+                    elif s["joining_date"]:
+                        is_active = (s["joining_date"] <= last_day_str) and (not s["tentative_leaving_date"] or s["tentative_leaving_date"] >= first_day_str)
+                    else:
+                        is_active = True
+
+                    if not is_active and (s["id"], m) in assignments_map:
+                        is_active = True
 
                     if not is_active:
                         td_months.append('<td style="text-align: center; background: var(--bg-main); color: var(--text-muted); font-size: 11px;" title="Staff is inactive in this month">Inactive</td>')

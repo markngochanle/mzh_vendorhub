@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 import os
-DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().with_name("db.sqlite3")))
+DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().with_name("db_nf_newcontract.sqlite3")))
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("PORT", "8800"))
@@ -409,6 +409,7 @@ def init_db():
 
         ensure_column(conn, "contract_staff_links", "joining_date", "TEXT")
         ensure_column(conn, "contract_staff_links", "tentative_leaving_date", "TEXT")
+        ensure_column(conn, "contract_staff_links", "paid_leave_total_hours", "REAL NULL DEFAULT 0.0")
 
         ensure_column(conn, "monthly_attendance_summary", "locked", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "monthly_attendance_summary", "manual_work_hours", "REAL")

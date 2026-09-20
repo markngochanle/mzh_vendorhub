@@ -585,6 +585,7 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
       <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll & Payment</a>
+      <a href="/attendance/acceptance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
     </div>
     """
 
@@ -1839,6 +1840,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
       <a href="/attendance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💵 Monthly Payroll & Payment</a>
+      <a href="/attendance/acceptance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
     </div>
     """
 
@@ -2019,12 +2021,13 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
 
       {f'''
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">
-        <div class="actions">
-          <button type="submit" style="background:#0b57d0; color:#fff; border-color:#0b57d0; font-weight:600; padding:10px 24px;">Save Calculations</button>
-          <a href="/attendance/monthly/export?{filter_qs}" class="btn btn-secondary" style="padding:10px 20px;">Export to Excel (CSV)</a>
+        <div class="actions" style="display:flex; gap:10px; align-items:center;">
+          <button type="submit" style="background:#0b57d0; color:#fff; border-color:#0b57d0; font-weight:600; padding:10px 24px;">Lưu tính toán</button>
+          <a href="/attendance/monthly/export?{filter_qs}" class="btn btn-secondary" style="padding:10px 20px;">Xuất Excel (CSV)</a>
+          <a href="/attendance/timesheet?{filter_qs}" target="_blank" class="btn btn-secondary" style="padding:10px 20px; background:#475569; color:#fff; border-color:#475569;">📄 Báo cáo Timesheet (PDF Khổ ngang)</a>
         </div>
         <div style="font-size:18px; font-weight:bold; color:#111;">
-          Total Monthly Payment: <span style="color:#0b57d0; font-size:20px;">{int(round(total_billing_all)):,} VND</span>
+          Tổng thanh toán tháng: <span style="color:#0b57d0; font-size:20px;">{int(round(total_billing_all)):,} VND</span>
         </div>
       </div>
       ''' if trs else ''}
@@ -2141,6 +2144,314 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
     
     first_month = months[0] if months else f"{date.today().month:02d}/{date.today().year:04d}"
     return layout(f"Monthly Payroll - Month {first_month}", body)
+
+
+def page_attendance_acceptance(filters: dict, error_msg: str | None = None, success_msg: str | None = None) -> str:
+    m_raw = filters.get("month")
+    if isinstance(m_raw, list):
+        month_val = m_raw[0].strip() if m_raw and isinstance(m_raw[0], str) else ""
+    elif isinstance(m_raw, str):
+        month_val = m_raw.strip()
+    else:
+        month_val = ""
+
+    if not month_val:
+        month_val = date.today().strftime("%Y-%m")
+
+    try:
+        y_val, m_val_int = map(int, month_val.split("-"))
+    except Exception:
+        today = date.today()
+        y_val, m_val_int = today.year, today.month
+        month_val = today.strftime("%Y-%m")
+
+    num_days = calendar.monthrange(y_val, m_val_int)[1]
+    month_start_date = f"{y_val:04d}-{m_val_int:02d}-01"
+    month_end_date = f"{y_val:04d}-{m_val_int:02d}-{num_days:02d}"
+
+    v_raw = filters.get("vendor_id")
+    if isinstance(v_raw, list):
+        v_raw = v_raw[0] if v_raw else None
+    vendor_filter = parse_int_or_none(v_raw)
+
+    c_raw = filters.get("contract_id")
+    if isinstance(c_raw, list):
+        c_raw = c_raw[0] if c_raw else None
+    contract_filter = parse_int_or_none(c_raw)
+
+    a_raw = filters.get("annex_id")
+    if isinstance(a_raw, list):
+        a_raw = a_raw[0] if a_raw else None
+    annex_filter = parse_int_or_none(a_raw)
+
+    q_raw = filters.get("q")
+    if isinstance(q_raw, list):
+        q_filter = q_raw[0].strip() if q_raw and isinstance(q_raw[0], str) else ""
+    elif isinstance(q_raw, str):
+        q_filter = q_raw.strip()
+    else:
+        q_filter = ""
+
+    conn = db_connect()
+    try:
+        if vendor_filter is not None and contract_filter is not None:
+            c_row = conn.execute("SELECT 1 FROM contracts WHERE id=? AND seller_vendor_id=?", (contract_filter, vendor_filter)).fetchone()
+            if not c_row:
+                contract_filter = None
+
+        if contract_filter is not None and annex_filter is not None:
+            a_row = conn.execute("SELECT 1 FROM contract_annexes WHERE id=? AND contract_id=?", (annex_filter, contract_filter)).fetchone()
+            if not a_row:
+                annex_filter = None
+
+        vendors = conn.execute("SELECT id, COALESCE(company_name, company_name_vi) AS company_name FROM vendors WHERE is_active=1 AND purchasing=0 ORDER BY company_name ASC").fetchall()
+
+        if vendor_filter is not None:
+            contracts = conn.execute("SELECT id, framework_no, framework_name FROM contracts WHERE is_active=1 AND seller_vendor_id=? ORDER BY framework_no ASC", (vendor_filter,)).fetchall()
+        else:
+            contracts = conn.execute("SELECT id, framework_no, framework_name FROM contracts WHERE is_active=1 ORDER BY framework_no ASC").fetchall()
+
+        annexes = conn.execute("SELECT a.id, a.contract_id, a.annex_name, c.seller_vendor_id FROM contract_annexes a JOIN contracts c ON c.id = a.contract_id WHERE a.is_active=1 AND a.deleted_at IS NULL ORDER BY a.annex_name ASC").fetchall()
+
+        annex_sql = """
+            SELECT a.id AS annex_id, a.annex_name, a.start_date, a.end_date,
+                   c.id AS contract_id, c.framework_no, c.framework_name,
+                   v.id AS vendor_id, COALESCE(v.company_name, v.company_name_vi) AS vendor_name,
+                   v.tax_id, COALESCE(v.address, v.address_vi) AS address_vi, v.tel
+            FROM contract_annexes a
+            JOIN contracts c ON c.id = a.contract_id
+            JOIN vendors v ON v.id = c.seller_vendor_id
+            WHERE a.is_active = 1 AND a.deleted_at IS NULL
+        """
+        params = []
+        if annex_filter is not None:
+            annex_sql += " AND a.id = ?"
+            params.append(annex_filter)
+        if contract_filter is not None:
+            annex_sql += " AND c.id = ?"
+            params.append(contract_filter)
+        if vendor_filter is not None:
+            annex_sql += " AND v.id = ?"
+            params.append(vendor_filter)
+
+        annex_sql += " ORDER BY v.company_name_vi, c.framework_no, a.annex_name"
+        annex_list = conn.execute(annex_sql, params).fetchall()
+
+        annex_cards = []
+        for a in annex_list:
+            aid = a["annex_id"]
+            
+            staff_sql = """
+                SELECT DISTINCT s.id, s.full_name_vi, s.position, l.monthly_rate, l.manday_rate
+                FROM contract_staff_links l
+                JOIN contract_staff s ON s.id = l.staff_id
+                WHERE l.annex_id = ? AND (s.status IS NULL OR s.status <> 'inactive')
+                  AND (l.joining_date IS NULL OR l.joining_date = '' OR l.joining_date <= ?)
+                  AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+                  AND (
+                      EXISTS (SELECT 1 FROM attendance att WHERE att.staff_id = s.id AND strftime('%Y-%m', att.date) = ?)
+                      OR EXISTS (SELECT 1 FROM monthly_attendance_summary mas WHERE mas.staff_id = s.id AND mas.month = ?)
+                  )
+            """
+            staff_params = [aid, month_end_date, month_start_date, month_val, month_val]
+            if q_filter:
+                staff_sql += " AND s.full_name_vi LIKE ?"
+                staff_params.append(f"%{q_filter}%")
+            staff_sql += " ORDER BY s.full_name_vi"
+
+            staff_rows = conn.execute(staff_sql, staff_params).fetchall()
+            staff_ids = [s["id"] for s in staff_rows]
+
+            # Fetch ALL active staff linked to this annex via contract during target month
+            all_linked_rows = conn.execute("""
+                SELECT DISTINCT s.id
+                FROM contract_staff_links l
+                JOIN contract_staff s ON s.id = l.staff_id
+                WHERE l.annex_id = ? AND (s.status IS NULL OR s.status <> 'inactive')
+                  AND (l.joining_date IS NULL OR l.joining_date = '' OR l.joining_date <= ?)
+                  AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+            """, (aid, month_end_date, month_start_date)).fetchall()
+            all_linked_ids = [r["id"] for r in all_linked_rows]
+
+            daily_lock_map = {}
+            monthly_lock_map = {}
+            if all_linked_ids:
+                s_ph = ", ".join(["?"] * len(all_linked_ids))
+                d_rows = conn.execute(f"""
+                    SELECT staff_id FROM attendance_locks
+                    WHERE month = ? AND staff_id IN ({s_ph}) AND locked = 1
+                """, [month_val] + all_linked_ids).fetchall()
+                daily_lock_map = {r["staff_id"]: True for r in d_rows}
+
+                m_rows = conn.execute(f"""
+                    SELECT staff_id FROM monthly_attendance_summary
+                    WHERE month = ? AND staff_id IN ({s_ph}) AND locked = 1
+                """, [month_val] + all_linked_ids).fetchall()
+                monthly_lock_map = {r["staff_id"]: True for r in m_rows}
+
+            is_fully_locked = (
+                len(all_linked_ids) > 0 and
+                all(daily_lock_map.get(sid, False) and monthly_lock_map.get(sid, False) for sid in all_linked_ids)
+            )
+
+            # Attendance Acceptance only displays annexes if ALL contract staff are fully locked in both Daily Attendance and Monthly Payroll
+            if not is_fully_locked:
+                continue
+
+            staff_trs = []
+            tot_wages = 0.0
+            for idx, s in enumerate(staff_rows, 1):
+                sid = s["id"]
+                s_lock_badge = '<span style="color:#137333; font-weight:bold;">🔒 Locked</span>'
+
+                sum_row = conn.execute("""
+                    SELECT actual_days, ot_converted_hours, daily_rate, total_amount
+                    FROM monthly_attendance_summary
+                    WHERE staff_id = ? AND month = ?
+                """, (sid, month_val)).fetchone()
+
+                act_d = sum_row["actual_days"] if sum_row else 0.0
+                ot_h = sum_row["ot_converted_hours"] if sum_row else 0.0
+                wages = sum_row["total_amount"] if sum_row else 0.0
+                tot_wages += wages
+
+                staff_trs.append(f"""
+                <tr>
+                  <td style="text-align:center;">{idx}</td>
+                  <td><b>{escape(s['full_name_vi'])}</b></td>
+                  <td>{escape(s['position'] or '')}</td>
+                  <td style="text-align:center;">{s_lock_badge}</td>
+                  <td style="text-align:right; font-family:monospace;">{act_d * 8.0:.1f} hrs</td>
+                  <td style="text-align:right; font-family:monospace;">{ot_h:.1f} hrs</td>
+                  <td style="text-align:right; font-family:monospace; font-weight:bold;">{int(round(wages)):,} VND</td>
+                </tr>
+                """)
+
+            badge_html = '<span style="background:#e6f4ea; color:#137333; border:1px solid #b4e3be; padding:4px 12px; border-radius:12px; font-weight:bold; font-size:13px;">🔒 ATTENDANCE & PAYROLL LOCKED</span>'
+
+            btn_html = f"""
+            <a href="/attendance/timesheet?annex_id={aid}&month={month_val}" target="_blank" class="btn" style="background:#0b57d0; color:#fff; font-weight:bold; padding:8px 18px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
+              📄 Print / Export BBNT PDF (A4 Landscape)
+            </a>
+            """
+
+            annex_cards.append(f"""
+            <div class="card" style="margin-bottom:24px; border:1px solid #cbd5e1; border-radius:12px; padding:20px; background:#fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start; border-bottom:1px solid #f1f5f9; padding-bottom:12px; margin-bottom:16px;">
+                <div>
+                  <h3 style="margin:0 0 6px 0; font-size:16px; color:#0f172a;">
+                    {escape(a['vendor_name'])} - <span style="color:#0b57d0;">{escape(a['annex_name'])}</span> ({escape(a['framework_no'])})
+                  </h3>
+                  <div style="font-size:13px; color:#475569; line-height:1.4;">
+                    <span><b>Tax Code:</b> {escape(a['tax_id'] or 'N/A')}</span> | 
+                    <span><b>Address:</b> {escape(a['address_vi'] or 'N/A')}</span> | 
+                    <span><b>TEL:</b> {escape(a['tel'] or 'N/A')}</span>
+                  </div>
+                </div>
+                <div>{badge_html}</div>
+              </div>
+
+              <div style="margin-bottom:16px;">
+                <table style="width:100%; border-collapse:collapse; font-size:13px;">
+                  <thead>
+                    <tr style="background:#f8fafc;">
+                      <th style="width:40px; text-align:center;">No.</th>
+                      <th style="text-align:left;">Full Name</th>
+                      <th style="text-align:left;">Position</th>
+                      <th style="text-align:center;">Attendance Status</th>
+                      <th style="text-align:right;">Standard Hours</th>
+                      <th style="text-align:right;">OT Hours</th>
+                      <th style="text-align:right;">Total Amount (VND)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {''.join(staff_trs) if staff_trs else '<tr><td colspan="7" style="text-align:center; padding:12px; color:#64748b;">No staff members assigned to this Annex.</td></tr>'}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style="display:flex; justify-content:space-between; align-items:center; background:#f8fafc; padding:12px 16px; border-radius:8px; border:1px solid #e2e8f0;">
+                <div>{btn_html}</div>
+                <div style="text-align:right; font-size:14px; color:#334155;">
+                  Total Amount: <b style="color:#0b57d0; font-size:17px; font-family:monospace;">{int(round(tot_wages)):,} VND</b>
+                </div>
+              </div>
+            </div>
+            """)
+
+        vendor_opts = ['<option value="">-- All Vendors --</option>']
+        for v in vendors:
+            sel = "selected" if vendor_filter == v["id"] else ""
+            vendor_opts.append(f'<option value="{v["id"]}" {sel}>{escape(v["company_name"])}</option>')
+
+        contract_opts = ['<option value="">-- All Contracts --</option>']
+        for c in contracts:
+            sel = "selected" if contract_filter == c["id"] else ""
+            contract_opts.append(f'<option value="{c["id"]}" {sel}>{escape(c["framework_no"])}</option>')
+
+        annex_opts = ['<option value="">-- All Annexes --</option>']
+        for a in annexes:
+            sel = "selected" if annex_filter == a["id"] else ""
+            annex_opts.append(f'<option value="{a["id"]}" data-contract-id="{a["contract_id"]}" data-vendor-id="{a["seller_vendor_id"]}" {sel}>{escape(a["annex_name"])}</option>')
+
+    finally:
+        conn.close()
+
+    act_qs = f"month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={urllib.parse.quote(q_filter)}"
+
+    sub_nav = f"""
+    <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
+      <a href="/attendance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
+      <a href="/attendance/monthly?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll & Payment</a>
+      <a href="/attendance/acceptance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📜 Attendance Acceptance</a>
+    </div>
+    """
+
+    filter_card = f"""
+    <div class="card">
+      <form method="GET" action="/attendance/acceptance" class="filters" style="margin: 0;">
+        <div>
+          <div class="label">Attendance Month</div>
+          <input type="month" name="month" value="{month_val}" onchange="this.form.submit()">
+        </div>
+        <div>
+          <div class="label">Vendor</div>
+          <select id="vendor_id" name="vendor_id" onchange="this.form.submit()">
+            {''.join(vendor_opts)}
+          </select>
+        </div>
+        <div>
+          <div class="label">Framework Contract</div>
+          <select id="contract_id" name="contract_id" onchange="this.form.submit()">
+            {''.join(contract_opts)}
+          </select>
+        </div>
+        <div>
+          <div class="label">Annex (filtered by Framework)</div>
+          <select id="annex_id" name="annex_id" onchange="this.form.submit()">
+            {''.join(annex_opts)}
+          </select>
+        </div>
+        <div>
+          <div class="label">Search staff</div>
+          <input type="text" name="q" placeholder="Enter staff name..." value="{escape(q_filter)}">
+        </div>
+        <div class="actions">
+          <button type="submit">Filter</button>
+          <a class="muted" href="/attendance/acceptance">Reset</a>
+        </div>
+      </form>
+    </div>
+    """
+
+    body = f"""
+    {sub_nav}
+    {filter_card}
+
+    {''.join(annex_cards) if annex_cards else '<div class="card"><p class="muted">No annexes match the current filter.</p></div>'}
+    """
+
+    return layout("Attendance Acceptance", body)
 
 
 def handle_attendance_monthly_save_post(handler):
@@ -2618,3 +2929,567 @@ def handle_attendance_monthly_export_get(handler):
     handler.end_headers()
     handler.wfile.write(csv_bytes)
 
+
+def page_attendance_timesheet_report(filters: dict) -> str:
+    months = parse_str_list(filters.get("month"))
+    if not months:
+        today = date.today()
+        months = [today.strftime("%Y-%m")]
+    m_val = months[0]
+
+    try:
+        y_val, m_val_int = map(int, m_val.split("-"))
+    except Exception:
+        today = date.today()
+        y_val, m_val_int = today.year, today.month
+        m_val = today.strftime("%Y-%m")
+
+    num_days = calendar.monthrange(y_val, m_val_int)[1]
+    days = list(range(1, num_days + 1))
+    
+    dt_month = date(y_val, m_val_int, 1)
+    month_title_str = dt_month.strftime("%b-%Y")
+
+    vendor_filters = parse_int_list(filters.get("vendor_id"))
+    contract_filters = parse_int_list(filters.get("contract_id"))
+    annex_filters = parse_int_list(filters.get("annex_id"))
+    q_filter = (filters.get("q") or "").strip()
+
+    month_start_date = f"{y_val:04d}-{m_val_int:02d}-01"
+    month_end_date = f"{y_val:04d}-{m_val_int:02d}-{num_days:02d}"
+
+    conn = db_connect()
+    try:
+        # Load matching annexes
+        annex_sql = """
+            SELECT a.id AS annex_id, a.annex_name, c.id AS contract_id, c.framework_no, c.framework_name,
+                   v.id AS vendor_id, v.company_name, v.company_name_vi,
+                   v.tax_id, v.address, v.address_vi, v.tel, v.account_name
+            FROM contract_annexes a
+            JOIN contracts c ON c.id = a.contract_id
+            JOIN vendors v ON v.id = c.seller_vendor_id
+            WHERE a.is_active = 1 AND a.deleted_at IS NULL
+        """
+        params = []
+        if annex_filters:
+            ph = ", ".join(["?"] * len(annex_filters))
+            annex_sql += f" AND a.id IN ({ph})"
+            params.extend(annex_filters)
+        if contract_filters:
+            ph = ", ".join(["?"] * len(contract_filters))
+            annex_sql += f" AND c.id IN ({ph})"
+            params.extend(contract_filters)
+        if vendor_filters:
+            ph = ", ".join(["?"] * len(vendor_filters))
+            annex_sql += f" AND v.id IN ({ph})"
+            params.extend(vendor_filters)
+
+        annex_sql += " ORDER BY COALESCE(v.company_name, v.company_name_vi), c.framework_no, a.annex_name"
+        target_annexes = conn.execute(annex_sql, params).fetchall()
+
+        if not target_annexes:
+            # Fallback if no annex filter matched
+            target_annexes = conn.execute("""
+                SELECT a.id AS annex_id, a.annex_name, c.id AS contract_id, c.framework_no, c.framework_name,
+                       v.id AS vendor_id, v.company_name, v.company_name_vi,
+                       v.tax_id, v.address, v.address_vi, v.tel, v.account_name
+                FROM contract_annexes a
+                JOIN contracts c ON c.id = a.contract_id
+                JOIN vendors v ON v.id = c.seller_vendor_id
+                WHERE a.is_active = 1 AND a.deleted_at IS NULL
+                ORDER BY COALESCE(v.company_name, v.company_name_vi), c.framework_no, a.annex_name LIMIT 1
+            """).fetchall()
+
+        annex_pages_html = []
+        unlocked_annexes = []
+
+        for annex_row in target_annexes:
+            aid = annex_row["annex_id"]
+            v_name = annex_row["company_name"] or annex_row["company_name_vi"] or "Vendor Company"
+            v_tax = annex_row["tax_id"] or "N/A"
+            v_addr = annex_row["address"] or annex_row["address_vi"] or "N/A"
+            v_tel = annex_row["tel"] or "N/A"
+            f_no = annex_row["framework_no"] or ""
+            a_name = annex_row["annex_name"] or ""
+
+            # Fetch staff for this Annex who have attendance records for this month
+            staff_rows = conn.execute("""
+                SELECT DISTINCT s.id, s.full_name_vi, s.position, s.ot,
+                       lnk.monthly_rate, lnk.manday_rate
+                FROM contract_staff s
+                JOIN contract_staff_links lnk ON lnk.staff_id = s.id
+                WHERE lnk.annex_id = ?
+                  AND (s.status IS NULL OR s.status <> 'inactive')
+                  AND lnk.joining_date <= ?
+                  AND (lnk.tentative_leaving_date IS NULL OR lnk.tentative_leaving_date = '' OR lnk.tentative_leaving_date >= ?)
+                  AND (
+                      EXISTS (SELECT 1 FROM attendance att WHERE att.staff_id = s.id AND strftime('%Y-%m', att.date) = ?)
+                      OR EXISTS (SELECT 1 FROM monthly_attendance_summary mas WHERE mas.staff_id = s.id AND mas.month = ?)
+                  )
+                ORDER BY s.full_name_vi ASC
+            """, (aid, month_end_date, month_start_date, m_val, m_val)).fetchall()
+
+            if not staff_rows:
+                # Fallback to any staff assigned to this Annex with attendance in target month
+                staff_rows = conn.execute("""
+                    SELECT DISTINCT s.id, s.full_name_vi, s.position, s.ot,
+                           lnk.monthly_rate, lnk.manday_rate
+                    FROM contract_staff s
+                    JOIN contract_staff_links lnk ON lnk.staff_id = s.id
+                    WHERE lnk.annex_id = ? AND (s.status IS NULL OR s.status <> 'inactive')
+                      AND (
+                          EXISTS (SELECT 1 FROM attendance att WHERE att.staff_id = s.id AND strftime('%Y-%m', att.date) = ?)
+                          OR EXISTS (SELECT 1 FROM monthly_attendance_summary mas WHERE mas.staff_id = s.id AND mas.month = ?)
+                      )
+                    ORDER BY s.full_name_vi ASC
+                """, (aid, m_val, m_val)).fetchall()
+
+            staff_ids = [s["id"] for s in staff_rows]
+
+            # Fetch ALL active staff linked to this annex via contract during target month
+            all_linked_rows = conn.execute("""
+                SELECT DISTINCT s.id
+                FROM contract_staff_links l
+                JOIN contract_staff s ON s.id = l.staff_id
+                WHERE l.annex_id = ? AND (s.status IS NULL OR s.status <> 'inactive')
+                  AND (l.joining_date IS NULL OR l.joining_date = '' OR l.joining_date <= ?)
+                  AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
+            """, (aid, month_end_date, month_start_date)).fetchall()
+            all_linked_ids = [r["id"] for r in all_linked_rows]
+
+            daily_lock_map = {}
+            monthly_lock_map = {}
+            daily_lock_time = ""
+            if all_linked_ids:
+                s_ph = ", ".join(["?"] * len(all_linked_ids))
+                d_rows = conn.execute(f"""
+                    SELECT staff_id, locked_at FROM attendance_locks
+                    WHERE month = ? AND staff_id IN ({s_ph}) AND locked = 1
+                """, [m_val] + all_linked_ids).fetchall()
+                daily_lock_map = {r["staff_id"]: True for r in d_rows}
+                lock_times = [r["locked_at"] for r in d_rows if r["locked_at"]]
+                if lock_times:
+                    daily_lock_time = max(lock_times)
+
+                m_rows = conn.execute(f"""
+                    SELECT staff_id FROM monthly_attendance_summary
+                    WHERE month = ? AND staff_id IN ({s_ph}) AND locked = 1
+                """, [m_val] + all_linked_ids).fetchall()
+                monthly_lock_map = {r["staff_id"]: True for r in m_rows}
+
+            is_fully_locked = (
+                len(all_linked_ids) > 0 and
+                all(daily_lock_map.get(sid, False) and monthly_lock_map.get(sid, False) for sid in all_linked_ids)
+            )
+
+            if not is_fully_locked:
+                unlocked_annexes.append(f"{v_name} - {a_name}")
+                if len(target_annexes) == 1:
+                    return f"""<!DOCTYPE html>
+                    <html>
+                    <head>
+                      <meta charset="utf-8">
+                      <title>Cannot Export BBNT - Attendance & Payroll Not Locked</title>
+                      <style>
+                        body {{ font-family: sans-serif; background: #f8fafc; padding: 40px; margin: 0; }}
+                        .card {{ max-width: 680px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 24px; border-left: 6px solid #b00020; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }}
+                      </style>
+                    </head>
+                    <body>
+                      <div class="card">
+                        <h2 style="color:#b00020; margin-top:0;">⚠️ Cannot Export Attendance Acceptance Report (PDF)</h2>
+                        <p style="font-size:15px; color:#334155; line-height:1.6;">
+                          Daily Attendance and Monthly Payroll for month <b>{month_title_str}</b> of <b>{escape(v_name)} - {escape(a_name)}</b> have not been fully <b>Locked</b>.
+                          <br><br>
+                          Requirement: Both Daily Attendance and Monthly Payroll must be locked before exporting BBNT PDF.
+                        </p>
+                        <a href="/attendance/acceptance?month={m_val}" style="display:inline-block; margin-top:12px; background:#0b57d0; color:#fff; padding:10px 20px; border-radius:6px; font-weight:bold; text-decoration:none;">← Back to Attendance Acceptance Page</a>
+                      </div>
+                    </body>
+                    </html>"""
+                continue
+
+            att_map = {}
+            summary_map = {}
+            if staff_ids:
+                s_placeholders = ", ".join(["?"] * len(staff_ids))
+                att_rows = conn.execute(f"""
+                    SELECT staff_id, strftime('%d', date) AS day_num, work_hours, ot_hours
+                    FROM attendance
+                    WHERE staff_id IN ({s_placeholders}) AND strftime('%Y-%m', date) = ?
+                """, staff_ids + [m_val]).fetchall()
+                for r in att_rows:
+                    d_int = int(r["day_num"])
+                    att_map[(r["staff_id"], d_int)] = {
+                        "work_hours": r["work_hours"] or 0.0,
+                        "ot_hours": r["ot_hours"] or 0.0
+                    }
+
+                sum_rows = conn.execute(f"""
+                    SELECT staff_id, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount
+                    FROM monthly_attendance_summary
+                    WHERE staff_id IN ({s_placeholders}) AND month = ?
+                """, staff_ids + [m_val]).fetchall()
+                for r in sum_rows:
+                    summary_map[r["staff_id"]] = dict(r)
+
+            std_days_in_m = get_standard_working_days(y_val, m_val_int)
+            avg_monthly_rate = 65000000.0
+            if staff_rows and staff_rows[0]["monthly_rate"]:
+                avg_monthly_rate = staff_rows[0]["monthly_rate"]
+
+            th_days_html = ""
+            th_wday_html = ""
+            for d in days:
+                dt = date(y_val, m_val_int, d)
+                w_name = dt.strftime("%a")
+                is_wknd = dt.weekday() >= 5
+                bg_style = "background-color:#94a3b8; color:#fff;" if is_wknd else ""
+                th_wday_html += f'<th style="border:1px solid #000; padding:1px; width:20px; font-size:7pt; text-align:center; {bg_style}">{w_name}</th>'
+                th_days_html += f'<th style="border:1px solid #000; padding:1px; width:20px; font-size:7pt; text-align:center; {bg_style}">{d:02d}</th>'
+
+            sec1_trs = []
+            sec1_tot_normal_hours = 0.0
+            for idx, s in enumerate(staff_rows, 1):
+                sid = s["id"]
+                code_lbl = f"M{idx:02d}"
+                tds = []
+                row_tot_hours = 0.0
+                for d in days:
+                    dt = date(y_val, m_val_int, d)
+                    if (sid, d) in att_map:
+                        wh = att_map[(sid, d)]["work_hours"]
+                    else:
+                        staff_has_att = any((sid, day) in att_map for day in days)
+                        wh = 8.0 if (not staff_has_att and not is_wknd) else 0.0
+                    bg_style = "background-color:#cbd5e1;" if is_wknd else ""
+                    val_lbl = f"{wh:.2f}" if wh > 0 else ""
+                    if not is_wknd:
+                        row_tot_hours += wh
+                    tds.append(f'<td style="border:1px solid #000; padding:1px; text-align:center; font-size:7pt; {bg_style}">{val_lbl}</td>')
+
+                sec1_tot_normal_hours += row_tot_hours
+                leave_info = ""
+                s_sum = summary_map.get(sid, {})
+                if s_sum.get("paid_leave_days", 0) > 0:
+                    leave_info = f"Annual leave: {s_sum['paid_leave_days'] * 8:.0f}h"
+
+                sec1_trs.append(f"""
+                <tr>
+                  <td style="border:1px solid #000; padding:2px; text-align:center;">{idx}</td>
+                  <td style="border:1px solid #000; padding:2px; text-align:center;">{code_lbl}</td>
+                  <td style="border:1px solid #000; padding:2px; white-space:nowrap;">{escape(s['full_name_vi'])}</td>
+                  {''.join(tds)}
+                  <td style="border:1px solid #000; padding:2px; text-align:right; font-weight:bold;">{row_tot_hours:.2f}</td>
+                  <td style="border:1px solid #000; padding:2px; font-size:7pt;">{escape(leave_info)}</td>
+                </tr>
+                """)
+
+            sec2_trs = []
+            sec2_tot_reg_ot = 0.0
+            sec2_tot_wknd_ot = 0.0
+            sec2_tot_hol_ot = 0.0
+            for idx, s in enumerate(staff_rows, 1):
+                sid = s["id"]
+                code_lbl = f"M{idx:02d}"
+                tds = []
+                row_reg_ot = 0.0
+                row_wknd_ot = 0.0
+                row_hol_ot = 0.0
+                for d in days:
+                    dt = date(y_val, m_val_int, d)
+                    is_wknd = dt.weekday() >= 5
+                    att = att_map.get((sid, d), {})
+                    oth = att.get("ot_hours", 0.0)
+                    bg_style = "background-color:#cbd5e1;" if is_wknd else ""
+                    val_lbl = f"{oth:.2f}" if oth > 0 else ""
+                    if oth > 0:
+                        if is_wknd:
+                            row_wknd_ot += oth
+                        else:
+                            row_reg_ot += oth
+                    tds.append(f'<td style="border:1px solid #000; padding:1px; text-align:center; font-size:7pt; {bg_style}">{val_lbl}</td>')
+
+                sec2_tot_reg_ot += row_reg_ot
+                sec2_tot_wknd_ot += row_wknd_ot
+                sec2_tot_hol_ot += row_hol_ot
+
+                sec2_trs.append(f"""
+                <tr>
+                  <td style="border:1px solid #000; padding:2px; text-align:center;">{idx}</td>
+                  <td style="border:1px solid #000; padding:2px; text-align:center;">{code_lbl}</td>
+                  <td style="border:1px solid #000; padding:2px; white-space:nowrap;">{escape(s['full_name_vi'])}</td>
+                  {''.join(tds)}
+                  <td style="border:1px solid #000; padding:2px; text-align:right;">{row_reg_ot:.2f}</td>
+                  <td style="border:1px solid #000; padding:2px; text-align:right;">{row_wknd_ot:.2f}</td>
+                  <td style="border:1px solid #000; padding:2px; text-align:right;">{row_hol_ot:.2f}</td>
+                </tr>
+                """)
+
+            sec3_trs = []
+            sec3_tot_norm_pay = 0.0
+            sec3_tot_reg_ot_pay = 0.0
+            sec3_tot_wknd_ot_pay = 0.0
+            sec3_tot_hol_ot_pay = 0.0
+            sec3_tot_all_pay = 0.0
+
+            for idx, s in enumerate(staff_rows, 1):
+                sid = s["id"]
+                code_lbl = f"M{idx:02d}"
+                s_sum = summary_map.get(sid, {})
+                d_rate = s_sum.get("daily_rate", avg_monthly_rate / std_days_in_m if std_days_in_m > 0 else 0.0)
+                h_rate = d_rate / 8.0
+
+                std_days = s_sum.get("standard_days", std_days_in_m)
+                act_days = s_sum.get("actual_days", std_days_in_m)
+                pl_days = s_sum.get("paid_leave_days", 0.0)
+                norm_pay = round((act_days + pl_days) * d_rate)
+
+                m_rate_val = s["monthly_rate"] if "monthly_rate" in s.keys() else None
+                d_rate_val = s["manday_rate"] if "manday_rate" in s.keys() else None
+                if m_rate_val is not None and m_rate_val > 0:
+                    unit_rate_val = m_rate_val
+                elif d_rate_val is not None and d_rate_val > 0:
+                    unit_rate_val = d_rate_val
+                else:
+                    unit_rate_val = d_rate
+
+                reg_ot_h = 0.0
+                wknd_ot_h = 0.0
+                for d in days:
+                    dt = date(y_val, m_val_int, d)
+                    att = att_map.get((sid, d), {})
+                    oth = att.get("ot_hours", 0.0)
+                    if oth > 0:
+                        if dt.weekday() >= 5:
+                            wknd_ot_h += oth
+                        else:
+                            reg_ot_h += oth
+
+                reg_ot_pay = round(reg_ot_h * h_rate * 1.5)
+                wknd_ot_pay = round(wknd_ot_h * h_rate * 2.0)
+                hol_ot_pay = 0.0
+                calc_total = norm_pay + reg_ot_pay + wknd_ot_pay + hol_ot_pay
+                total_pay = s_sum.get("total_amount") if (s_sum and s_sum.get("total_amount") is not None) else calc_total
+
+                sec3_tot_norm_pay += norm_pay
+                sec3_tot_reg_ot_pay += reg_ot_pay
+                sec3_tot_wknd_ot_pay += wknd_ot_pay
+                sec3_tot_hol_ot_pay += hol_ot_pay
+                sec3_tot_all_pay += total_pay
+
+                sec3_trs.append(f"""
+                <tr>
+                  <td style="border:1px solid #000; padding:3px; text-align:center;">{idx}</td>
+                  <td style="border:1px solid #000; padding:3px; text-align:center;">{code_lbl}</td>
+                  <td style="border:1px solid #000; padding:3px; white-space:nowrap;">{escape(s['full_name_vi'])}</td>
+                  <td style="border:1px solid #000; padding:3px; text-align:right; font-family:monospace;">{std_days:.1f}</td>
+                  <td style="border:1px solid #000; padding:3px; text-align:right; font-family:monospace;">{act_days:.1f}</td>
+                  <td style="border:1px solid #000; padding:3px; text-align:right; font-family:monospace;">{pl_days:.1f}</td>
+                  <td style="border:1px solid #000; padding:3px; text-align:right; font-family:monospace;">{unit_rate_val:,.0f}</td>
+                  <td style="border:1px solid #000; padding:3px; text-align:right; font-family:monospace;">{reg_ot_pay:,.0f}</td>
+                  <td style="border:1px solid #000; padding:3px; text-align:right; font-family:monospace;">{wknd_ot_pay:,.0f}</td>
+                  <td style="border:1px solid #000; padding:3px; text-align:right; font-family:monospace;">{hol_ot_pay:,.0f}</td>
+                  <td style="border:1px solid #000; padding:3px; text-align:right; font-family:monospace; font-weight:bold;">{total_pay:,.0f}</td>
+                </tr>
+                """)
+
+            annex_pages_html.append(f"""
+            <div class="annex-page-break" style="page-break-after: always; break-after: page; max-width: 1100px; margin: 0 auto 30px auto; background: #fff;">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
+                <div>
+                  <div style="font-weight: bold; font-size: 11pt; text-transform: uppercase;">{escape(v_name)}</div>
+                  <div style="font-size: 7.5pt; color: #333;">Tax Code: {escape(v_tax)}</div>
+                  <div style="font-size: 7.5pt; color: #333;">Address: {escape(v_addr)} | Tel: {escape(v_tel)}</div>
+                </div>
+                <div style="text-align: right;">
+                  <div style="font-weight: bold; font-size: 11pt;">MINUTES OF SERVICE ACCEPTANCE</div>
+                  <div style="font-size: 8pt; font-weight: bold; margin-top: 2px;">Period: {month_title_str}</div>
+                  <div style="font-size: 7.5pt; color: #333;">Framework No: {escape(f_no)} | Annex: {escape(a_name)}</div>
+                </div>
+              </div>
+
+              <div style="border-bottom: 1px solid #000; margin-bottom: 10px;"></div>
+
+              <div style="margin-bottom: 16px;">
+                <div style="font-weight: bold; font-size: 9pt; margin-bottom: 4px;">1. Normal working hour report</div>
+                <table style="font-size: 7.5pt;">
+                  <thead>
+                    <tr style="background: #f8fafc;">
+                      <th style="width: 20px; padding: 2px;">No.</th>
+                      <th style="width: 35px; padding: 2px;">Code</th>
+                      <th style="width: 120px; padding: 2px; text-align: left;">Full Name</th>
+                      {th_wday_html}
+                      <th style="width: 45px; padding: 2px;">Total</th>
+                      <th style="width: 120px; padding: 2px; text-align: left;">Annual leave</th>
+                    </tr>
+                    <tr style="background: #f8fafc;">
+                      <th colspan="3" style="padding: 1px;">Date</th>
+                      {th_days_html}
+                      <th colspan="2" style="padding: 1px;"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {''.join(sec1_trs) if sec1_trs else '<tr><td colspan="37" style="text-align:center; padding:10px;">No staff records for this Annex.</td></tr>'}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style="margin-bottom: 16px;">
+                <div style="font-weight: bold; font-size: 9pt; margin-bottom: 4px;">2. Overtime working hour report</div>
+                <table style="font-size: 7.5pt;">
+                  <thead>
+                    <tr style="background: #f8fafc;">
+                      <th style="width: 20px; padding: 2px;" rowspan="2">No.</th>
+                      <th style="width: 35px; padding: 2px;" rowspan="2">Code</th>
+                      <th style="width: 120px; padding: 2px; text-align: left;" rowspan="2">Full Name</th>
+                      {th_wday_html}
+                      <th colspan="3" style="padding: 2px; text-align: center;">Total Overtime (Hours)</th>
+                    </tr>
+                    <tr style="background: #f8fafc;">
+                      {th_days_html}
+                      <th style="width: 35px; padding: 1px;">Regular</th>
+                      <th style="width: 35px; padding: 1px;">Weekend</th>
+                      <th style="width: 35px; padding: 1px;">Holiday</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {''.join(sec2_trs) if sec2_trs else '<tr><td colspan="38" style="text-align:center; padding:10px;">No overtime records for this Annex.</td></tr>'}
+                  </tbody>
+                </table>
+              </div>
+
+              <div style="margin-bottom: 20px;">
+                <div style="font-weight: bold; font-size: 9pt; margin-bottom: 4px;">3. Service Fee calculation</div>
+                <table style="font-size: 7.5pt;">
+                  <thead>
+                    <tr style="background: #f8fafc;">
+                      <th style="width: 20px; padding: 3px;" rowspan="2">No.</th>
+                      <th style="width: 35px; padding: 3px;" rowspan="2">Code</th>
+                      <th style="width: 140px; padding: 3px; text-align: left;" rowspan="2">Full Name</th>
+                      <th style="padding: 3px; text-align: right;" rowspan="2">Standard Days</th>
+                      <th style="padding: 3px; text-align: right;" rowspan="2">Actual Days</th>
+                      <th style="padding: 3px; text-align: right;" rowspan="2">Paid Leave</th>
+                      <th style="padding: 3px; text-align: right;" rowspan="2">Unit Rate (Man-month / Man-day)</th>
+                      <th colspan="3" style="padding: 3px; text-align: center;">Overtime Pay</th>
+                      <th style="padding: 3px; text-align: right;" rowspan="2">Total Amount (VND)</th>
+                    </tr>
+                    <tr style="background: #f8fafc;">
+                      <th style="padding: 2px; text-align: right;">Regular Day (150%)</th>
+                      <th style="padding: 2px; text-align: right;">Weekend Day (200%)</th>
+                      <th style="padding: 2px; text-align: right;">Public Holiday (300%)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {''.join(sec3_trs) if sec3_trs else '<tr><td colspan="11" style="text-align:center; padding:10px;">No calculation records.</td></tr>'}
+                  </tbody>
+                  <tfoot>
+                    <tr style="font-weight: bold; background: #f8fafc;">
+                      <td colspan="10" style="border:1px solid #000; padding:3px; text-align:right;">Total Amount (VND):</td>
+                      <td style="border:1px solid #000; padding:3px; text-align:right; font-family:monospace; color:#0b57d0;">{sec3_tot_all_pay:,.0f}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+
+              <div style="display: flex; justify-content: flex-start; margin-top: 24px; font-size: 8.5pt; text-align: center;">
+                <div>
+                  <div style="font-weight: bold; text-transform: uppercase;">MIZUHO BANK, LTD. HANOI BRANCH</div>
+                  <div style="height: 50px;"></div>
+                  <div style="font-weight: bold; border-top: 1px solid #000; width: 180px; margin: 0 auto; padding-top: 4px;">Authorized Signature</div>
+                </div>
+              </div>
+            </div>
+            """)
+
+    finally:
+        conn.close()
+
+    if not annex_pages_html:
+        return f"""<!DOCTYPE html>
+        <html>
+        <head>
+          <meta charset="utf-8">
+          <title>Cannot Export BBNT</title>
+          <style>body {{ font-family: sans-serif; background: #f8fafc; padding: 40px; }} .card {{ max-width: 600px; margin: 0 auto; background: #fff; padding: 24px; border-radius: 12px; border-left: 6px solid #b00020; }}</style>
+        </head>
+        <body>
+          <div class="card">
+            <h2 style="color:#b00020; margin-top:0;">⚠️ Cannot Export BBNT Report</h2>
+            <p>No annexes with locked attendance match the filter for exporting BBNT report.</p>
+            <a href="/attendance/acceptance?month={m_val}" style="display:inline-block; background:#0b57d0; color:#fff; padding:8px 16px; border-radius:6px; text-decoration:none; font-weight:bold;">← Back to Acceptance Page</a>
+          </div>
+        </body>
+        </html>"""
+
+    filter_qs = build_filter_qs(months, vendor_filters, contract_filters, annex_filters, q_filter)
+
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Timesheet BBNT Report - {month_title_str}</title>
+  <style>
+    @page {{
+      size: A4 landscape;
+      margin: 6mm 8mm;
+    }}
+    body {{
+      font-family: 'Times New Roman', Times, serif;
+      color: #000;
+      background: #fff;
+      margin: 0;
+      padding: 10px;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }}
+    table {{
+      border-collapse: collapse;
+      width: 100%;
+    }}
+    th, td {{
+      border: 1px solid #000;
+      font-size: 8pt;
+    }}
+    .no-print {{
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      background: #f8fafc;
+      padding: 12px 20px;
+      border-bottom: 1px solid #cbd5e1;
+      margin-bottom: 16px;
+    }}
+    @media print {{
+      .no-print {{
+        display: none !important;
+      }}
+      body {{
+        padding: 0;
+      }}
+      .annex-page-break {{
+        page-break-after: always;
+        break-after: page;
+      }}
+    }}
+  </style>
+</head>
+<body>
+
+  <div class="no-print">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <a href="/attendance/acceptance?{filter_qs}" style="text-decoration:none; color:#0b57d0; font-weight:bold; font-size:13px;">← Back to Attendance Acceptance Page</a>
+      <h2 style="margin:0; font-size:16px; font-family:sans-serif;">Attendance Acceptance BBNT Report (A4 Landscape - {month_title_str})</h2>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <button onclick="window.print()" style="padding:8px 16px; background:#0b57d0; color:#fff; border:none; border-radius:6px; font-weight:bold; cursor:pointer;">🖨️ Print / Save PDF (A4 Landscape)</button>
+    </div>
+  </div>
+
+  <div id="report-container">
+    {''.join(annex_pages_html)}
+  </div>
+
+</body>
+</html>"""

@@ -647,6 +647,11 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
 
     error_html = f'<div class="card danger"><b>Error:</b> {escape(error_msg)}</div>' if error_msg else ""
 
+    tot_pl_val = to_float_or_none(gv("paid_leave_total_hours")) or 0.0
+    used_pl_val = to_float_or_none(gv("paid_leave_used_hours")) or 0.0
+    rem_pl_val = max(0.0, tot_pl_val - used_pl_val)
+    rem_days_val = rem_pl_val / 8.0
+
     joining_date_val = gv("joining_date")
     tentative_leaving_date_val = gv("tentative_leaving_date")
     date_attrs = ""
@@ -672,6 +677,22 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
       <option value="" {"selected" if not work_shift_val else ""}>-- Not configured --</option>
       <option value="8:00 - 17:00" {"selected" if work_shift_val=="8:00 - 17:00" else ""}>8:00 - 17:00</option>
       <option value="8:30 - 17:30" {"selected" if work_shift_val=="8:30 - 17:30" else ""}>8:30 - 17:30</option>
+    """
+    body_fields_html = f"""
+          <div>
+            <div class="label">Paid leave (hour) - Total</div>
+            <input type="text" name="paid_leave_total_hours" value="{escape(gv("paid_leave_total_hours"))}" style="width:100%; background:#f1f5f9;" readonly>
+          </div>
+
+          <div>
+            <div class="label">Paid leave (hour) - Actual used</div>
+            <input type="text" name="paid_leave_used_hours" value="{escape(gv("paid_leave_used_hours"))}" style="width:100%; background:#f1f5f9;" readonly>
+          </div>
+
+          <div>
+            <div class="label">Paid leave (hour) - Remaining</div>
+            <input type="text" value="{rem_pl_val:.1f} hrs ({rem_days_val:.2f} days)" style="width:100%; background:#e6f4ea; color:#137333; font-weight:bold;" readonly>
+          </div>
     """
 
     assigned_projects_html = ""
@@ -847,15 +868,7 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
             <input type="date" name="tentative_leaving_date" value="{escape(tentative_leaving_date_val)}" style="width:100%;" {date_attrs}>
           </div>
 
-          <div>
-            <div class="label">Paid leave (hour) - Total</div>
-            <input type="text" name="paid_leave_total_hours" value="{escape(gv("paid_leave_total_hours"))}" style="width:100%;">
-          </div>
-
-          <div>
-            <div class="label">Paid leave (hour) - Actual used</div>
-            <input type="text" name="paid_leave_used_hours" value="{escape(gv("paid_leave_used_hours"))}" style="width:100%;">
-          </div>
+{body_fields_html}
 
           <div>
             <div class="label">OT</div>
@@ -1046,10 +1059,14 @@ def handle_staff_update_post(handler):
     try:
         cur = conn.cursor()
 
-        row = cur.execute("SELECT id FROM contract_staff WHERE id=?", (int(sid),)).fetchone()
-        if not row:
+        existing_staff = cur.execute("SELECT id, paid_leave_total_hours, paid_leave_used_hours FROM contract_staff WHERE id=?", (int(sid),)).fetchone()
+        if not existing_staff:
             send_html(handler, layout("Not found", "<div class='card'>Staff not found</div>"), status=404)
             return
+        if pl_total is None:
+            pl_total = existing_staff["paid_leave_total_hours"]
+        if pl_used is None:
+            pl_used = existing_staff["paid_leave_used_hours"]
 
         v_ok = cur.execute("""
             SELECT 1 FROM vendors WHERE id=? AND is_active=1 AND purchasing=0

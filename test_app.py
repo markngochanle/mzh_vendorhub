@@ -1787,6 +1787,224 @@ class TestProjects(BaseTestCase):
         self.assertIn("Nguyễn Văn An", csv_text)
         self.assertIn("38,750,000.00", csv_text)
 
+    def test_contract_assign_staff_with_leave_and_rates(self):
+        import contracts
+        import urllib.parse
+        cur = self.conn.cursor()
+        
+        # Check initial paid leave total
+        staff = cur.execute("SELECT paid_leave_total_hours FROM contract_staff WHERE id = ?", (self.staff_id,)).fetchone()
+        init_leave = staff["paid_leave_total_hours"] or 0.0
+
+        existing_link = cur.execute("SELECT id FROM contract_staff_links WHERE staff_id = ? AND annex_id = ?", (self.staff_id, self.annex_id)).fetchone()
+        link_id_val = str(existing_link["id"]) if existing_link else ""
+
+        # Simulate POST request to assign staff to contract annex with rate and paid leave hours
+        post_data = urllib.parse.urlencode({
+            "contract_id": str(self.contract_id),
+            "annex_id": str(self.annex_id),
+            "link_id": link_id_val,
+            "staff_id": str(self.staff_id),
+            "joining_date": "2026-06-01",
+            "tentative_leaving_date": "2026-12-31",
+            "monthly_rate": "55000000",
+            "manday_rate": "",
+            "paid_leave_total_hours": "16.0"
+        }).encode("utf-8")
+
+        handler = StubHandler(
+            "/contract/assign-staff/save",
+            "POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded", "Content-Length": str(len(post_data))},
+            body=post_data
+        )
+        contracts.handle_contract_assign_staff_save_post(handler)
+
+        self.assertEqual(handler.response_status, 302)
+
+        # Verify staff link saved rate, dates, and paid leave hours
+        link = cur.execute("SELECT * FROM contract_staff_links WHERE staff_id = ? AND annex_id = ?", (self.staff_id, self.annex_id)).fetchone()
+        self.assertIsNotNone(link)
+        self.assertEqual(link["monthly_rate"], 55000000.0)
+        self.assertEqual(link["joining_date"], "2026-06-01")
+        self.assertEqual(link["paid_leave_total_hours"], 16.0)
+
+        # Verify staff paid leave total was updated with total hours across links
+        updated_staff = cur.execute("SELECT paid_leave_total_hours FROM contract_staff WHERE id = ?", (self.staff_id,)).fetchone()
+        self.assertEqual(updated_staff["paid_leave_total_hours"], 16.0)
+
+    def test_page_attendance_acceptance(self):
+        # Render attendance acceptance tab page with string and list inputs
+        html = attendance.page_attendance_acceptance({"month": "2026-06"})
+        self.assertIn("Attendance Month", html)
+        self.assertIn("Framework Contract", html)
+        self.assertNotIn("gồm 10% VAT", html)
+
+        # Test list inputs (from HTTP parse_qs)
+        html_list = attendance.page_attendance_acceptance({
+            "month": ["2026-06"],
+            "vendor_id": ["1"],
+            "contract_id": ["1"],
+            "annex_id": ["1"],
+            "q": ["test"]
+        })
+    def test_attendance_acceptance_both_locks_required(self):
+        # Create dedicated annex and staff, test lock requirements.
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active) VALUES (?, 'Annex Lock Test 1', '2026-01-01', '2026-12-31', 1)", (self.contract_id,))
+        test_annex_id = cur.lastrowid
+
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Test Staff Both Locks', ?)", (self.seller_id,))
+        test_staff_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate) VALUES (?, ?, ?, 50000000)", (test_staff_id, self.contract_id, test_annex_id))
+        cur.execute("INSERT INTO attendance (staff_id, date, work_hours, ot_hours) VALUES (?, '2026-06-01', 8, 0)", (test_staff_id,))
+        self.conn.commit()
+
+        # 1. Unlocked daily & monthly -> Annex should NOT appear in acceptance
+        html = attendance.page_attendance_acceptance({"month": "2026-06", "annex_id": str(test_annex_id)})
+        self.assertNotIn("Test Staff Both Locks", html)
+
+        # 2. Lock daily attendance only -> Annex should still NOT appear
+        cur.execute("INSERT INTO attendance_locks (staff_id, month, locked, locked_at) VALUES (?, '2026-06', 1, '2026-06-30 17:30:00')", (test_staff_id,))
+        self.conn.commit()
+        html = attendance.page_attendance_acceptance({"month": "2026-06", "annex_id": str(test_annex_id)})
+        self.assertNotIn("Test Staff Both Locks", html)
+
+        # 3. Lock monthly payroll as well -> Annex SHOULD appear
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-06', 22, 22, 0, 0, 2272727, 50000000, 1)
+        """, (test_staff_id,))
+        self.conn.commit()
+        html = attendance.page_attendance_acceptance({"month": "2026-06", "annex_id": str(test_annex_id)})
+        self.assertIn("Test Staff Both Locks", html)
+        self.assertIn("ATTENDANCE & PAYROLL LOCKED", html)
+
+    def test_attendance_acceptance_all_contract_staff_must_be_locked(self):
+        # Test that if an Annex has 2 staff members, Annex only appears when ALL contract staff are locked.
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active) VALUES (?, 'Annex Multi Staff Lock Test', '2026-01-01', '2026-12-31', 1)", (self.contract_id,))
+        test_annex_id = cur.lastrowid
+
+        # Staff 1
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Staff One Contract', ?)", (self.seller_id,))
+        sid1 = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate) VALUES (?, ?, ?, 40000000)", (sid1, self.contract_id, test_annex_id))
+        cur.execute("INSERT INTO attendance_locks (staff_id, month, locked, locked_at) VALUES (?, '2026-07', 1, '2026-07-31 18:00:00')", (sid1,))
+        cur.execute("INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked) VALUES (?, '2026-07', 22, 22, 0, 0, 1818181, 40000000, 1)", (sid1,))
+
+        # Staff 2 (linked to same annex, but not locked yet)
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Staff Two Contract', ?)", (self.seller_id,))
+        sid2 = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate) VALUES (?, ?, ?, 60000000)", (sid2, self.contract_id, test_annex_id))
+        self.conn.commit()
+
+        # Only Staff 1 is locked, Staff 2 is unlocked -> Annex MUST NOT appear
+        html = attendance.page_attendance_acceptance({"month": "2026-07", "annex_id": str(test_annex_id)})
+        self.assertNotIn("Staff One Contract", html)
+
+        # Now lock Staff 2 daily & monthly -> Annex SHOULD appear
+        cur.execute("INSERT INTO attendance_locks (staff_id, month, locked, locked_at) VALUES (?, '2026-07', 1, '2026-07-31 19:00:00')", (sid2,))
+        cur.execute("INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked) VALUES (?, '2026-07', 22, 22, 0, 0, 2727272, 60000000, 1)", (sid2,))
+        self.conn.commit()
+
+        html2 = attendance.page_attendance_acceptance({"month": "2026-07", "annex_id": str(test_annex_id)})
+        self.assertIn("Staff One Contract", html2)
+        self.assertIn("Staff Two Contract", html2)
+
+    def test_attendance_pdf_lock_date_leave_and_amount_consistency(self):
+        # Verify PDF contains daily attendance lock timestamp, leave hours match monthly payroll, and total amount matches monthly payroll.
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active) VALUES (?, 'Annex Consistency Test', '2026-01-01', '2026-12-31', 1)", (self.contract_id,))
+        test_annex_id = cur.lastrowid
+
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Staff Consistency Check', ?)", (self.seller_id,))
+        sid = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate) VALUES (?, ?, ?, 65000000)", (sid, self.contract_id, test_annex_id))
+        cur.execute("INSERT INTO attendance (staff_id, date, work_hours, ot_hours) VALUES (?, '2026-08-01', 8, 0)", (sid,))
+        cur.execute("INSERT INTO attendance_locks (staff_id, month, locked, locked_at) VALUES (?, '2026-08', 1, '2026-08-31 16:45:00')", (sid,))
+        # Set 2.0 paid leave days (16.0 hours) and total_amount = 65000000 in monthly payroll summary
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-08', 22, 20, 2.0, 0, 2954545, 65000000, 1)
+        """, (sid,))
+        self.conn.commit()
+
+        # Fetch PDF HTML
+        pdf_html = attendance.page_attendance_timesheet_report({"month": "2026-08", "annex_id": str(test_annex_id)})
+
+        # 1. Verify Daily Attendance Lock Date and Vietnamese subtitle are NOT present
+        self.assertNotIn("Daily Attendance Lock Date:", pdf_html)
+        self.assertNotIn("(BIÊN BẢN NGHIỆM THU DỊCH VỤ)", pdf_html)
+
+        # 2. Verify Annual leave hours in Section 1 match monthly payroll paid_leave_days * 8 = 16h
+        self.assertIn("Annual leave: 16h", pdf_html)
+
+        # 3. Verify Total amount matches monthly payroll summary total_amount = 65,000,000
+        self.assertIn("65,000,000", pdf_html)
+
+    def test_attendance_acceptance_joining_date_filtering(self):
+        # Staff joining in 2026-07 must NOT appear in 2026-06 Acceptance
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active) VALUES (?, 'Annex Joining Date Test', '2026-01-01', '2026-12-31', 1)", (self.contract_id,))
+        test_annex_id = cur.lastrowid
+
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Lưu Hoàng Long', ?)", (self.seller_id,))
+        sid = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, joining_date, monthly_rate) VALUES (?, ?, ?, '2026-07-01', 50000000)", (sid, self.contract_id, test_annex_id))
+        self.conn.commit()
+
+        # In June 2026 (before joining date), staff should NOT be included
+        html_june = attendance.page_attendance_acceptance({"month": "2026-06", "annex_id": str(test_annex_id)})
+        self.assertNotIn("Lưu Hoàng Long", html_june)
+
+        # In July 2026 (starting from joining date), after locking daily & monthly
+        cur.execute("INSERT INTO attendance_locks (staff_id, month, locked, locked_at) VALUES (?, '2026-07', 1, '2026-07-31 18:00:00')", (sid,))
+        cur.execute("INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked) VALUES (?, '2026-07', 22, 22, 0, 0, 2272727, 50000000, 1)", (sid,))
+        self.conn.commit()
+
+        html_july = attendance.page_attendance_acceptance({"month": "2026-07", "annex_id": str(test_annex_id)})
+        self.assertIn("Lưu Hoàng Long", html_july)
+
+    def test_service_fee_calculation_columns_and_rates(self):
+        # Verify Section 3 includes Standard Days, Actual Days, Paid Leave, and Unit Rate (Man-month vs Man-day rate)
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active) VALUES (?, 'Annex Rate Test', '2026-01-01', '2026-12-31', 1)", (self.contract_id,))
+        annex_id = cur.lastrowid
+
+        # Staff 1: Monthly rate
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Staff Monthly Rate', ?)", (self.seller_id,))
+        sid1 = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate) VALUES (?, ?, ?, 60000000)", (sid1, self.contract_id, annex_id))
+
+        # Staff 2: Manday rate
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Staff Manday Rate', ?)", (self.seller_id,))
+        sid2 = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, manday_rate) VALUES (?, ?, ?, 3000000)", (sid2, self.contract_id, annex_id))
+
+        # Locks and Monthly Summary
+        for sid in [sid1, sid2]:
+            cur.execute("INSERT INTO attendance (staff_id, date, work_hours, ot_hours) VALUES (?, '2026-08-01', 8, 0)", (sid,))
+            cur.execute("INSERT INTO attendance_locks (staff_id, month, locked, locked_at) VALUES (?, '2026-08', 1, '2026-08-31 17:00:00')", (sid,))
+
+        cur.execute("INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked) VALUES (?, '2026-08', 22, 20, 2.0, 0, 2727273, 60000000, 1)", (sid1,))
+        cur.execute("INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked) VALUES (?, '2026-08', 22, 20, 2.0, 0, 3000000, 66000000, 1)", (sid2,))
+        self.conn.commit()
+
+        pdf_html = attendance.page_attendance_timesheet_report({"month": "2026-08", "annex_id": str(annex_id)})
+
+        # Check headers
+        self.assertIn("Standard Days", pdf_html)
+        self.assertIn("Actual Days", pdf_html)
+        self.assertIn("Paid Leave", pdf_html)
+        self.assertIn("Unit Rate", pdf_html)
+
+        # Check rates
+        self.assertIn("60,000,000", pdf_html)  # Staff 1 Man-month rate
+        self.assertIn("3,000,000", pdf_html)   # Staff 2 Man-day rate
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
