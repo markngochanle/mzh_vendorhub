@@ -523,7 +523,12 @@ def layout(title: str, body_html: str):
       <a href="/" class="nav-link">Invoices</a>
       <a href="/vendors" class="nav-link">Vendors</a>
       <a href="/contracts" class="nav-link">Contracts</a>
-      <a href="/staff" class="nav-link">Staff</a>
+      <div class="nav-dropdown">
+        <a href="/staff" class="nav-link nav-dropdown-toggle">Staff <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
+        <div class="nav-dropdown-menu">
+          <a href="/projects/assign#add-staff-section" class="nav-dropdown-item">Assign Staff to Project</a>
+        </div>
+      </div>
       <a href="/projects" class="nav-link">Projects</a>
       <a href="/attendance" class="nav-link">Attendance</a>
       <a href="/audit-logs" class="nav-link">Audit Logs</a>
@@ -671,6 +676,58 @@ def layout(title: str, body_html: str):
       color: var(--primary);
       background: var(--bg-card);
       box-shadow: var(--shadow-sm);
+    }}
+
+    .nav-dropdown {{
+      position: relative;
+      display: inline-block;
+    }}
+    .nav-dropdown-toggle {{
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      cursor: pointer;
+    }}
+    .nav-dropdown-menu {{
+      display: none;
+      position: absolute;
+      top: 100%;
+      left: 0;
+      min-width: 220px;
+      background: #ffffff;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1);
+      padding: 6px 0;
+      z-index: 99999;
+      margin: 0;
+    }}
+    .nav-dropdown-menu::before {{
+      content: "";
+      position: absolute;
+      top: -12px;
+      left: 0;
+      right: 0;
+      height: 12px;
+      background: transparent;
+    }}
+    .nav-dropdown:hover .nav-dropdown-menu,
+    .nav-dropdown:focus-within .nav-dropdown-menu {{
+      display: block;
+    }}
+    .nav-dropdown-item {{
+      display: block;
+      padding: 10px 18px;
+      color: var(--text-primary);
+      font-weight: 500;
+      font-size: 13px;
+      text-decoration: none !important;
+      transition: background 0.15s ease, color 0.15s ease;
+      cursor: pointer;
+    }}
+    .nav-dropdown-item:hover {{
+      background: #f1f5f9;
+      color: var(--primary);
     }}
 
     .muted {{

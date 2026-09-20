@@ -2003,8 +2003,22 @@ class TestProjects(BaseTestCase):
         self.assertIn("60,000,000", pdf_html)  # Staff 1 Man-month rate
         self.assertIn("3,000,000", pdf_html)   # Staff 2 Man-day rate
 
+    def test_staff_submenu_assign_to_project(self):
+        # 1. Verify layout contains Staff sub-menu link for Assign Staff to Project
+        html = common.layout("Test Title", "<p>Content</p>")
+        self.assertIn("Assign Staff to Project", html)
+        self.assertIn("/projects/assign#add-staff-section", html)
+
+        # 2. Verify /projects/assign page contains Add New Staff member to Project form with id="add-staff-section"
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO projects (short_name, full_name, os_start_date, os_end_date, is_active) VALUES ('PROJ-SUB', 'Submenu Project', '2026-01-01', '2026-12-31', 1)")
+        p_id = cur.lastrowid
+        self.conn.commit()
+
+        assign_html = projects.page_projects_assign(selected_project_id=str(p_id))
+        self.assertIn('id="add-staff-section"', assign_html)
+        self.assertIn("Add New Staff member to Project", assign_html)
+
 
 if __name__ == "__main__":
     unittest.main()
-
-
