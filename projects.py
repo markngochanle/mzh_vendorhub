@@ -426,64 +426,29 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
         sel = "selected" if selected_vendor_id and str(v['id']) == str(selected_vendor_id) else ""
         vendor_opts.append(f'<option value="{v["id"]}" {sel}>{escape(v_name)}</option>')
 
-    # Filters Form & Quick Create Project Form Grid
+    # Filters Form
     filters_html = f"""
-    <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; margin-bottom: 24px; align-items: stretch;">
-      
-      <!-- Left: Assignments Filter -->
-      <div class="card" style="margin: 0; display: flex; flex-direction: column; justify-content: space-between; padding: 18px;">
-        <div>
-          <h3 style="margin-top: 0; margin-bottom: 16px;">Staff Assignments Filters</h3>
-          <form class="filters" method="GET" action="/projects/assign" style="display: flex; flex-direction: column; gap: 12px;">
-            <div>
-              <div class="label">Project (Required)</div>
-              <select name="project_id" onchange="this.form.submit()" style="width: 100%;" required>
-                {''.join(project_opts)}
-              </select>
-            </div>
-            <div>
-              <div class="label">Filter by Company (Optional)</div>
-              <select name="vendor_id" onchange="this.form.submit()" style="width: 100%;">
-                {''.join(vendor_opts)}
-              </select>
-            </div>
-            <div style="margin-top: 8px;">
-              <button type="submit" style="width: 100%;">Apply Filters</button>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <!-- Right: Quick Create New Project -->
+    <div style="margin-bottom: 24px;">
       <div class="card" style="margin: 0; padding: 18px;">
-        <h3 style="margin-top: 0; margin-bottom: 12px;">Quick Create New Project</h3>
-        <form method="POST" action="/project/create?redirect_to=/projects/assign" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-          <div style="grid-column: span 2;">
-            <div class="label" style="font-size: 11px;">Short Name (required)</div>
-            <input type="text" name="short_name" placeholder="e.g. MZH-Hub" style="width: 100%; padding: 4px; font-size: 13px;" required>
+        <h3 style="margin-top: 0; margin-bottom: 16px;">Staff Assignments Filters</h3>
+        <form class="filters" method="GET" action="/projects/assign" style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-end;">
+          <div style="flex: 1; min-width: 250px;">
+            <div class="label">Project (Required)</div>
+            <select name="project_id" onchange="this.form.submit()" style="width: 100%;" required>
+              {''.join(project_opts)}
+            </select>
           </div>
-          <div style="grid-column: span 2;">
-            <div class="label" style="font-size: 11px;">Full Name (required)</div>
-            <input type="text" name="full_name" placeholder="e.g. Mizuho Vendor Hub System" style="width: 100%; padding: 4px; font-size: 13px;" required>
+          <div style="flex: 1; min-width: 250px;">
+            <div class="label">Filter by Company (Optional)</div>
+            <select name="vendor_id" onchange="this.form.submit()" style="width: 100%;">
+              {''.join(vendor_opts)}
+            </select>
           </div>
           <div>
-            <div class="label" style="font-size: 11px;">OS Start Date</div>
-            <input type="date" name="os_start_date" style="width: 100%; padding: 3px; font-size: 12px;">
-          </div>
-          <div>
-            <div class="label" style="font-size: 11px;">OS End Date</div>
-            <input type="date" name="os_end_date" style="width: 100%; padding: 3px; font-size: 12px;">
-          </div>
-          <div style="grid-column: span 2;">
-            <div class="label" style="font-size: 11px;">IT Outsourcing Budget</div>
-            <input type="number" step="0.01" name="it_outsourcing_budget" placeholder="Budget in VND" style="width: 100%; padding: 4px; font-size: 13px;">
-          </div>
-          <div style="grid-column: span 2; margin-top: 6px;">
-            <button type="submit" class="btn-primary" style="width: 100%; padding: 8px; font-size: 13px;">Create & Select Project</button>
+            <button type="submit" style="padding: 8px 20px;">Apply Filters</button>
           </div>
         </form>
       </div>
-
     </div>
     """
 
@@ -541,7 +506,7 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
             """)
 
         add_staff_form_html = f"""
-        <div class="card" style="margin-bottom: 24px;">
+        <div class="card" id="add-staff-section" style="margin-bottom: 24px;">
           <h3 style="margin-top: 0; margin-bottom: 16px;">Add New Staff member to Project</h3>
           <form method="POST" action="/project/assign/create">
             <input type="hidden" name="project_id" value="{project_row["id"]}">
