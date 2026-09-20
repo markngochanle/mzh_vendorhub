@@ -2022,12 +2022,11 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
       {f'''
       <div style="display:flex; justify-content:space-between; align-items:center; margin-top:20px;">
         <div class="actions" style="display:flex; gap:10px; align-items:center;">
-          <button type="submit" style="background:#0b57d0; color:#fff; border-color:#0b57d0; font-weight:600; padding:10px 24px;">Lưu tính toán</button>
-          <a href="/attendance/monthly/export?{filter_qs}" class="btn btn-secondary" style="padding:10px 20px;">Xuất Excel (CSV)</a>
-          <a href="/attendance/timesheet?{filter_qs}" target="_blank" class="btn btn-secondary" style="padding:10px 20px; background:#475569; color:#fff; border-color:#475569;">📄 Báo cáo Timesheet (PDF Khổ ngang)</a>
+          <button type="submit" style="background:#0b57d0; color:#fff; border-color:#0b57d0; font-weight:600; padding:10px 24px;">Save Calculations</button>
+          <a href="/attendance/monthly/export?{filter_qs}" class="btn btn-secondary" style="padding:10px 20px;">Export Excel (CSV)</a>
         </div>
         <div style="font-size:18px; font-weight:bold; color:#111;">
-          Tổng thanh toán tháng: <span style="color:#0b57d0; font-size:20px;">{int(round(total_billing_all)):,} VND</span>
+          Total Monthly Payment: <span style="color:#0b57d0; font-size:20px;">{int(round(total_billing_all)):,} VND</span>
         </div>
       </div>
       ''' if trs else ''}
