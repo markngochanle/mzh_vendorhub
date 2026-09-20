@@ -3294,6 +3294,9 @@ def page_attendance_timesheet_report(filters: dict) -> str:
                 </tr>
                 """)
 
+            is_manday_annex = any((("manday_rate" in s.keys()) and s["manday_rate"] is not None and s["manday_rate"] > 0) for s in staff_rows)
+            sec3_rate_header_lbl = "Unit Rate (Man-day)" if is_manday_annex else "Unit Rate (Man-month)"
+
             annex_pages_html.append(f"""
             <div class="annex-page-break" style="page-break-after: always; break-after: page; max-width: 1100px; margin: 0 auto 30px auto; background: #fff;">
               <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px;">
@@ -3370,7 +3373,7 @@ def page_attendance_timesheet_report(filters: dict) -> str:
                       <th style="padding: 3px; text-align: right;" rowspan="2">Standard Days</th>
                       <th style="padding: 3px; text-align: right;" rowspan="2">Actual Days</th>
                       <th style="padding: 3px; text-align: right;" rowspan="2">Paid Leave</th>
-                      <th style="padding: 3px; text-align: right;" rowspan="2">Unit Rate (Man-month / Man-day)</th>
+                      <th style="padding: 3px; text-align: right;" rowspan="2">{sec3_rate_header_lbl}</th>
                       <th colspan="3" style="padding: 3px; text-align: center;">Overtime Pay</th>
                       <th style="padding: 3px; text-align: right;" rowspan="2">Total Amount (VND)</th>
                     </tr>
@@ -3395,7 +3398,7 @@ def page_attendance_timesheet_report(filters: dict) -> str:
               <div style="display: flex; justify-content: flex-start; margin-top: 24px; font-size: 8.5pt; text-align: center;">
                 <div>
                   <div style="font-weight: bold; text-transform: uppercase;">MIZUHO BANK, LTD. HANOI BRANCH</div>
-                  <div style="height: 50px;"></div>
+                  <div style="height: 75px;"></div>
                   <div style="font-weight: bold; border-top: 1px solid #000; width: 180px; margin: 0 auto; padding-top: 4px;">Authorized Signature</div>
                 </div>
               </div>
