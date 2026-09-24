@@ -458,6 +458,29 @@ def send_json(handler, data: dict, status=200):
     handler.end_headers()
     handler.wfile.write(encoded)
 
+def get_python_executable():
+    try:
+        import playwright
+        return sys.executable
+    except ImportError:
+        pass
+
+    candidates = [
+        "/Library/Frameworks/Python.framework/Versions/3.14/bin/python3",
+        "/Library/Frameworks/Python.framework/Versions/3.13/bin/python3",
+        "/usr/local/bin/python3",
+        "/opt/homebrew/bin/python3",
+    ]
+    for candidate in candidates:
+        if os.path.exists(candidate):
+            try:
+                res = subprocess.run([candidate, "-c", "import playwright"], capture_output=True)
+                if res.returncode == 0:
+                    return candidate
+            except Exception:
+                pass
+    return sys.executable
+
 def handle_run_tests_post(handler):
     """
     Handles POST requests to trigger Playwright subprocess.
@@ -480,8 +503,8 @@ def handle_run_tests_post(handler):
         f.write("====================================\n\n")
 
     # Construct execution command
-    # Base command uses current python executable to run run_tests.py with --headed and --log-to-file
-    args = [sys.executable, str(PLAYWRIGHT_DIR / "run_tests.py"), "--headed", "--log-to-file"]
+    python_exe = get_python_executable()
+    args = [python_exe, str(PLAYWRIGHT_DIR / "run_tests.py"), "--headed", "--log-to-file"]
     if tc != "all":
         args += ["--tc", tc]
 

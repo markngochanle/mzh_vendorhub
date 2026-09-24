@@ -224,8 +224,6 @@ def run_playwright_tests():
                 page.fill("input[name='full_name_vi']", "Nguyen UAT Tester")
                 page.select_option("select[name='vendor_id']", value="2")  # FPT SOFTWARE
                 page.fill("input[name='position']", "Senior QA Automator")
-                page.fill("input[name='paid_leave_total_hours']", "12")
-                page.fill("input[name='paid_leave_used_hours']", "0")
                 page.select_option("select[name='work_shift']", value="8:00 - 17:00")
                 
                 if show:
