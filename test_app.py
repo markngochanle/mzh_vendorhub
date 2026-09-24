@@ -314,6 +314,18 @@ class TestContracts(BaseTestCase):
         deleted = self.conn.execute("SELECT is_active FROM contracts WHERE id=?", (self.contract_id,)).fetchone()
         self.assertEqual(deleted["is_active"], 0)
 
+    def test_handle_contract_assign_staff_save_post_error_handling(self):
+        # Test in-batch duplicate submission
+        body = f"contract_id={self.contract_id}&link_id=&staff_id={self.staff_id}&joining_date=2025-01-01&monthly_rate=50000000&link_id=&staff_id={self.staff_id}&joining_date=2025-01-01&monthly_rate=60000000".encode()
+        handler = MockHandler(body=body, headers={"content-length": str(len(body))})
+        contracts.handle_contract_assign_staff_save_post(handler)
+        self.assertEqual(handler.response_status, 400)
+        out = handler.get_output_text()
+        self.assertIn("Duplicate allocation", out)
+        # Verify submitted rows (rates and dates) were preserved in returned form
+        self.assertIn("50000000", out)
+        self.assertIn("60000000", out)
+
     def test_contract_and_annex_values(self):
         # Create a contract with custom contract_value
         body = f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&framework_no=MHB/VAL/2026&contract_value=5000000000".encode()
@@ -360,7 +372,7 @@ class TestStaff(BaseTestCase):
         # 1. Same staff overlap test
         ok, msg = staff.check_no_overlap(cur, None, self.staff_id, "2025-07-01", "2025-08-01")
         self.assertFalse(ok)
-        self.assertIn("Overlap with", msg)
+        self.assertIn("already allocated", msg)
 
         # 2. Distinct staff_id, no overlap issues
         ok_diff, msg_diff = staff.check_no_overlap(cur, None, 9999, "2025-07-01", "2025-08-01")
@@ -1787,6 +1799,55 @@ class TestProjects(BaseTestCase):
         self.assertIn("Nguyễn Văn An", csv_text)
         self.assertIn("38,750,000.00", csv_text)
 
+    def test_inactive_staff_in_projects_and_attendance(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO projects (short_name, full_name, os_start_date, os_end_date, is_active)
+            VALUES ('INACTIVE-PROJ', 'Inactive Staff Project', '2026-01-01', '2026-12-31', 1)
+        """)
+        p_id = cur.lastrowid
+
+        # Assign staff Nguyễn Văn An to project
+        cur.execute("""
+            INSERT INTO project_staff_assignments (project_id, staff_id, month)
+            VALUES (?, ?, '2026-05')
+        """, (p_id, self.staff_id))
+
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-05', 21.0, 21.0, 0.0, 0.0, 1000000.0, 21000000.0, 1)
+        """, (self.staff_id,))
+
+        cur.execute("""
+            INSERT INTO attendance_locks (staff_id, month, locked)
+            VALUES (?, '2026-05', 1)
+        """, (self.staff_id,))
+
+        # Set staff to status = 'inactive'
+        cur.execute("UPDATE contract_staff SET status = 'inactive' WHERE id = ?", (self.staff_id,))
+        self.conn.commit()
+
+        # 1. Check project assign page displays inactive staff member & their assignment
+        html_assign = projects.page_projects_assign(selected_month='2026-05', selected_project_id=p_id)
+        self.assertIn("Nguyễn Văn An", html_assign)
+        self.assertIn("Inactive", html_assign)
+
+        # 2. Check project detail CSV export includes inactive staff & their locked payment
+        handler_csv = StubHandler(f"/projects/assign/export?project_id={p_id}", "GET")
+        projects.handle_projects_assign_export_csv(handler_csv)
+        csv_text = handler_csv.wfile.getvalue().decode("utf-8")
+        self.assertIn("Nguyễn Văn An (Inactive)", csv_text)
+        self.assertIn("21,000,000.00", csv_text)
+
+        # 3. Check attendance page displays inactive staff member for that month
+        html_att = attendance.page_attendance({"month": "2026-05"})
+        self.assertIn("Nguyễn Văn An", html_att)
+        self.assertIn("Inactive", html_att)
+
+        # 4. Check locked payroll matrix includes inactive staff member
+        html_matrix = attendance.page_monthly_attendance({"month": "2026-05"})
+        self.assertIn("Nguyễn Văn An", html_matrix)
+
     def test_contract_assign_staff_with_leave_and_rates(self):
         import contracts
         import urllib.parse
@@ -1800,17 +1861,17 @@ class TestProjects(BaseTestCase):
         link_id_val = str(existing_link["id"]) if existing_link else ""
 
         # Simulate POST request to assign staff to contract annex with rate and paid leave hours
-        post_data = urllib.parse.urlencode({
-            "contract_id": str(self.contract_id),
-            "annex_id": str(self.annex_id),
-            "link_id": link_id_val,
-            "staff_id": str(self.staff_id),
-            "joining_date": "2026-06-01",
-            "tentative_leaving_date": "2026-12-31",
-            "monthly_rate": "55000000",
-            "manday_rate": "",
-            "paid_leave_total_hours": "16.0"
-        }).encode("utf-8")
+        post_data = urllib.parse.urlencode([
+            ("contract_id", str(self.contract_id)),
+            ("annex_id", str(self.annex_id)),
+            ("link_id", link_id_val),
+            ("staff_id", str(self.staff_id)),
+            ("joining_date", "2026-06-01"),
+            ("tentative_leaving_date", "2026-12-31"),
+            ("monthly_rate", "55000000"),
+            ("manday_rate", ""),
+            ("paid_leave_total_hours", "16.0")
+        ]).encode("utf-8")
 
         handler = StubHandler(
             "/contract/assign-staff/save",
@@ -1832,6 +1893,59 @@ class TestProjects(BaseTestCase):
         # Verify staff paid leave total was updated with total hours across links
         updated_staff = cur.execute("SELECT paid_leave_total_hours FROM contract_staff WHERE id = ?", (self.staff_id,)).fetchone()
         self.assertEqual(updated_staff["paid_leave_total_hours"], 16.0)
+
+    def test_multi_row_contract_staff_allocation(self):
+        import contracts
+        import urllib.parse
+        cur = self.conn.cursor()
+
+        # Create a second staff member for testing bulk allocation
+        cur.execute("""
+            INSERT INTO contract_staff (vendor_id, full_name_vi, position, status)
+            VALUES (1, 'Trần Thị Bình', 'Tester', 'active')
+        """)
+        s2_id = cur.lastrowid
+        self.conn.commit()
+
+        # Simulate bulk multi-row POST (allocating 2 staff members at once)
+        post_data = urllib.parse.urlencode([
+            ("contract_id", str(self.contract_id)),
+            ("annex_id", str(self.annex_id)),
+            ("link_id", ""),
+            ("staff_id", str(self.staff_id)),
+            ("joining_date", "2026-07-01"),
+            ("tentative_leaving_date", "2026-12-31"),
+            ("monthly_rate", "40000000"),
+            ("manday_rate", "2000000"),
+            ("paid_leave_total_hours", "12.0"),
+            # Row 2 (Second staff member)
+            ("link_id", ""),
+            ("staff_id", str(s2_id)),
+            ("joining_date", "2026-07-01"),
+            ("tentative_leaving_date", "2026-12-31"),
+            ("monthly_rate", "45000000"),
+            ("manday_rate", "2200000"),
+            ("paid_leave_total_hours", "16.0")
+        ]).encode("utf-8")
+
+        handler = StubHandler(
+            "/contract/assign-staff/save",
+            "POST",
+            body=post_data,
+            headers={"Content-Length": str(len(post_data)), "Content-Type": "application/x-www-form-urlencoded"}
+        )
+        contracts.handle_contract_assign_staff_save_post(handler)
+
+        self.assertEqual(handler.response_status, 302)
+        
+        # Verify both allocations were inserted into DB
+        link1 = cur.execute("SELECT * FROM contract_staff_links WHERE staff_id = ? AND joining_date = '2026-07-01'", (self.staff_id,)).fetchone()
+        self.assertIsNotNone(link1)
+        self.assertEqual(link1["monthly_rate"], 40000000.0)
+
+        link2 = cur.execute("SELECT * FROM contract_staff_links WHERE staff_id = ? AND joining_date = '2026-07-01'", (s2_id,)).fetchone()
+        self.assertIsNotNone(link2)
+        self.assertEqual(link2["monthly_rate"], 45000000.0)
 
     def test_page_attendance_acceptance(self):
         # Render attendance acceptance tab page with string and list inputs

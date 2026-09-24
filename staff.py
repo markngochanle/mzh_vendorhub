@@ -68,34 +68,40 @@ def check_no_overlap(conn, link_id_exclude, staff_id: int,
     new_start = joining_date
     new_end = leaving_date or "9999-12-31"
 
-    # Params for SQL below
     params = [staff_id]
 
     exclude_sql = ""
-    if link_id_exclude is not None:
-        exclude_sql = "AND id <> ?"
+    if link_id_exclude is not None and str(link_id_exclude).isdigit():
+        exclude_sql = "AND l.id <> ?"
         params.append(int(link_id_exclude))
 
     params.extend([new_end, new_start])
 
     sql = f"""
-        SELECT id, joining_date, tentative_leaving_date, contract_id, annex_id
-        FROM contract_staff_links
-        WHERE staff_id = ?
+        SELECT l.id, l.joining_date, l.tentative_leaving_date, l.contract_id, l.annex_id,
+               s.full_name_vi AS staff_name,
+               c.framework_no AS contract_no,
+               a.annex_name
+        FROM contract_staff_links l
+        JOIN contract_staff s ON s.id = l.staff_id
+        LEFT JOIN contracts c ON c.id = l.contract_id
+        LEFT JOIN contract_annexes a ON a.id = l.annex_id
+        WHERE l.staff_id = ?
           {exclude_sql}
-          AND COALESCE(joining_date, '0001-01-01') <= ?
-          AND COALESCE(tentative_leaving_date, '9999-12-31') >= ?
+          AND COALESCE(l.joining_date, '0001-01-01') <= ?
+          AND COALESCE(l.tentative_leaving_date, '9999-12-31') >= ?
         LIMIT 1
     """
 
     row = conn.execute(sql, params).fetchone()
     if row:
-        ex_end = row["tentative_leaving_date"] or "9999-12-31"
-        msg = (
-            f"Overlap with contract link id={row['id']} "
-            f"(existing {row['joining_date']} → {ex_end}), "
-            f"contract_id={row['contract_id']}, annex_id={row['annex_id']}"
-        )
+        staff_name = row["staff_name"] or f"ID {staff_id}"
+        contract_info = f"Contract '{row['contract_no']}'" if row["contract_no"] else f"Contract ID {row['contract_id']}"
+        if row["annex_name"]:
+            contract_info += f" (Annex: '{row['annex_name']}')"
+        ex_start = row["joining_date"] or "0000-00-00"
+        ex_end = row["tentative_leaving_date"] or "Present"
+        msg = f"Staff member '{staff_name}' is already allocated to {contract_info} during period ({ex_start} → {ex_end}). Active periods for the same staff member cannot overlap."
         return False, msg
 
     return True, None

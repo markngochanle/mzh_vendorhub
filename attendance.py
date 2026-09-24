@@ -280,9 +280,7 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         first_day_str = f"{month_val}-01"
         last_day_str = f"{month_val}-{num_days:02d}"
 
-        where = [
-            "(s.status IS NULL OR s.status <> 'inactive')"
-        ]
+        where = []
         join_params = [last_day_str, first_day_str]
         params = []
 
@@ -299,11 +297,11 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
             where.append("s.full_name_vi LIKE ?")
             params.append(f"%{q_filter}%")
 
-        where_sql = "WHERE " + " AND ".join(where)
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
-        # Load active staff
+        # Load staff active in month or having records in month
         staff_list = conn.execute(f"""
-            SELECT s.id, s.full_name_vi, s.ot, s.work_shift,
+            SELECT s.id, s.full_name_vi, s.status, s.ot, s.work_shift,
                    COALESCE(v.company_name, v.company_name_vi) AS vendor_name,
                    c.framework_no AS contract_no,
                    an.annex_name
@@ -318,7 +316,7 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
             ORDER BY vendor_name ASC, s.full_name_vi ASC
         """, join_params + params).fetchall()
 
-        # Load active staff và còn hạn hợp đồng trong tháng để hiển thị ở mục Import
+        # Load staff for Import section
         import_staff_list = conn.execute(f"""
             SELECT s.id, s.full_name_vi, s.work_shift, s.ot, COALESCE(v.company_name, v.company_name_vi) AS company_name
             FROM contract_staff s
@@ -495,7 +493,7 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         <tr>
           <td class="sticky-col1" style="font-size: 11px; text-align: center;">{idx}</td>
           <td class="sticky-col2" style="font-size: 12px;">
-            <b>{escape(s["full_name_vi"])}</b>
+            <b>{escape(s["full_name_vi"])}</b>{f' <span class="tag tag-deactive" style="font-size:9px; padding:1px 4px;">Inactive</span>' if ("status" in s.keys() and s["status"] and s["status"].strip().lower() == "inactive") else ""}
             <div class="muted" style="font-size: 9px;">{escape(s["contract_no"])}{f' - {escape(s["annex_name"])}' if s["annex_name"] else ''}</div>
             {lock_action_html}
           </td>
@@ -876,8 +874,7 @@ def handle_attendance_import_post(handler):
     try:
         staff_rows = conn.execute("""
             SELECT id, full_name_vi, ot, work_shift 
-            FROM contract_staff 
-            WHERE status IS NULL OR status <> 'inactive'
+            FROM contract_staff
         """).fetchall()
         staff_map = {s["id"]: s for s in staff_rows}
 
@@ -1543,7 +1540,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
             available_months = [date.today().strftime("%Y-%m")]
 
         # Build SQL to load staff WHOSE ATTENDANCE IS LOCKED for selected months
-        where = ["(s.status IS NULL OR s.status <> 'inactive')", "l.locked = 1"]
+        where = ["l.locked = 1"]
         params = []
 
         m_placeholders = ", ".join(["?"] * len(months))
@@ -2244,7 +2241,7 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
                 SELECT DISTINCT s.id, s.full_name_vi, s.position, l.monthly_rate, l.manday_rate
                 FROM contract_staff_links l
                 JOIN contract_staff s ON s.id = l.staff_id
-                WHERE l.annex_id = ? AND (s.status IS NULL OR s.status <> 'inactive')
+                WHERE l.annex_id = ?
                   AND (l.joining_date IS NULL OR l.joining_date = '' OR l.joining_date <= ?)
                   AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
                   AND (
@@ -2266,7 +2263,7 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
                 SELECT DISTINCT s.id
                 FROM contract_staff_links l
                 JOIN contract_staff s ON s.id = l.staff_id
-                WHERE l.annex_id = ? AND (s.status IS NULL OR s.status <> 'inactive')
+                WHERE l.annex_id = ?
                   AND (l.joining_date IS NULL OR l.joining_date = '' OR l.joining_date <= ?)
                   AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
             """, (aid, month_end_date, month_start_date)).fetchall()
@@ -2795,7 +2792,7 @@ def handle_attendance_monthly_export_get(handler):
 
     conn = db_connect()
     try:
-        where = ["(s.status IS NULL OR s.status <> 'inactive')", "l.locked = 1"]
+        where = ["l.locked = 1"]
         params = []
 
         m_placeholders = ", ".join(["?"] * len(months))
@@ -3018,7 +3015,6 @@ def page_attendance_timesheet_report(filters: dict) -> str:
                 FROM contract_staff s
                 JOIN contract_staff_links lnk ON lnk.staff_id = s.id
                 WHERE lnk.annex_id = ?
-                  AND (s.status IS NULL OR s.status <> 'inactive')
                   AND lnk.joining_date <= ?
                   AND (lnk.tentative_leaving_date IS NULL OR lnk.tentative_leaving_date = '' OR lnk.tentative_leaving_date >= ?)
                   AND (
@@ -3035,7 +3031,7 @@ def page_attendance_timesheet_report(filters: dict) -> str:
                            lnk.monthly_rate, lnk.manday_rate
                     FROM contract_staff s
                     JOIN contract_staff_links lnk ON lnk.staff_id = s.id
-                    WHERE lnk.annex_id = ? AND (s.status IS NULL OR s.status <> 'inactive')
+                    WHERE lnk.annex_id = ?
                       AND (
                           EXISTS (SELECT 1 FROM attendance att WHERE att.staff_id = s.id AND strftime('%Y-%m', att.date) = ?)
                           OR EXISTS (SELECT 1 FROM monthly_attendance_summary mas WHERE mas.staff_id = s.id AND mas.month = ?)
@@ -3050,7 +3046,7 @@ def page_attendance_timesheet_report(filters: dict) -> str:
                 SELECT DISTINCT s.id
                 FROM contract_staff_links l
                 JOIN contract_staff s ON s.id = l.staff_id
-                WHERE l.annex_id = ? AND (s.status IS NULL OR s.status <> 'inactive')
+                WHERE l.annex_id = ?
                   AND (l.joining_date IS NULL OR l.joining_date = '' OR l.joining_date <= ?)
                   AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
             """, (aid, month_end_date, month_start_date)).fetchall()
@@ -3265,7 +3261,10 @@ def page_attendance_timesheet_report(filters: dict) -> str:
                         else:
                             reg_ot_h += oth
 
-                reg_ot_pay = round(reg_ot_h * h_rate * 1.5)
+                if s_sum and s_sum.get("ot_converted_hours") is not None and wknd_ot_h == 0:
+                    reg_ot_pay = round(s_sum["ot_converted_hours"] * h_rate)
+                else:
+                    reg_ot_pay = round(reg_ot_h * h_rate * 1.5)
                 wknd_ot_pay = round(wknd_ot_h * h_rate * 2.0)
                 hol_ot_pay = 0.0
                 calc_total = norm_pay + reg_ot_pay + wknd_ot_pay + hol_ot_pay

@@ -299,15 +299,14 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
             # Get staffs that are already assigned to this project in any month
             staff_params = [project_row["id"]]
             staff_where = [
-                "cs.id IN (SELECT DISTINCT staff_id FROM project_staff_assignments WHERE project_id = ?)",
-                "(cs.status IS NULL OR TRIM(cs.status) = '')"
+                "cs.id IN (SELECT DISTINCT staff_id FROM project_staff_assignments WHERE project_id = ?)"
             ]
             if selected_vendor_id and str(selected_vendor_id).isdigit():
                 staff_where.append("cs.vendor_id = ?")
                 staff_params.append(int(selected_vendor_id))
 
             staffs = conn.execute(f"""
-                SELECT cs.id, cs.full_name_vi, latest_link.joining_date, latest_link.tentative_leaving_date,
+                SELECT cs.id, cs.full_name_vi, cs.status, latest_link.joining_date, latest_link.tentative_leaving_date,
                        COALESCE(v.company_name, v.company_name_vi) AS vendor_name, cs.vendor_id
                 FROM contract_staff cs
                 JOIN vendors v ON v.id = cs.vendor_id
@@ -625,10 +624,12 @@ def page_projects_assign(selected_month: str | None = None, selected_project_id:
                             """)
 
                 td_months_str = "".join(td_months)
+                st_status = (s["status"] or "").strip().lower() if "status" in s.keys() else ""
+                status_tag = ' <span class="tag tag-deactive" style="font-size:10px; margin-left:4px;">Inactive</span>' if st_status == "inactive" else ""
                 trs.append(f"""
                 <tr>
                   <td>{idx}</td>
-                  <td style="font-weight: 600; color: var(--text-main);">{escape(s['full_name_vi'])}</td>
+                  <td style="font-weight: 600; color: var(--text-main);">{escape(s['full_name_vi'])}{status_tag}</td>
                   <td><span class="muted" style="font-size: 12px;">{escape(s['vendor_name'])}</span></td>
                   {td_months_str}
                 </tr>
@@ -948,7 +949,6 @@ def handle_project_assign_create_post(handler):
                 SELECT 1 FROM contract_staff s
                 JOIN contract_staff_links l ON l.staff_id = s.id
                 WHERE s.id = ? 
-                  AND (s.status IS NULL OR TRIM(s.status) = '')
                   AND l.joining_date <= ?
                   AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
             """, (staff_id, last_day_str, first_day_str)).fetchone()
@@ -1132,7 +1132,6 @@ def handle_project_toggle_assignment_ajax(handler):
                 SELECT 1 FROM contract_staff s
                 JOIN contract_staff_links l ON l.staff_id = s.id
                 WHERE s.id = ? 
-                  AND (s.status IS NULL OR TRIM(s.status) = '')
                   AND l.joining_date <= ?
                   AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR l.tentative_leaving_date >= ?)
             """, (staff_id, last_day_str, first_day_str)).fetchone()
@@ -1605,15 +1604,14 @@ def handle_projects_assign_export_csv(handler):
 
         staff_params = [project_id]
         staff_where = [
-            "cs.id IN (SELECT DISTINCT staff_id FROM project_staff_assignments WHERE project_id = ?)",
-            "(cs.status IS NULL OR TRIM(cs.status) = '')"
+            "cs.id IN (SELECT DISTINCT staff_id FROM project_staff_assignments WHERE project_id = ?)"
         ]
         if selected_vendor_id:
             staff_where.append("cs.vendor_id = ?")
             staff_params.append(int(selected_vendor_id))
 
         staffs = conn.execute(f"""
-            SELECT cs.id, cs.full_name_vi,
+            SELECT cs.id, cs.full_name_vi, cs.status,
                    COALESCE(v.company_name, v.company_name_vi) AS vendor_name
             FROM contract_staff cs
             JOIN vendors v ON v.id = cs.vendor_id
@@ -1664,7 +1662,8 @@ def handle_projects_assign_export_csv(handler):
     grand_total = 0.0
 
     for idx, s in enumerate(staffs, 1):
-        row = [idx, s["full_name_vi"], s["vendor_name"]]
+        st_name = s["full_name_vi"] + (" (Inactive)" if (s["status"] or "").strip().lower() == "inactive" else "")
+        row = [idx, st_name, s["vendor_name"]]
         staff_total = 0.0
         for m in months:
             assigned_pid = assignments_map.get((s["id"], m))

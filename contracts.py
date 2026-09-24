@@ -1529,7 +1529,7 @@ def handle_toggle_reference_lock_ajax(handler):
         conn.close()
 
 
-def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, link_id: int | None = None, error_msg: str | None = None):
+def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, link_id: int | None = None, error_msg: str | None = None, submitted_rows: list[dict] | None = None):
     conn = db_connect()
     try:
         cur = conn.cursor()
@@ -1564,104 +1564,235 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
         
     # Build staff dropdown
     staff_opts = ['<option value="">-- select staff --</option>']
-    selected_staff_id = link["staff_id"] if link else None
     for s in staff_rows:
-        sel = "selected" if selected_staff_id and s["id"] == selected_staff_id else ""
         tot_h = s["paid_leave_total_hours"] or 0.0
         used_h = s["paid_leave_used_hours"] or 0.0
         rem_h = tot_h - used_h
         rem_lbl = f"{rem_h/8.0:.1f}d remaining"
-        staff_opts.append(f'<option value="{s["id"]}" {sel}>{escape(s["full_name_vi"])} ({escape(s["position"] or "")} - {rem_lbl})</option>')
-        
-    def gv(key, default=""):
-        if link and link[key] is not None:
-            return str(link[key])
-        return default
-        
+        staff_opts.append(f'<option value="{s["id"]}">{escape(s["full_name_vi"])} ({escape(s["position"] or "")} - {rem_lbl})</option>')
+    staff_options_html = "".join(staff_opts)
+
+    default_jdate = ""
+    default_tdate = ""
+    if annex:
+        default_jdate = annex["start_date"] or contract["start_date"] or ""
+        default_tdate = annex["end_date"] or contract["end_date"] or ""
+    else:
+        default_jdate = contract["start_date"] or ""
+        default_tdate = contract["end_date"] or ""
+
+    initial_rows = []
+    if submitted_rows is not None and len(submitted_rows) > 0:
+        initial_rows = submitted_rows
+    elif link:
+        initial_rows.append({
+            "link_id": link["id"],
+            "staff_id": link["staff_id"],
+            "joining_date": link["joining_date"] or default_jdate,
+            "tentative_leaving_date": link["tentative_leaving_date"] or default_tdate,
+            "monthly_rate": link["monthly_rate"],
+            "manday_rate": link["manday_rate"],
+            "paid_leave_total_hours": link["paid_leave_total_hours"] if link["paid_leave_total_hours"] is not None else 0.0
+        })
+    else:
+        initial_rows.append({
+            "link_id": "",
+            "staff_id": "",
+            "joining_date": default_jdate,
+            "tentative_leaving_date": default_tdate,
+            "monthly_rate": "",
+            "manday_rate": "",
+            "paid_leave_total_hours": 0.0
+        })
+
+    import json
+    initial_rows_json = json.dumps(initial_rows)
+
     title = "Edit Staff Allocation" if link else "Allocate Staff"
     header_lbl = f"Edit Staff Allocation to Contract No. {contract['framework_no']}" if link else f"Allocate Staff to Contract No. {contract['framework_no']}"
     if annex:
         header_lbl += f" (Annex: {annex['annex_name']})"
         
-    error_html = f'<div class="card danger"><b>Error:</b> {escape(error_msg)}</div>' if error_msg else ""
+    error_html = f'<div class="card danger" style="margin-bottom:16px;"><b>Error:</b> {escape(error_msg)}</div>' if error_msg else ""
     
-    # If editing link, staff selection is disabled
-    staff_select_html = f"""
-        <select name="staff_id" style="width:100%;" required>
-          {"".join(staff_opts)}
-        </select>
-    """
-    if link:
-        # Find staff name
-        staff_name = ""
-        for s in staff_rows:
-            if s["id"] == link["staff_id"]:
-                tot_h = s["paid_leave_total_hours"] or 0.0
-                used_h = s["paid_leave_used_hours"] or 0.0
-                rem_h = tot_h - used_h
-                staff_name = f"{s['full_name_vi']} ({s['position'] or ''} - {rem_h/8.0:.1f}d remaining)"
-                break
-        staff_select_html = f"""
-            <input type="hidden" name="staff_id" value="{link['staff_id']}">
-            <input type="text" value="{escape(staff_name)}" style="width:100%; background:#f1f5f9;" readonly>
-        """
-        
     body = f"""
     {error_html}
-    <div class="card">
-      <div class="actions" style="margin-bottom:10px;">
+    <div class="card" style="padding: 20px;">
+      <div class="actions" style="margin-bottom: 12px;">
         <a href="/contract/edit?id={contract_id}">← Back to Contract</a>
       </div>
       
-      <h2>{escape(header_lbl)}</h2>
-      <p class="muted">Vendor: <b>{escape(vendor_name)}</b></p>
+      <h2 style="margin-top: 0; margin-bottom: 4px;">{escape(header_lbl)}</h2>
+      <p class="muted" style="margin-top: 0; margin-bottom: 20px;">Vendor: <b>{escape(vendor_name)}</b></p>
       
-      <form method="POST" action="/contract/assign-staff/save">
+      <form method="POST" action="/contract/assign-staff/save" id="allocation-form">
         <input type="hidden" name="contract_id" value="{contract_id}">
         <input type="hidden" name="annex_id" value="{annex_id or ''}">
-        <input type="hidden" name="link_id" value="{link_id or ''}">
         
-        <div class="grid">
-          <div>
-            <div class="label">Contract Staff Name (required)</div>
-            {staff_select_html}
-          </div>
-          
-          <div>
-            <div class="label">Active Period - Onboarding Date (required)</div>
-            <input type="date" name="joining_date" value="{escape(gv('joining_date'))}" style="width:100%;" required>
-          </div>
-          
-          <div>
-            <div class="label">Active Period - Tentative Leaving Date</div>
-            <input type="date" name="tentative_leaving_date" value="{escape(gv('tentative_leaving_date'))}" style="width:100%;">
-          </div>
-          
-          <div>
-            <div class="label">Monthly Rate (VND)</div>
-            <input type="number" step="0.01" name="monthly_rate" value="{escape(gv('monthly_rate'))}" style="width:100%;" placeholder="e.g. 45000000">
-          </div>
-          
-          <div>
-            <div class="label">Man-day Rate (VND)</div>
-            <input type="number" step="0.01" name="manday_rate" value="{escape(gv('manday_rate'))}" style="width:100%;" placeholder="e.g. 2000000">
-          </div>
-
-          <div>
-            <div class="label">Paid Leave Hours (for this Annex)</div>
-            <input type="number" step="0.5" name="paid_leave_total_hours" value="{escape(gv('paid_leave_total_hours', '0'))}" style="width:100%;" placeholder="e.g. 16.0">
-            <div class="muted" style="font-size:11px; margin-top:2px;">Saved paid leave hours allocated for this specific Annex link.</div>
-          </div>
+        <div style="overflow-x: auto; margin-bottom: 16px;">
+          <table id="alloc-table" style="width: 100%; border-collapse: collapse; min-width: 920px;">
+            <thead>
+              <tr style="background: #f8fafc; border-bottom: 2px solid var(--border); text-align: left;">
+                <th style="width: 40px; text-align: center; padding: 8px;">#</th>
+                <th style="min-width: 240px; padding: 8px;">Contract Staff Name <span style="color:var(--danger)">*</span></th>
+                <th style="min-width: 140px; padding: 8px;">Onboarding Date <span style="color:var(--danger)">*</span></th>
+                <th style="min-width: 140px; padding: 8px;">Leaving Date</th>
+                <th style="min-width: 140px; padding: 8px;">Monthly Rate (VND)</th>
+                <th style="min-width: 130px; padding: 8px;">Man-day Rate (VND)</th>
+                <th style="min-width: 110px; padding: 8px;">Paid Leave (h)</th>
+                <th style="width: 130px; text-align: center; padding: 8px;">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="alloc-tbody">
+            </tbody>
+          </table>
         </div>
-        
-        <div class="actions" style="margin-top:14px;">
-          <button type="submit" class="btn-primary">Save Allocation</button>
-          <a class="muted" href="/contract/edit?id={contract_id}">Cancel</a>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--border);">
+          <button type="button" class="btn-secondary" onclick="addAllocRow()" style="font-size: 13px; font-weight: 600; cursor: pointer; padding: 8px 16px;">
+            ➕ Add Staff Row
+          </button>
+
+          <div class="actions" style="gap: 12px;">
+            <button type="submit" class="btn-primary" style="font-size: 14px; padding: 8px 22px;">💾 Save Allocation</button>
+            <a class="btn-secondary" href="/contract/edit?id={contract_id}" style="text-decoration:none; padding: 8px 16px;">Cancel</a>
+          </div>
         </div>
       </form>
     </div>
     """
-    return layout(title, body)
+
+    script_js = """
+    <script>
+    const STAFF_OPTIONS_HTML = __STAFF_OPTIONS__;
+    const DEFAULT_JDATE = __DEFAULT_JDATE__;
+    const DEFAULT_TDATE = __DEFAULT_TDATE__;
+    const INITIAL_ROWS = __INITIAL_ROWS__;
+
+    function renderRow(data, index) {
+      data = data || {};
+      const tr = document.createElement("tr");
+      tr.className = "alloc-row";
+      tr.style.borderBottom = "1px solid var(--border)";
+      
+      const staffId = data.staff_id || "";
+      const jDate = data.joining_date !== undefined ? data.joining_date : DEFAULT_JDATE;
+      const tDate = data.tentative_leaving_date !== undefined ? data.tentative_leaving_date : DEFAULT_TDATE;
+      const mRate = data.monthly_rate !== null && data.monthly_rate !== undefined ? data.monthly_rate : "";
+      const dRate = data.manday_rate !== null && data.manday_rate !== undefined ? data.manday_rate : "";
+      const plHours = data.paid_leave_total_hours !== null && data.paid_leave_total_hours !== undefined ? data.paid_leave_total_hours : "0";
+      const linkId = data.link_id || "";
+
+      tr.innerHTML = `
+        <td style="text-align: center; font-weight: bold; color: var(--text-muted); padding: 6px;" class="row-num">${index}</td>
+        <td style="padding: 6px;">
+          <input type="hidden" name="link_id" value="${linkId}">
+          <select name="staff_id" class="staff-select" style="width: 100%; font-size: 13px; padding: 6px;" required>
+            ${STAFF_OPTIONS_HTML}
+          </select>
+        </td>
+        <td style="padding: 6px;">
+          <input type="date" name="joining_date" value="${jDate}" style="width: 100%; font-size: 13px; padding: 5px;" required>
+        </td>
+        <td style="padding: 6px;">
+          <input type="date" name="tentative_leaving_date" value="${tDate}" style="width: 100%; font-size: 13px; padding: 5px;">
+        </td>
+        <td style="padding: 6px;">
+          <input type="number" step="0.01" name="monthly_rate" value="${mRate}" placeholder="e.g. 45000000" style="width: 100%; font-size: 13px; padding: 5px;">
+        </td>
+        <td style="padding: 6px;">
+          <input type="number" step="0.01" name="manday_rate" value="${dRate}" placeholder="e.g. 2000000" style="width: 100%; font-size: 13px; padding: 5px;">
+        </td>
+        <td style="padding: 6px;">
+          <input type="number" step="0.5" name="paid_leave_total_hours" value="${plHours}" style="width: 100%; font-size: 13px; padding: 5px;">
+        </td>
+        <td style="text-align: center; white-space: nowrap; padding: 6px;">
+          <button type="button" class="btn-secondary duplicate-btn" title="Duplicate this row" style="font-size: 11px; padding: 4px 8px; margin-right: 4px; cursor: pointer;">📋 Copy</button>
+          <button type="button" class="btn-danger remove-btn" title="Remove row" style="font-size: 11px; padding: 4px 8px; cursor: pointer;">🗑️ Delete</button>
+        </td>
+      `;
+
+      if (staffId) {
+        const sel = tr.querySelector(".staff-select");
+        if (sel) sel.value = staffId;
+      }
+
+      tr.querySelector(".duplicate-btn").addEventListener("click", function() {
+        duplicateRow(tr);
+      });
+
+      tr.querySelector(".remove-btn").addEventListener("click", function() {
+        removeRow(tr);
+      });
+
+      return tr;
+    }
+
+    function addAllocRow(data) {
+      data = data || {};
+      const tbody = document.getElementById("alloc-tbody");
+      const count = tbody.children.length + 1;
+      const newTr = renderRow(data, count);
+      tbody.appendChild(newTr);
+      updateRowNumbers();
+    }
+
+    function duplicateRow(sourceTr) {
+      const staffId = sourceTr.querySelector('[name="staff_id"]').value;
+      const jDate = sourceTr.querySelector('[name="joining_date"]').value;
+      const tDate = sourceTr.querySelector('[name="tentative_leaving_date"]').value;
+      const mRate = sourceTr.querySelector('[name="monthly_rate"]').value;
+      const dRate = sourceTr.querySelector('[name="manday_rate"]').value;
+      const plHours = sourceTr.querySelector('[name="paid_leave_total_hours"]').value;
+
+      const newData = {
+        staff_id: "", // reset staff_id so user selects next staff member
+        joining_date: jDate,
+        tentative_leaving_date: tDate,
+        monthly_rate: mRate,
+        manday_rate: dRate,
+        paid_leave_total_hours: plHours,
+        link_id: ""
+      };
+
+      const tbody = document.getElementById("alloc-tbody");
+      const newTr = renderRow(newData, tbody.children.length + 1);
+      sourceTr.after(newTr);
+      updateRowNumbers();
+    }
+
+    function removeRow(tr) {
+      const tbody = document.getElementById("alloc-tbody");
+      if (tbody.children.length <= 1) {
+        alert("At least one allocation row is required.");
+        return;
+      }
+      tr.remove();
+      updateRowNumbers();
+    }
+
+    function updateRowNumbers() {
+      const rows = document.querySelectorAll("#alloc-tbody tr.alloc-row");
+      rows.forEach((row, idx) => {
+        const numTd = row.querySelector(".row-num");
+        if (numTd) numTd.textContent = idx + 1;
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", function() {
+      if (INITIAL_ROWS && INITIAL_ROWS.length > 0) {
+        INITIAL_ROWS.forEach(d => addAllocRow(d));
+      } else {
+        addAllocRow({});
+      }
+    });
+    </script>
+    """.replace("__STAFF_OPTIONS__", json.dumps(staff_options_html))\
+       .replace("__DEFAULT_JDATE__", json.dumps(default_jdate))\
+       .replace("__DEFAULT_TDATE__", json.dumps(default_tdate))\
+       .replace("__INITIAL_ROWS__", initial_rows_json)
+
+    return layout(title, body + script_js)
 
 
 def handle_contract_assign_staff_save_post(handler):
@@ -1669,72 +1800,113 @@ def handle_contract_assign_staff_save_post(handler):
     
     contract_id = (form.get("contract_id", [""])[0] or "").strip()
     annex_id = (form.get("annex_id", [""])[0] or "").strip()
-    link_id = (form.get("link_id", [""])[0] or "").strip()
-    staff_id = (form.get("staff_id", [""])[0] or "").strip()
-    joining_date = (form.get("joining_date", [""])[0] or "").strip()
-    tentative_leaving_date = (form.get("tentative_leaving_date", [""])[0] or "").strip() or None
     
-    monthly_rate = to_float_or_none(form.get("monthly_rate", [""])[0])
-    manday_rate = to_float_or_none(form.get("manday_rate", [""])[0])
-    paid_leave_total_hours = to_float_or_none(form.get("paid_leave_total_hours", [""])[0])
-    if paid_leave_total_hours is None:
-        paid_leave_total_hours = to_float_or_none(form.get("add_paid_leave_hours", [""])[0]) or 0.0
-    
-    if not contract_id.isdigit() or not staff_id.isdigit() or not joining_date:
-        send_html(handler, layout("Error", "<div class='card danger'>Invalid input parameters</div>"), status=400)
+    if not contract_id.isdigit():
+        send_html(handler, layout("Error", "<div class='card danger'>Invalid contract ID</div>"), status=400)
         return
         
     annex_id_int = int(annex_id) if annex_id.isdigit() else None
-    link_id_int = int(link_id) if link_id.isdigit() else None
     
+    staff_ids = form.get("staff_id", [])
+    joining_dates = form.get("joining_date", [])
+    tentative_leaving_dates = form.get("tentative_leaving_date", [])
+    monthly_rates = form.get("monthly_rate", [])
+    manday_rates = form.get("manday_rate", [])
+    paid_leave_total_hours_list = form.get("paid_leave_total_hours", [])
+    link_ids = form.get("link_id", [])
+    
+    submitted_rows = []
+    num_rows = max(len(staff_ids), len(joining_dates), len(link_ids), 1)
+    for i in range(num_rows):
+        sid = (staff_ids[i] if i < len(staff_ids) else "").strip()
+        jdate = (joining_dates[i] if i < len(joining_dates) else "").strip()
+        tdate = (tentative_leaving_dates[i] if i < len(tentative_leaving_dates) else "").strip()
+        m_rate = (monthly_rates[i] if i < len(monthly_rates) else "").strip()
+        d_rate = (manday_rates[i] if i < len(manday_rates) else "").strip()
+        pl_hours = (paid_leave_total_hours_list[i] if i < len(paid_leave_total_hours_list) else "").strip()
+        lid = (link_ids[i] if i < len(link_ids) else "").strip()
+        
+        submitted_rows.append({
+            "link_id": int(lid) if lid.isdigit() else "",
+            "staff_id": int(sid) if sid.isdigit() else "",
+            "joining_date": jdate,
+            "tentative_leaving_date": tdate,
+            "monthly_rate": to_float_or_none(m_rate),
+            "manday_rate": to_float_or_none(d_rate),
+            "paid_leave_total_hours": to_float_or_none(pl_hours) if to_float_or_none(pl_hours) is not None else 0.0
+        })
+
+    rows_to_save = [r for r in submitted_rows if r["staff_id"] and r["joining_date"]]
+        
+    if not rows_to_save:
+        send_html(handler, page_contract_assign_staff(int(contract_id), annex_id=annex_id_int, error_msg="Please select at least one staff member and onboarding date.", submitted_rows=submitted_rows), status=400)
+        return
+        
     conn = db_connect()
     try:
         cur = conn.cursor()
-        
-        # Check overlap
-        from staff import check_no_overlap
-        ok, msg = check_no_overlap(
-            cur,
-            link_id_exclude=link_id_int,
-            staff_id=int(staff_id),
-            joining_date=joining_date,
-            leaving_date=tentative_leaving_date
-        )
-        if not ok:
-            send_html(handler, layout("Error", f"<div class='card danger'>{escape(msg)}</div>"), status=400)
-            return
-            
-        if link_id_int:
-            # Update existing link
-            cur.execute("""
-                UPDATE contract_staff_links
-                SET joining_date = ?,
-                    tentative_leaving_date = ?,
-                    monthly_rate = ?,
-                    manday_rate = ?,
-                    paid_leave_total_hours = ?,
-                    updated_at = ?
-                WHERE id = ?
-            """, (joining_date, tentative_leaving_date, monthly_rate, manday_rate, paid_leave_total_hours, now_iso(), link_id_int))
-            log_action(cur, "UPDATE_CONTRACT_STAFF_LINK", "contract_staff_links", link_id_int, f"Updated staff allocation ID {staff_id} in contract ID {contract_id}")
-        else:
-            # Insert new link
-            cur.execute("""
-                INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, paid_leave_total_hours, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (int(staff_id), int(contract_id), annex_id_int, monthly_rate, manday_rate, joining_date, tentative_leaving_date, paid_leave_total_hours, now_iso(), now_iso()))
-            new_id = cur.lastrowid
-            log_action(cur, "CREATE_CONTRACT_STAFF_LINK", "contract_staff_links", new_id, f"Allocated staff ID {staff_id} to contract ID {contract_id}")
+        # Check in-batch overlaps for submitted rows
+        for i in range(len(rows_to_save)):
+            r1 = rows_to_save[i]
+            s1 = r1["joining_date"]
+            e1 = r1["tentative_leaving_date"] or "9999-12-31"
+            for j in range(i + 1, len(rows_to_save)):
+                r2 = rows_to_save[j]
+                if r1["staff_id"] == r2["staff_id"]:
+                    s2 = r2["joining_date"]
+                    e2 = r2["tentative_leaving_date"] or "9999-12-31"
+                    if s1 <= e2 and s2 <= e1:
+                        s_row = cur.execute("SELECT full_name_vi FROM contract_staff WHERE id = ?", (r1["staff_id"],)).fetchone()
+                        s_name = s_row["full_name_vi"] if s_row else f"ID {r1['staff_id']}"
+                        msg = f"Duplicate allocation for staff '{s_name}' in submitted form (Row {i+1} and Row {j+1} have overlapping active periods: {r1['joining_date']} → {r1['tentative_leaving_date'] or 'Present'} vs {r2['joining_date']} → {r2['tentative_leaving_date'] or 'Present'})."
+                        send_html(handler, page_contract_assign_staff(int(contract_id), annex_id=annex_id_int, error_msg=msg, submitted_rows=submitted_rows), status=400)
+                        return
 
-        # Recalculate and sync total paid leave hours on contract_staff from all links
-        cur.execute("""
-            UPDATE contract_staff
-            SET paid_leave_total_hours = COALESCE((
-                SELECT SUM(paid_leave_total_hours) FROM contract_staff_links WHERE staff_id = ?
-            ), 0.0),
-            updated_at = ?
-            WHERE id = ?
-        """, (int(staff_id), now_iso(), int(staff_id)))
+        from staff import check_no_overlap
+        for r in rows_to_save:
+            ok, msg = check_no_overlap(
+                cur,
+                link_id_exclude=r["link_id"],
+                staff_id=r["staff_id"],
+                joining_date=r["joining_date"],
+                leaving_date=r["tentative_leaving_date"]
+            )
+            if not ok:
+                send_html(handler, page_contract_assign_staff(int(contract_id), annex_id=annex_id_int, error_msg=msg, submitted_rows=submitted_rows), status=400)
+                return
+                
+        affected_staff_ids = set()
+        for r in rows_to_save:
+            affected_staff_ids.add(r["staff_id"])
+            if r["link_id"]:
+                cur.execute("""
+                    UPDATE contract_staff_links
+                    SET joining_date = ?,
+                        tentative_leaving_date = ?,
+                        monthly_rate = ?,
+                        manday_rate = ?,
+                        paid_leave_total_hours = ?,
+                        updated_at = ?
+                    WHERE id = ?
+                """, (r["joining_date"], r["tentative_leaving_date"], r["monthly_rate"], r["manday_rate"], r["paid_leave_total_hours"], now_iso(), r["link_id"]))
+                log_action(cur, "UPDATE_CONTRACT_STAFF_LINK", "contract_staff_links", r["link_id"], f"Updated staff allocation ID {r['staff_id']} in contract ID {contract_id}")
+            else:
+                cur.execute("""
+                    INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, paid_leave_total_hours, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (r["staff_id"], int(contract_id), annex_id_int, r["monthly_rate"], r["manday_rate"], r["joining_date"], r["tentative_leaving_date"], r["paid_leave_total_hours"], now_iso(), now_iso()))
+                new_id = cur.lastrowid
+                log_action(cur, "CREATE_CONTRACT_STAFF_LINK", "contract_staff_links", new_id, f"Allocated staff ID {r['staff_id']} to contract ID {contract_id}")
+
+        for sid in affected_staff_ids:
+            cur.execute("""
+                UPDATE contract_staff
+                SET paid_leave_total_hours = COALESCE((
+                    SELECT SUM(paid_leave_total_hours) FROM contract_staff_links WHERE staff_id = ?
+                ), 0.0),
+                updated_at = ?
+                WHERE id = ?
+            """, (sid, now_iso(), sid))
             
         conn.commit()
     finally:
