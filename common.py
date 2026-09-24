@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 import os
-DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().with_name("db_nf_newcontract.sqlite3")))
+DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().with_name("db.sqlite3")))
 
 HOST = "127.0.0.1"
 PORT = int(os.environ.get("PORT", "8800"))
