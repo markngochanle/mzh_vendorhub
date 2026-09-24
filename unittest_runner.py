@@ -57,7 +57,10 @@ TEST_SUITES = [
             ("test_handle_contract_update_post", "Edit contract details"),
             ("test_toggle_reference_lock_ajax", "Toggle locking state for reference numbers"),
             ("test_handle_contract_delete_post", "Deactivate contract and mark as deleted"),
-            ("test_contract_and_annex_values", "Verify value constraint validation rules")
+            ("test_handle_contract_assign_staff_save_post_error_handling", "Validate multi-row staff allocation saving and error state preservation"),
+            ("test_contract_and_annex_values", "Verify value constraint validation rules"),
+            ("test_contract_assign_staff_with_leave_and_rates", "Verify staff allocation with paid leave and rate fields"),
+            ("test_multi_row_contract_staff_allocation", "Verify multi-row horizontal table staff allocation saving")
         ],
         "steps": "1. Create framework contract with start/end dates.<br>2. Add contract annexes with values.<br>3. Try inserting non-numeric characters in value field.",
         "expect": "Contracts and annexes persist correctly, and invalid currency/number formats are rejected."
@@ -69,9 +72,12 @@ TEST_SUITES = [
         "cases": [
             ("test_check_no_overlap", "Validate staff dates overlap rules"),
             ("test_page_staff_shifts", "Render staff shifts and custom layouts"),
+            ("test_page_staff_list_locked_payroll", "Display locked payroll total for staff"),
             ("test_handle_staff_create_post", "Create staff profiles and save employment dates"),
             ("test_page_staff_form_with_none_values", "Handle edge cases with null constraints"),
-            ("test_handle_staff_update_post", "Update staff profiles and save employment dates directly")
+            ("test_page_staff_form_payroll", "Render staff edit form with payroll metrics"),
+            ("test_handle_staff_update_post", "Update staff profiles and save employment dates directly"),
+            ("test_staff_submenu_assign_to_project", "Verify staff submenu project assign link")
         ],
         "steps": "1. Create staff member and check mandatory inputs.<br>2. Verify start/end date columns in contract_staff table.<br>3. Verify update form doesn't override contract links dates.",
         "expect": "Staff record saves successfully with overall employment period dates directly on the main table."
@@ -108,7 +114,13 @@ TEST_SUITES = [
             ("test_monthly_attendance_calculations_and_save", "Process monthly adjustments"),
             ("test_handle_attendance_import_post_success", "Import daily attendance logs from CSV file"),
             ("test_attendance_clear", "Clear daily logs"),
-            ("test_attendance_manual_totals", "Add manual totals for missing days")
+            ("test_attendance_manual_totals", "Add manual totals for missing days"),
+            ("test_page_attendance_acceptance", "Render BBNT acceptance report page"),
+            ("test_attendance_acceptance_both_locks_required", "Require both daily and monthly locks for acceptance"),
+            ("test_attendance_acceptance_all_contract_staff_must_be_locked", "Require all contract staff locked for acceptance"),
+            ("test_attendance_pdf_lock_date_leave_and_amount_consistency", "Verify PDF lock date, leave, and amount consistency"),
+            ("test_attendance_acceptance_joining_date_filtering", "Filter acceptance report by staff joining date"),
+            ("test_service_fee_calculation_columns_and_rates", "Verify service fee calculation columns and rates")
         ],
         "steps": "1. Log daily attendance hours via grid.<br>2. Sync summary and verify auto-save.<br>3. Submit log lock and verify inputs become read-only.<br>4. Submit unlock request.",
         "expect": "Locks disable attendance input fields, monthly aggregates compute correctly, and unlocking restores editing."
@@ -155,7 +167,8 @@ TEST_SUITES = [
         "name": "Test Dashboard Metrics",
         "desc": "Verify dashboard metrics aggregation, vendor count, and active staff counts.",
         "cases": [
-            ("test_page_dashboard_rendering", "Render dashboard charts, metrics, and currency counts")
+            ("test_page_dashboard_rendering", "Render dashboard charts, metrics, and currency counts"),
+            ("test_page_dashboard_filtering_and_payroll_trend", "Verify dashboard filtering and payroll trend metrics")
         ],
         "steps": "1. Compute dashboard statistics.<br>2. Verify active staff count matching.<br>3. Check monthly cost aggregations.",
         "expect": "Dashboard calculations match database rows, and totals aggregate correctly."
@@ -165,7 +178,8 @@ TEST_SUITES = [
         "name": "Test Annex Filtering",
         "desc": "Verify filtering and displaying annexes by contract status.",
         "cases": [
-            ("test_annex_filter_handling", "Filter staff list and attendance grid by annex selection")
+            ("test_annex_filter_handling", "Filter staff list and attendance grid by annex selection"),
+            ("test_monthly_multiselect_filters", "Verify multi-select month filtering")
         ],
         "steps": "1. Filter annexes by contract.<br>2. Toggle contract status.<br>3. Verify annex list visibility.",
         "expect": "Annex list is updated dynamically based on selected contract status."
@@ -191,7 +205,11 @@ TEST_SUITES = [
             ("test_handle_project_create_post", "Create projects with validation"),
             ("test_handle_project_delete_post", "Deactivate project record"),
             ("test_staff_assignments_logic", "Prevent overlapping project assignments"),
-            ("test_staff_assignments_multi_month", "Verify assignment across multiple months")
+            ("test_staff_assignments_multi_month", "Verify assignment across multiple months"),
+            ("test_page_project_edit_payroll", "Render project edit page with payroll metrics"),
+            ("test_locked_payroll_payment_matrix", "Verify locked payroll payment matrix in project details"),
+            ("test_projects_assign_export_csv", "Export project staff assignments to CSV"),
+            ("test_inactive_staff_in_projects_and_attendance", "Include inactive staff in project matrix and attendance reports")
         ],
         "steps": "1. Create project with budget and dates.<br>2. Assign staff to project.<br>3. Toggle project assignment check box.<br>4. Close project and check assignment read-only state.",
         "expect": "Project assignments persist correctly, and closed projects reject new staff assignments."
@@ -241,7 +259,7 @@ def page_unittest_runner(handler):
     <div style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
       <div>
         <h2 style="margin: 0 0 6px 0; color: var(--text-primary);">Unit Test Runner Dashboard</h2>
-        <p style="margin: 0; color: var(--text-muted); font-size: 14px;">Verify server database operations, validations, and logic handlers using Python unittest (61 test cases total).</p>
+        <p style="margin: 0; color: var(--text-muted); font-size: 14px;">Verify server database operations, validations, and logic handlers using Python unittest (80 test cases total).</p>
       </div>
       <div style="display: flex; gap: 10px;">
         <button type="button" id="btn-run-all" class="btn" style="background: var(--success); color:#fff; border-color: var(--success); font-weight: 600;" onclick="runTestCase('all')">
