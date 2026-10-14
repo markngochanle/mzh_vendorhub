@@ -873,7 +873,7 @@ class TestAttendance(BaseTestCase):
         # 2. Render monthly attendance summary
         html = attendance.page_monthly_attendance({"month": "2026-06"})
         self.assertIn("Nguyễn Văn An", html)
-        self.assertIn("Monthly Payroll & Payment", html)
+        self.assertIn("Monthly Payroll", html)
 
         # 3. Save monthly summary updates
         body = f"month=2026-06&std_{self.staff_id}=20.0&pl_{self.staff_id}=1.0&ot_{self.staff_id}=10.0".encode()
@@ -1083,6 +1083,7 @@ class TestServerRoutes(BaseTestCase):
             ("/staff", "Contract Staff (HR)"),
             ("/staff/shifts", "Staff Work Shifts Settings"),
             ("/attendance", "Time Attendance"),
+            ("/attendance/cashout", "Fiscal Year Cash-out Overview"),
             ("/invoice/new", "Import New Invoice"),
             ("/vendor/new", "Add Vendor"),
             (f"/vendor/edit?id={self.seller_id}", "Edit Vendor"),
@@ -1991,8 +1992,8 @@ class TestProjects(BaseTestCase):
         """, (test_staff_id,))
         self.conn.commit()
         html = attendance.page_attendance_acceptance({"month": "2026-06", "annex_id": str(test_annex_id)})
-        self.assertIn("Test Staff Both Locks", html)
-        self.assertIn("ATTENDANCE & PAYROLL LOCKED", html)
+        self.assertIn("💰 Cash-out", html)
+        self.assertNotIn("CASHED OUT", html)
 
     def test_attendance_acceptance_all_contract_staff_must_be_locked(self):
         # Test that if an Annex has 2 staff members, Annex only appears when ALL contract staff are locked.
@@ -2122,6 +2123,8 @@ class TestProjects(BaseTestCase):
         html = common.layout("Test Title", "<p>Content</p>")
         self.assertIn("Assign Staff to Project", html)
         self.assertIn("/projects/assign#add-staff-section", html)
+        self.assertIn('<a href="/attendance" class="nav-link">Timesheet & Payroll</a>', html)
+        self.assertNotIn('<a href="/attendance" class="nav-link">Attendance</a>', html)
 
         # 2. Verify /projects/assign page contains Add New Staff member to Project form with id="add-staff-section"
         cur = self.conn.cursor()
@@ -2131,7 +2134,271 @@ class TestProjects(BaseTestCase):
 
         assign_html = projects.page_projects_assign(selected_project_id=str(p_id))
         self.assertIn('id="add-staff-section"', assign_html)
-        self.assertIn("Add New Staff member to Project", assign_html)
+    def test_attendance_tab_name_and_import_invoice_link(self):
+        # 1. Verify tab name changed to "Monthly Payroll" (not "Monthly Payroll & Payment")
+        html_daily = attendance.page_attendance({"month": "2026-08"})
+        self.assertIn("💵 Monthly Payroll", html_daily)
+        self.assertNotIn("💵 Monthly Payroll & Payment", html_daily)
+
+        html_monthly = attendance.page_monthly_attendance({"month": "2026-08"})
+        self.assertIn("💵 Monthly Payroll", html_monthly)
+        self.assertNotIn("💵 Monthly Payroll & Payment", html_monthly)
+
+        html_acc = attendance.page_attendance_acceptance({"month": "2026-08"})
+        self.assertIn("💵 Monthly Payroll", html_acc)
+        self.assertNotIn("💵 Monthly Payroll & Payment", html_acc)
+
+        # 2. Setup a locked annex to test "Import hóa đơn" button in Attendance Acceptance
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active) VALUES (?, 'Annex 3', '2026-01-01', '2026-12-31', 1)", (self.contract_id,))
+        annex_id = cur.lastrowid
+
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Staff Acceptance Test', ?)", (self.seller_id,))
+        sid = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate) VALUES (?, ?, ?, 50000000)", (sid, self.contract_id, annex_id))
+
+        cur.execute("INSERT INTO attendance (staff_id, date, work_hours, ot_hours) VALUES (?, '2026-08-01', 8, 0)", (sid,))
+        cur.execute("INSERT INTO attendance_locks (staff_id, month, locked, locked_at) VALUES (?, '2026-08', 1, '2026-08-31 17:00:00')", (sid,))
+        cur.execute("INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked) VALUES (?, '2026-08', 22, 22, 0, 0, 2272727, 50000000, 1)", (sid,))
+        self.conn.commit()
+
+        acc_html = attendance.page_attendance_acceptance({"month": "2026-08", "annex_id": str(annex_id)})
+        self.assertIn("📥 Import Invoice", acc_html)
+        self.assertIn('service_year=2026', acc_html)
+        self.assertIn('service_month=08', acc_html)
+        self.assertIn('Annex%203', acc_html)
+
+        # 3. Test /invoice/new with query parameters (via StubHandler)
+        handler_with_params = StubHandler("/invoice/new?service_year=2026&service_month=08&contract_no=Annex%203&return_month=2026-08&from=acceptance", "GET")
+        handler_with_params.do_GET()
+        invoice_html = handler_with_params.get_output_text()
+
+        self.assertIn('value="2026"', invoice_html)
+        self.assertIn('value="08"', invoice_html)
+        self.assertIn('value="Annex 3"', invoice_html)
+        self.assertIn('forward to Attendance acceptance', invoice_html)
+        self.assertIn('/attendance/acceptance?month=2026-08', invoice_html)
+
+        # 4. Test /invoice/new without parameters (default month link)
+        handler_no_params = StubHandler("/invoice/new", "GET")
+        handler_no_params.do_GET()
+        invoice_html_default = handler_no_params.get_output_text()
+        self.assertIn('forward to Attendance acceptance', invoice_html_default)
+        self.assertIn('href="/attendance/acceptance"', invoice_html_default)
+
+        # 5. Test locking import button when invoice already exists for this annex & month
+        seller_tax_id = self.conn.execute("SELECT tax_id FROM vendors WHERE id = ?", (self.seller_id,)).fetchone()["tax_id"]
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO invoices (service_year, service_month, contract_no, seller_mst, shdon, imported_at)
+            VALUES (2026, 8, 'Annex 3', ?, 'HD-TEST-001', '2026-08-20')
+        """, (seller_tax_id,))
+        self.conn.commit()
+
+        acc_html_locked = attendance.page_attendance_acceptance({"month": "2026-08", "annex_id": str(annex_id)})
+        self.assertIn("🔒 Invoice Imported", acc_html_locked)
+        self.assertIn("disabled", acc_html_locked)
+        self.assertIn("View Inv #HD-TEST-001", acc_html_locked)
+        self.assertNotIn("/invoice/new?service_year=2026&amp;service_month=08&amp;contract_no=Annex%203", acc_html_locked)
+
+    def test_attendance_acceptance_cashout_popup_and_save(self):
+        # 1. Setup a locked annex
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active) VALUES (?, 'Annex Cashout Test', '2026-01-01', '2026-12-31', 1)", (self.contract_id,))
+        annex_id = cur.lastrowid
+
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Staff Cashout', ?)", (self.seller_id,))
+        sid = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate) VALUES (?, ?, ?, 50000000)", (sid, self.contract_id, annex_id))
+
+        cur.execute("INSERT INTO attendance (staff_id, date, work_hours, ot_hours) VALUES (?, '2026-09-01', 8, 0)", (sid,))
+        cur.execute("INSERT INTO attendance_locks (staff_id, month, locked, locked_at) VALUES (?, '2026-09', 1, '2026-09-30 17:00:00')", (sid,))
+        cur.execute("INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked) VALUES (?, '2026-09', 22, 22, 0, 0, 2272727, 50000000, 1)", (sid,))
+        self.conn.commit()
+
+        # 2. Before cash-out:
+        # - Button "💰 Cash-out" is present
+        # - CASHED OUT badge is NOT displayed ("trường hợp chưa cashout thì ko hiển thị gì")
+        # - Modal popup HTML is rendered
+        html_before = attendance.page_attendance_acceptance({"month": "2026-09", "annex_id": str(annex_id)})
+        self.assertIn("💰 Cash-out", html_before)
+        self.assertNotIn("CASHED OUT", html_before)
+        self.assertIn('id="cashoutModal"', html_before)
+
+        # 3. Save cash-out date via POST handler
+        body_set = f"annex_id={annex_id}&month=2026-09&cashout_date=2026-09-25&action=save".encode()
+        handler_set = MockHandler(path="/attendance/acceptance/cashout", body=body_set, headers={"content-length": str(len(body_set))})
+        attendance.handle_attendance_cashout_post(handler_set)
+        self.assertEqual(handler_set.response_status, 302)
+
+        # 4. After cash-out:
+        # - Badge "💸 CASHED OUT (2026-09-25)" is displayed
+        # - Button changes to "✏️ Edit Cash-out"
+        html_after_set = attendance.page_attendance_acceptance({"month": "2026-09", "annex_id": str(annex_id)})
+        self.assertIn("CASHED OUT", html_after_set)
+        self.assertIn("2026-09-25", html_after_set)
+        self.assertIn("✏️ Edit Cash-out", html_after_set)
+
+        # 5. Edit cash-out date to 2026-09-28
+        body_edit = f"annex_id={annex_id}&month=2026-09&cashout_date=2026-09-28&action=save".encode()
+        handler_edit = MockHandler(path="/attendance/acceptance/cashout", body=body_edit, headers={"content-length": str(len(body_edit))})
+        attendance.handle_attendance_cashout_post(handler_edit)
+        self.assertEqual(handler_edit.response_status, 302)
+
+        html_after_edit = attendance.page_attendance_acceptance({"month": "2026-09", "annex_id": str(annex_id)})
+        self.assertIn("2026-09-28", html_after_edit)
+        self.assertNotIn("2026-09-25", html_after_edit)
+
+        # 6. Clear cash-out date
+        body_clear = f"annex_id={annex_id}&month=2026-09&action=clear".encode()
+        handler_clear = MockHandler(path="/attendance/acceptance/cashout", body=body_clear, headers={"content-length": str(len(body_clear))})
+        attendance.handle_attendance_cashout_post(handler_clear)
+        self.assertEqual(handler_clear.response_status, 302)
+
+        html_after_clear = attendance.page_attendance_acceptance({"month": "2026-09", "annex_id": str(annex_id)})
+        self.assertNotIn("CASHED OUT", html_after_clear)
+        self.assertIn("💰 Cash-out", html_after_clear)
+
+    def test_attendance_payout_tab_and_csv_export(self):
+        # 1. Verify sub-nav contains Cash-out tab on all attendance views
+        daily_html = attendance.page_attendance({"month": "2026-08"})
+        self.assertIn("💰 Cash-out", daily_html)
+        self.assertIn('/attendance/cashout', daily_html)
+
+        monthly_html = attendance.page_monthly_attendance({"month": "2026-08"})
+        self.assertIn("💰 Cash-out", monthly_html)
+
+        acceptance_html = attendance.page_attendance_acceptance({"month": "2026-08"})
+        self.assertIn("💰 Cash-out", acceptance_html)
+
+        # 2. Setup test data for FY26:
+        # Create a vendor, contract, and annex with cashout in FY26 (2026-04 to 2027-03)
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO vendors (company_name, purchasing, tax_id) VALUES ('Alpha Vendor Solutions', 0, '0109999999')")
+        v_id = cur.lastrowid
+        cur.execute("INSERT INTO contracts (buyer_vendor_id, seller_vendor_id, framework_no) VALUES (?, ?, 'CONT-PAYOUT-01')", (self.buyer_id, v_id))
+        c_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name) VALUES (?, 'Annex Payout 1')", (c_id,))
+        a_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Nguyen Payout Staff', ?)", (v_id,))
+        s_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate) VALUES (?, ?, ?, 50000000)", (s_id, c_id, a_id))
+        # Add summary record for 2026-05 (Month 5 in Q1 of FY26)
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, daily_rate, total_amount, locked)
+            VALUES (?, '2026-05', 22, 22, 2272727, 50000000, 1)
+        """, (s_id,))
+        # Set cashout date for 2026-05
+        cur.execute("""
+            INSERT INTO annex_cashouts (annex_id, month, cashout_date)
+            VALUES (?, '2026-05', '2026-06-15')
+        """, (a_id,))
+        self.conn.commit()
+
+        # 3. View Cash-out tab for FY26
+        payout_html = attendance.page_attendance_payout({"fy": "2026"})
+        self.assertIn("Timesheet &amp; Payroll - Cash-out FY26", payout_html)
+        self.assertIn("Fiscal Year Cash-out Overview - FY26", payout_html)
+        self.assertIn("Period: 01/04/2026 &rarr; 31/03/2027", payout_html)
+
+        # Verify quarters and months headers
+        self.assertIn("Quarter 1 (Q1)", payout_html)
+        self.assertIn("Quarter 2 (Q2)", payout_html)
+        self.assertIn("Quarter 3 (Q3)", payout_html)
+        self.assertIn("Quarter 4 (Q4)", payout_html)
+        self.assertIn("Apr", payout_html)
+        self.assertIn("May", payout_html)
+        self.assertIn("Jun", payout_html)
+        self.assertIn("Jul", payout_html)
+        self.assertIn("Aug", payout_html)
+        self.assertIn("Sep", payout_html)
+        self.assertIn("Oct", payout_html)
+        self.assertIn("Nov", payout_html)
+        self.assertIn("Dec", payout_html)
+        self.assertIn("Jan", payout_html)
+        self.assertIn("Feb", payout_html)
+        self.assertIn("Mar", payout_html)
+
+        # Verify calendar FY picker UI elements
+        self.assertIn('id="fyPickerBtn"', payout_html)
+        self.assertIn('id="fyCalendarPopup"', payout_html)
+        self.assertIn('id="fyMonthPicker"', payout_html)
+        self.assertIn('pickMonthFY', payout_html)
+        self.assertIn('toggleFyCalendar', payout_html)
+        self.assertIn('Total FY Payroll', payout_html)
+        self.assertIn('Total FY Cash-out', payout_html)
+
+        # Verify dual concepts: Payroll vs Cash-out in table
+        self.assertIn("Alpha Vendor Solutions", payout_html)
+        self.assertIn("Annex Payout 1", payout_html)
+        self.assertIn("50,000,000", payout_html)
+        self.assertIn("2026-06-15", payout_html)
+        self.assertIn("Export to CSV", payout_html)
+
+        # Check raw data breakdown from get_payout_data
+        data = attendance.get_payout_data(self.conn, 2026, "with_cashout", None, "")
+        self.assertEqual(len(data["rows"]), 1)
+        r0 = data["rows"][0]
+        # In Month 2026-05: Payroll is 50,000,000 (service month), Cash-out is 0.0 (no cashout executed in May)
+        self.assertEqual(r0["months"]["2026-05"]["payroll"], 50000000.0)
+        self.assertEqual(r0["months"]["2026-05"]["cashout"], 0.0)
+        # In Month 2026-06: Cash-out is 50,000,000 (paid on 2026-06-15), Payroll is 0.0
+        self.assertEqual(r0["months"]["2026-06"]["cashout"], 50000000.0)
+        self.assertEqual(r0["months"]["2026-06"]["cashout_date_str"], "2026-06-15")
+        self.assertEqual(r0["months"]["2026-06"]["payroll"], 0.0)
+
+        # 4. Test blank cashout date logic
+        # Annex 2 with payroll locked in 2026-07 but NO cashout date set (blank)
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name) VALUES (?, 'Annex No Cashout Date')", (c_id,))
+        a2_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Pending Cashout Staff', ?)", (v_id,))
+        s2_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate) VALUES (?, ?, ?, 30000000)", (s2_id, c_id, a2_id))
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, daily_rate, total_amount, locked)
+            VALUES (?, '2026-07', 22, 22, 1363636, 30000000, 1)
+        """, (s2_id,))
+        self.conn.commit()
+
+        data2 = attendance.get_payout_data(self.conn, 2026, "with_cashout", None, "")
+        annex2_row = next(r for r in data2["rows"] if r["annex"]["annex_id"] == a2_id)
+        # Month 2026-07: Payroll is 30,000,000; Cash-out is 0.0 because cashout date is blank
+        self.assertEqual(annex2_row["months"]["2026-07"]["payroll"], 30000000.0)
+        self.assertEqual(annex2_row["months"]["2026-07"]["cashout"], 0.0)
+        self.assertFalse(annex2_row["has_cashout"])
+        self.assertTrue(annex2_row["has_payroll"])
+
+        # In "cashed_out" only filter, Annex 2 must NOT appear
+        data_co_only = attendance.get_payout_data(self.conn, 2026, "cashed_out", None, "")
+        self.assertFalse(any(r["annex"]["annex_id"] == a2_id for r in data_co_only["rows"]))
+
+        # 6. Test cashout_only status filter: hides Payroll, shows Cash-out only
+        html_co = attendance.page_attendance_payout({"fy": "2026", "status": "cashout_only"})
+        self.assertIn("Total FY Cash-out", html_co)
+        self.assertNotIn("Total FY Payroll", html_co)
+        self.assertIn("Annex Payout 1", html_co)
+        self.assertNotIn("Annex No Cashout Date", html_co) # Annex 2 has no cashout
+
+        # Test CSV export with cashout_only
+        export_co_handler = MockHandler(path="/attendance/cashout/export?fy=2026&status=cashout_only")
+        attendance.handle_attendance_cashout_export_get(export_co_handler)
+        csv_co = export_co_handler.wfile.getvalue().decode("utf-8-sig")
+        self.assertIn("Q1 - Jun (06/2026) Cash-out", csv_co)
+        self.assertNotIn(") Payroll", csv_co)
+
+        # 7. Test payroll_only status filter: hides Cash-out, shows Payroll only
+        html_po = attendance.page_attendance_payout({"fy": "2026", "status": "payroll_only"})
+        self.assertIn("Total FY Payroll", html_po)
+        self.assertNotIn("Total FY Cash-out", html_po)
+        self.assertIn("Annex Payout 1", html_po)
+        self.assertIn("Annex No Cashout Date", html_po) # Annex 2 has payroll
+
+        # Test CSV export with payroll_only
+        export_po_handler = MockHandler(path="/attendance/cashout/export?fy=2026&status=payroll_only")
+        attendance.handle_attendance_cashout_export_get(export_po_handler)
+        csv_po = export_po_handler.wfile.getvalue().decode("utf-8-sig")
+        self.assertIn("Q1 - May (05/2026) Payroll", csv_po)
+        self.assertNotIn(") Cash-out", csv_po)
 
 
 if __name__ == "__main__":

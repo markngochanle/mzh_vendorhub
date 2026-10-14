@@ -100,6 +100,9 @@ from attendance import (
     handle_attendance_monthly_export_get,
     page_attendance_timesheet_report,
     page_attendance_acceptance,
+    handle_attendance_cashout_post,
+    page_attendance_payout,
+    handle_attendance_payout_export_get,
 )
 from projects import (
     page_projects_list,
@@ -190,7 +193,29 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/invoice/new":
-                send_html(self, page_new_invoice())
+                service_year = qs.get("service_year", [""])[0]
+                service_month = qs.get("service_month", [""])[0]
+                contract_no = qs.get("contract_no", [""])[0] or qs.get("annex", [""])[0]
+                return_month = qs.get("return_month", [""])[0]
+                from_attendance = qs.get("from", [""])[0] in ("acceptance", "attendance") or bool(return_month)
+
+                month_param = qs.get("month", [""])[0]
+                if month_param and "-" in month_param:
+                    parts = month_param.split("-")
+                    if not service_year:
+                        service_year = parts[0]
+                    if not service_month:
+                        service_month = str(int(parts[1]))
+                    if not return_month:
+                        return_month = month_param
+
+                send_html(self, page_new_invoice(
+                    service_year=service_year,
+                    service_month=service_month,
+                    contract_no=contract_no,
+                    return_month=return_month,
+                    from_attendance=from_attendance
+                ))
                 return
 
             # ---------------- Vendors ----------------
@@ -414,6 +439,20 @@ class Handler(BaseHTTPRequestHandler):
                     "q": qs.get("q", [""])[0],
                 }
                 send_html(self, page_attendance_timesheet_report(filters))
+                return
+
+            if path in ("/attendance/cashout", "/attendance/payout"):
+                filters = {
+                    "fy": qs.get("fy", []),
+                    "status": qs.get("status", []),
+                    "vendor_id": qs.get("vendor_id", []),
+                    "q": qs.get("q", [""])[0],
+                }
+                send_html(self, page_attendance_payout(filters))
+                return
+
+            if path in ("/attendance/cashout/export", "/attendance/payout/export"):
+                handle_attendance_payout_export_get(self)
                 return
 
             # ---------------- Projects ----------------
@@ -648,6 +687,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/attendance/save-cell":
                 handle_attendance_save_cell_post(self)
+                return
+
+            if path in ("/attendance/acceptance/cashout", "/attendance/cashout/save"):
+                handle_attendance_cashout_post(self)
                 return
 
             send_html(

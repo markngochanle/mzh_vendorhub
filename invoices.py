@@ -1506,35 +1506,62 @@ def parse_multipart(handler):
 
 
 # -------------------- Pages & Post Handlers --------------------
-def page_new_invoice(error_msg: str | None = None):
+def page_new_invoice(
+    error_msg: str | None = None,
+    service_year: str | int | None = None,
+    service_month: str | int | None = None,
+    service_day: str | int | None = None,
+    contract_no: str | None = None,
+    return_month: str | None = None,
+    from_attendance: bool = False
+):
+    import urllib.parse
     error_html = f"<div class='card danger'><b>Error:</b> {escape(error_msg)}</div>" if error_msg else ""
     
+    target_month = (return_month or "").strip()
+    if not target_month and service_year and service_month:
+        try:
+            sy = int(service_year)
+            sm = int(service_month)
+            if 1 <= sm <= 12 and 1900 <= sy <= 2100:
+                target_month = f"{sy:04d}-{sm:02d}"
+        except Exception:
+            pass
+
+    if target_month:
+        acceptance_url = f"/attendance/acceptance?month={urllib.parse.quote(target_month)}"
+    else:
+        acceptance_url = "/attendance/acceptance"
+
     body = f"""
     {error_html}
     <div class="card">
-      <div class="actions" style="margin-bottom:10px;">
+      <div class="actions" style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
         <a href="/">← Back to List</a>
+        <a href="{acceptance_url}" style="color:#0b57d0; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">forward to Attendance acceptance &rarr;</a>
       </div>
       
       <form method="POST" action="/invoice/create" enctype="multipart/form-data">
+        <input type="hidden" name="return_month" value="{escape(str(return_month or ''))}">
+        <input type="hidden" name="from_attendance" value="{'1' if from_attendance else '0'}">
         
         <h3>Service & Contract Information (Applies to all imported invoices)</h3>
         <div class="grid">
           <div>
             <div class="label">Service Year (service_year)</div>
-            <input type="number" name="service_year" placeholder="YYYY">
+            <input type="number" name="service_year" placeholder="YYYY" value="{escape(str(service_year or ''))}">
           </div>
           <div>
             <div class="label">Month (service_month)</div>
-            <input type="number" name="service_month" placeholder="MM">
+            <input type="number" name="service_month" placeholder="MM" value="{escape(str(service_month or ''))}">
           </div>
           <div>
             <div class="label">Day (service_day)</div>
-            <input type="number" name="service_day" placeholder="DD">
+            <input type="number" name="service_day" placeholder="DD" value="{escape(str(service_day or ''))}">
           </div>
           <div>
             <div class="label">Contract No (contract_no)</div>
-            <input type="text" name="contract_no" placeholder="e.g. MHB/FPT/2025/001" style="width:100%;">
+            <input type="text" name="contract_no" placeholder="e.g. MHB/FPT/2025/001" style="width:100%;" value="{escape(str(contract_no or ''))}">
           </div>
         </div>
 
@@ -1602,6 +1629,19 @@ def handle_new_invoice_post(handler):
     sd_raw = form.get("service_day", [""])[0].strip()
     contract_no = form.get("contract_no", [""])[0].strip()
     import_type = form.get("import_type", ["file"])[0].strip()
+    return_month = form.get("return_month", [""])[0].strip()
+    from_attendance = form.get("from_attendance", ["0"])[0].strip() == "1"
+
+    def render_err(msg):
+        return page_new_invoice(
+            error_msg=msg,
+            service_year=sy_raw,
+            service_month=sm_raw,
+            service_day=sd_raw,
+            contract_no=contract_no,
+            return_month=return_month,
+            from_attendance=from_attendance
+        )
 
     service_year = parse_int_or_none(sy_raw)
     service_month = parse_int_or_none(sm_raw)
@@ -1610,13 +1650,13 @@ def handle_new_invoice_post(handler):
 
     # Validate dates
     if service_month is not None and not (1 <= service_month <= 12):
-        send_html(handler, page_new_invoice("Month must be between 1 and 12, or empty"))
+        send_html(handler, render_err("Month must be between 1 and 12, or empty"))
         return
     if service_day is not None and not (1 <= service_day <= 31):
-        send_html(handler, page_new_invoice("Day must be between 1 and 31, or empty"))
+        send_html(handler, render_err("Day must be between 1 and 31, or empty"))
         return
     if service_year is not None and not (1900 <= service_year <= 2100):
-        send_html(handler, page_new_invoice("Year should be between 1900 and 2100, or empty"))
+        send_html(handler, render_err("Year should be between 1900 and 2100, or empty"))
         return
 
     # Collect XML items to process: list of tuples (filename/source, xml_bytes)
@@ -1626,7 +1666,7 @@ def handle_new_invoice_post(handler):
         uploaded_files = form.get("xml_files", [])
         valid_files = [f for f in uploaded_files if f.get("filename") and len(f.get("content", b"")) > 0]
         if not valid_files:
-            send_html(handler, page_new_invoice("Please select at least one XML file to upload."))
+            send_html(handler, render_err("Please select at least one XML file to upload."))
             return
         for f in valid_files:
             xml_items.append((f["filename"], f["content"]))
@@ -1634,12 +1674,12 @@ def handle_new_invoice_post(handler):
     elif import_type == "path":
         local_path_raw = form.get("local_path", [""])[0].strip()
         if not local_path_raw:
-            send_html(handler, page_new_invoice("Please enter the directory or XML file path."))
+            send_html(handler, render_err("Please enter the directory or XML file path."))
             return
         
         path_obj = Path(local_path_raw)
         if not path_obj.exists():
-            send_html(handler, page_new_invoice(f"Path does not exist on server: {local_path_raw}"))
+            send_html(handler, render_err(f"Path does not exist on server: {local_path_raw}"))
             return
         
         try:
@@ -1650,22 +1690,22 @@ def handle_new_invoice_post(handler):
                 except Exception as ex:
                     pass
         except Exception as e:
-            send_html(handler, page_new_invoice(f"Error traversing path: {str(e)}"))
+            send_html(handler, render_err(f"Error traversing path: {str(e)}"))
             return
 
         if not xml_items:
-            send_html(handler, page_new_invoice(f"No XML files found at path: {local_path_raw}"))
+            send_html(handler, render_err(f"No XML files found at path: {local_path_raw}"))
             return
 
     elif import_type == "paste":
         xml_content_raw = form.get("xml_content", [""])[0].strip()
         if not xml_content_raw:
-            send_html(handler, page_new_invoice("Please paste the XML invoice code."))
+            send_html(handler, render_err("Please paste the XML invoice code."))
             return
         xml_items.append(("Pasted from Clipboard", xml_content_raw.encode("utf-8")))
     
     else:
-        send_html(handler, page_new_invoice("Invalid import method."))
+        send_html(handler, render_err("Invalid import method."))
         return
 
     # Process XML items
@@ -1749,6 +1789,19 @@ def handle_new_invoice_post(handler):
         </tr>
         """)
 
+    target_month = (return_month or "").strip()
+    if not target_month and service_year and service_month:
+        try:
+            target_month = f"{service_year:04d}-{service_month:02d}"
+        except Exception:
+            pass
+
+    acceptance_link_btn = ""
+    if from_attendance or target_month:
+        import urllib.parse
+        acc_url = f"/attendance/acceptance?month={urllib.parse.quote(target_month)}" if target_month else "/attendance/acceptance"
+        acceptance_link_btn = f'<a href="{acc_url}"><button type="button" class="btn-secondary">Forward to Attendance acceptance &rarr;</button></a>'
+
     summary_html = f"""
     <div class="card">
       <h2>Import Results</h2>
@@ -1771,9 +1824,10 @@ def handle_new_invoice_post(handler):
         </tbody>
       </table>
 
-      <div class="actions" style="margin-top:20px;">
+      <div class="actions" style="margin-top:20px; display:flex; gap:10px; align-items:center;">
         <a href="/"><button type="button" style="background:#0b57d0; color:#fff; border-color:#0b57d0; font-weight:600;">Invoices List</button></a>
         <a href="/invoice/new"><button type="button" class="btn-secondary">Import More Invoices</button></a>
+        {acceptance_link_btn}
       </div>
     </div>
     """

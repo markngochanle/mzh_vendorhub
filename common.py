@@ -242,6 +242,27 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+        try:
+            cur.execute("ALTER TABLE contract_annexes ADD COLUMN cashout_date TEXT")
+            conn.commit()
+        except sqlite3.OperationalError:
+            pass
+
+        # -------- annex_cashouts --------
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS annex_cashouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                annex_id INTEGER NOT NULL,
+                month TEXT NOT NULL,
+                cashout_date TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(annex_id) REFERENCES contract_annexes(id),
+                UNIQUE(annex_id, month)
+            )
+        """)
+        conn.commit()
+
         # -------- invoices --------
         cur.execute("""
             CREATE TABLE IF NOT EXISTS invoices (
@@ -530,7 +551,7 @@ def layout(title: str, body_html: str):
         </div>
       </div>
       <a href="/projects" class="nav-link">Projects</a>
-      <a href="/attendance" class="nav-link">Attendance</a>
+      <a href="/attendance" class="nav-link">Timesheet & Payroll</a>
       <a href="/audit-logs" class="nav-link">Audit Logs</a>
       <a href="/playwright" class="nav-link">UAT Runner</a>
       <a href="/unit-tests" class="nav-link">Unit Tests</a>

@@ -582,8 +582,9 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
     sub_nav = f"""
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
       <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📅 Daily Attendance</a>
-      <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll & Payment</a>
+      <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
+      <a href="/attendance/cashout" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💰 Cash-out</a>
     </div>
     """
 
@@ -1836,8 +1837,9 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
     sub_nav = f"""
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
       <a href="/attendance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
-      <a href="/attendance/monthly?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💵 Monthly Payroll & Payment</a>
+      <a href="/attendance/monthly?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
+      <a href="/attendance/cashout" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💰 Cash-out</a>
     </div>
     """
 
@@ -2233,6 +2235,29 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
         annex_sql += " ORDER BY v.company_name_vi, c.framework_no, a.annex_name"
         annex_list = conn.execute(annex_sql, params).fetchall()
 
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS annex_cashouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                annex_id INTEGER NOT NULL,
+                month TEXT NOT NULL,
+                cashout_date TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(annex_id) REFERENCES contract_annexes(id),
+                UNIQUE(annex_id, month)
+            )
+        """)
+        cashout_rows = conn.execute("SELECT annex_id, cashout_date FROM annex_cashouts WHERE month = ?", (month_val,)).fetchall()
+        cashout_map = {r["annex_id"]: r["cashout_date"] for r in cashout_rows}
+
+        # Query all invoices for current service year and month
+        inv_rows = conn.execute("""
+            SELECT id, shdon, khhdon, nlap, service_year, service_month, contract_no, seller_mst
+            FROM invoices
+            WHERE (service_year = ? AND service_month = ?)
+               OR (service_year IS NULL AND strftime('%Y-%m', nlap) = ?)
+        """, (y_val, m_val_int, month_val)).fetchall()
+
         annex_cards = []
         for a in annex_list:
             aid = a["annex_id"]
@@ -2323,7 +2348,65 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
                 </tr>
                 """)
 
-            badge_html = '<span style="background:#e6f4ea; color:#137333; border:1px solid #b4e3be; padding:4px 12px; border-radius:12px; font-weight:bold; font-size:13px;">🔒 ATTENDANCE & PAYROLL LOCKED</span>'
+            cashout_date = cashout_map.get(aid)
+            if cashout_date:
+                badge_html = f'<span class="badge-cashed-out" style="background:#e6f4ea; color:#137333; border:1px solid #b4e3be; padding:4px 12px; border-radius:12px; font-weight:bold; font-size:13px;" title="Cashed out on {escape(cashout_date)}">💸 CASHED OUT ({escape(cashout_date)})</span>'
+                cashout_btn_html = f"""
+                <button type="button" class="btn" onclick="openCashoutModal({aid}, '{escape(a['annex_name'])}', '{month_val}', '{escape(cashout_date)}')" style="background:#f8fafc; color:#0b57d0; border:1px solid #0b57d0; font-size:13px; font-weight:600; padding:6px 14px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,0.05);" title="Edit Cash-out date (current: {escape(cashout_date)})">
+                  ✏️ Edit Cash-out
+                </button>
+                """
+            else:
+                badge_html = ''
+                cashout_btn_html = f"""
+                <button type="button" class="btn" onclick="openCashoutModal({aid}, '{escape(a['annex_name'])}', '{month_val}', '')" style="background:#fff; color:#0b57d0; border:1px solid #0b57d0; font-size:13px; font-weight:600; padding:6px 14px; border-radius:6px; cursor:pointer; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,0.05);" title="Set Cash-out date for {escape(a['annex_name'])}">
+                  💰 Cash-out
+                </button>
+                """
+
+            # Check if invoice for this annex and month has already been imported
+            def _norm_mst(s):
+                return (s or "").replace("-", "").replace(" ", "").strip().lower()
+
+            target_mst = _norm_mst(a["tax_id"])
+            a_name = (a["annex_name"] or "").strip().lower()
+            f_no = (a["framework_no"] or "").strip().lower()
+
+            imported_inv = None
+            for inv in inv_rows:
+                inv_mst = _norm_mst(inv["seller_mst"])
+                if target_mst and inv_mst and target_mst != inv_mst:
+                    continue
+
+                c_no = (inv["contract_no"] or "").strip().lower()
+                if not c_no:
+                    continue
+
+                if a_name and (c_no == a_name or a_name in c_no or c_no in a_name):
+                    imported_inv = inv
+                    break
+                if f_no and (c_no == f_no or f_no in c_no):
+                    imported_inv = inv
+                    break
+
+            if imported_inv:
+                inv_shdon = imported_inv["shdon"] or ""
+                inv_id = imported_inv["id"]
+                view_link = f' <a href="/invoice?id={inv_id}" style="color:#0b57d0; font-size:12px; font-weight:600; text-decoration:none;" title="View invoice #{escape(inv_shdon)}">[View Inv #{escape(inv_shdon)}]</a>'
+                import_btn_html = f"""
+                <span style="display:inline-flex; align-items:center; gap:6px;">
+                  <button type="button" class="btn" disabled style="background:#f1f5f9; color:#94a3b8; border:1px solid #cbd5e1; font-size:13px; font-weight:600; padding:6px 14px; border-radius:6px; cursor:not-allowed; display:inline-flex; align-items:center; gap:6px; white-space:nowrap;" title="Invoice for month {month_val} of {escape(a['annex_name'])} has been imported (Inv No: {escape(inv_shdon)}).">
+                    🔒 Invoice Imported
+                  </button>
+                  {view_link}
+                </span>
+                """
+            else:
+                import_btn_html = f"""
+                <a href="/invoice/new?service_year={y_val}&service_month={m_val_int:02d}&contract_no={urllib.parse.quote(a['annex_name'])}&annex={urllib.parse.quote(a['annex_name'])}&return_month={month_val}&from=acceptance" class="btn" style="background:#0b57d0; color:#fff; font-size:13px; font-weight:600; padding:6px 14px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; white-space:nowrap; box-shadow:0 1px 2px rgba(0,0,0,0.05);" title="Import invoice for {escape(a['annex_name'])}">
+                  📥 Import Invoice
+                </a>
+                """
 
             btn_html = f"""
             <a href="/attendance/timesheet?annex_id={aid}&month={month_val}" target="_blank" class="btn" style="background:#0b57d0; color:#fff; font-weight:bold; padding:8px 18px; border-radius:6px; text-decoration:none; display:inline-flex; align-items:center; gap:6px;">
@@ -2344,7 +2427,11 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
                     <span><b>TEL:</b> {escape(a['tel'] or 'N/A')}</span>
                   </div>
                 </div>
-                <div>{badge_html}</div>
+                <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap; justify-content:flex-end;">
+                  {badge_html}
+                  {cashout_btn_html}
+                  {import_btn_html}
+                </div>
               </div>
 
               <div style="margin-bottom:16px;">
@@ -2398,8 +2485,9 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
     sub_nav = f"""
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
       <a href="/attendance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
-      <a href="/attendance/monthly?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll & Payment</a>
+      <a href="/attendance/monthly?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📜 Attendance Acceptance</a>
+      <a href="/attendance/cashout" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💰 Cash-out</a>
     </div>
     """
 
@@ -2440,14 +2528,1134 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
     </div>
     """
 
+    error_html = f"<div class='card danger' style='margin-bottom:16px;'><b>Error:</b> {escape(error_msg)}</div>" if error_msg else ""
+    success_html = f"<div class='card success' style='border-color:#b4e3be; background:#f4fbf6; color:#137333; padding:12px; border-radius:8px; margin-bottom:16px;'><b>Success:</b> {escape(success_msg)}</div>" if success_msg else ""
+
+    modal_html = f"""
+    <!-- Cash-out Modal -->
+    <div id="cashoutModal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background-color:rgba(0,0,0,0.45); backdrop-filter:blur(2px); align-items:center; justify-content:center;">
+      <div style="background:#fff; border-radius:12px; width:92%; max-width:440px; box-shadow:0 20px 25px -5px rgba(0,0,0,0.1), 0 8px 10px -6px rgba(0,0,0,0.1); border:1px solid #e2e8f0; overflow:hidden;">
+        <div style="display:flex; justify-content:space-between; align-items:center; padding:16px 20px; border-bottom:1px solid #f1f5f9; background:#f8fafc;">
+          <h3 id="modalTitle" style="margin:0; font-size:16px; font-weight:700; color:#0f172a;">💰 Cash-out Date</h3>
+          <button type="button" onclick="closeCashoutModal()" style="background:none; border:none; font-size:22px; cursor:pointer; color:#64748b; line-height:1; padding:0 4px;">&times;</button>
+        </div>
+        
+        <form method="POST" action="/attendance/acceptance/cashout" style="margin:0; padding:20px;">
+          <input type="hidden" name="annex_id" id="modalAnnexId" value="">
+          <input type="hidden" name="month" id="modalMonth" value="">
+          <input type="hidden" name="return_url" value="/attendance/acceptance?{act_qs}">
+          
+          <div style="margin-bottom:16px;">
+            <div style="font-size:13px; color:#64748b; margin-bottom:4px;">Annex: <b id="modalAnnexName" style="color:#0f172a;"></b></div>
+            <div style="font-size:13px; color:#64748b;">Month: <b id="modalMonthText" style="color:#0f172a;"></b></div>
+          </div>
+          
+          <div style="margin-bottom:20px;">
+            <label for="modalCashoutDate" style="display:block; font-size:13px; font-weight:600; color:#334155; margin-bottom:6px;">
+              Cash-out Date: <span style="color:#dc2626;">*</span>
+            </label>
+            <input type="date" name="cashout_date" id="modalCashoutDate" required style="width:100%; box-sizing:border-box; padding:9px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:14px; font-family:inherit;">
+          </div>
+          
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; border-top:1px solid #f1f5f9; padding-top:16px;">
+            <div id="modalRemoveBtnContainer">
+              <button type="submit" name="action" value="clear" style="background:#fff; color:#dc2626; border:1px solid #fca5a5; padding:8px 14px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer;" onclick="return confirm('Are you sure you want to remove the cash-out date?');">
+                🗑️ Clear
+              </button>
+            </div>
+            <div style="display:flex; gap:10px; margin-left:auto;">
+              <button type="button" onclick="closeCashoutModal()" class="btn-secondary" style="padding:8px 16px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; border:1px solid #cbd5e1; background:#fff; color:#475569;">
+                Cancel
+              </button>
+              <button type="submit" name="action" value="save" style="background:#0b57d0; color:#fff; border:none; padding:8px 20px; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+                Save
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+    function openCashoutModal(annexId, annexName, monthVal, currentDate) {{
+      document.getElementById('modalAnnexId').value = annexId;
+      document.getElementById('modalAnnexName').textContent = annexName;
+      document.getElementById('modalMonth').value = monthVal;
+      document.getElementById('modalMonthText').textContent = monthVal;
+      
+      var dateInput = document.getElementById('modalCashoutDate');
+      var titleEl = document.getElementById('modalTitle');
+      var removeBtn = document.getElementById('modalRemoveBtnContainer');
+      
+      if (currentDate) {{
+        titleEl.textContent = '✏️ Edit Cash-out Date';
+        dateInput.value = currentDate;
+        removeBtn.style.display = 'block';
+      }} else {{
+        titleEl.textContent = '💰 Set Cash-out Date';
+        var today = new Date().toISOString().split('T')[0];
+        dateInput.value = today;
+        removeBtn.style.display = 'none';
+      }}
+      
+      var modal = document.getElementById('cashoutModal');
+      modal.style.display = 'flex';
+    }}
+
+    function closeCashoutModal() {{
+      document.getElementById('cashoutModal').style.display = 'none';
+    }}
+
+    window.addEventListener('click', function(event) {{
+      var modal = document.getElementById('cashoutModal');
+      if (event.target === modal) {{
+        modal.style.display = 'none';
+      }}
+    }});
+    </script>
+    """
+
     body = f"""
     {sub_nav}
+    {error_html}
+    {success_html}
     {filter_card}
 
     {''.join(annex_cards) if annex_cards else '<div class="card"><p class="muted">No annexes match the current filter.</p></div>'}
+    {modal_html}
     """
 
     return layout("Attendance Acceptance", body)
+
+
+def handle_attendance_cashout_post(handler):
+    length = int(handler.headers.get("Content-Length", 0))
+    raw = handler.rfile.read(length).decode("utf-8", errors="ignore")
+    import urllib.parse
+    form = urllib.parse.parse_qs(raw, keep_blank_values=True)
+
+    annex_id_raw = form.get("annex_id", [""])[0].strip()
+    month_val = form.get("month", [""])[0].strip()
+    cashout_date = form.get("cashout_date", [""])[0].strip()
+    action = form.get("action", ["save"])[0].strip()
+    return_url = form.get("return_url", [""])[0].strip()
+
+    if not return_url:
+        return_url = f"/attendance/acceptance?month={urllib.parse.quote(month_val)}" if month_val else "/attendance/acceptance"
+
+    annex_id = parse_int_or_none(annex_id_raw)
+    if not annex_id:
+        redirect(handler, return_url)
+        return
+
+    conn = db_connect()
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS annex_cashouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                annex_id INTEGER NOT NULL,
+                month TEXT NOT NULL,
+                cashout_date TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(annex_id) REFERENCES contract_annexes(id),
+                UNIQUE(annex_id, month)
+            )
+        """)
+
+        if action == "clear" or not cashout_date:
+            conn.execute("DELETE FROM annex_cashouts WHERE annex_id = ? AND month = ?", (annex_id, month_val))
+            try:
+                conn.execute("UPDATE contract_annexes SET cashout_date = NULL WHERE id = ?", (annex_id,))
+            except sqlite3.OperationalError:
+                pass
+            conn.commit()
+        else:
+            conn.execute("""
+                INSERT INTO annex_cashouts (annex_id, month, cashout_date, created_at, updated_at)
+                VALUES (?, ?, ?, datetime('now'), datetime('now'))
+                ON CONFLICT(annex_id, month) DO UPDATE SET
+                    cashout_date = excluded.cashout_date,
+                    updated_at = datetime('now')
+            """, (annex_id, month_val, cashout_date))
+            try:
+                conn.execute("UPDATE contract_annexes SET cashout_date = ? WHERE id = ?", (cashout_date, annex_id))
+            except sqlite3.OperationalError:
+                pass
+            conn.commit()
+    finally:
+        conn.close()
+
+    redirect(handler, return_url)
+
+
+def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None, q_filter: str):
+    q1_months = [f"{fy:04d}-04", f"{fy:04d}-05", f"{fy:04d}-06"]
+    q2_months = [f"{fy:04d}-07", f"{fy:04d}-08", f"{fy:04d}-09"]
+    q3_months = [f"{fy:04d}-10", f"{fy:04d}-11", f"{fy:04d}-12"]
+    q4_months = [f"{fy+1:04d}-01", f"{fy+1:04d}-02", f"{fy+1:04d}-03"]
+    fy_months = q1_months + q2_months + q3_months + q4_months
+
+    fy_start_date = f"{fy:04d}-04-01"
+    fy_end_date = f"{fy+1:04d}-03-31"
+
+    month_info = {
+        f"{fy:04d}-04": {"num": "04", "name": "Apr", "quarter": "Q1", "sub": f"04/{fy}"},
+        f"{fy:04d}-05": {"num": "05", "name": "May", "quarter": "Q1", "sub": f"05/{fy}"},
+        f"{fy:04d}-06": {"num": "06", "name": "Jun", "quarter": "Q1", "sub": f"06/{fy}"},
+        f"{fy:04d}-07": {"num": "07", "name": "Jul", "quarter": "Q2", "sub": f"07/{fy}"},
+        f"{fy:04d}-08": {"num": "08", "name": "Aug", "quarter": "Q2", "sub": f"08/{fy}"},
+        f"{fy:04d}-09": {"num": "09", "name": "Sep", "quarter": "Q2", "sub": f"09/{fy}"},
+        f"{fy:04d}-10": {"num": "10", "name": "Oct", "quarter": "Q3", "sub": f"10/{fy}"},
+        f"{fy:04d}-11": {"num": "11", "name": "Nov", "quarter": "Q3", "sub": f"11/{fy}"},
+        f"{fy:04d}-12": {"num": "12", "name": "Dec", "quarter": "Q3", "sub": f"12/{fy}"},
+        f"{fy+1:04d}-01": {"num": "01", "name": "Jan", "quarter": "Q4", "sub": f"01/{fy+1}"},
+        f"{fy+1:04d}-02": {"num": "02", "name": "Feb", "quarter": "Q4", "sub": f"02/{fy+1}"},
+        f"{fy+1:04d}-03": {"num": "03", "name": "Mar", "quarter": "Q4", "sub": f"03/{fy+1}"},
+    }
+
+    annex_sql = """
+        SELECT 
+            a.id as annex_id,
+            a.annex_name,
+            c.id as contract_id,
+            c.framework_no,
+            v.id as vendor_id,
+            v.company_name,
+            v.short_name,
+            v.tax_id
+        FROM contract_annexes a
+        JOIN contracts c ON a.contract_id = c.id
+        JOIN vendors v ON c.seller_vendor_id = v.id
+        WHERE a.deleted_at IS NULL AND c.deleted_at IS NULL AND v.deleted_at IS NULL
+    """
+    annex_params = []
+    if vendor_filter:
+        annex_sql += " AND v.id = ?"
+        annex_params.append(vendor_filter)
+    if q_filter:
+        annex_sql += " AND (v.company_name LIKE ? OR a.annex_name LIKE ? OR c.framework_no LIKE ?)"
+        annex_params.extend([f"%{q_filter}%", f"%{q_filter}%", f"%{q_filter}%"])
+    annex_sql += " ORDER BY v.company_name COLLATE NOCASE ASC, c.framework_no ASC, a.annex_name ASC"
+    annex_rows = conn.execute(annex_sql, annex_params).fetchall()
+
+    # Query all cashouts occurring strictly within this Fiscal Year (April 1 to March 31)
+    co_rows = conn.execute("""
+        SELECT annex_id, month, cashout_date 
+        FROM annex_cashouts 
+        WHERE cashout_date IS NOT NULL 
+          AND trim(cashout_date) != ''
+          AND cashout_date >= ? 
+          AND cashout_date <= ?
+    """, (fy_start_date, fy_end_date)).fetchall()
+
+    # Group cashout disbursements into their payment calendar month: (annex_id, cashout_month)
+    cashout_by_month = {}
+    for r in co_rows:
+        aid = r["annex_id"]
+        c_date = (r["cashout_date"] or "").strip()
+        co_month = c_date[:7]
+        sm = r["month"]
+        if co_month in fy_months:
+            cashout_by_month.setdefault((aid, co_month), []).append({
+                "service_month": sm,
+                "cashout_date": c_date
+            })
+
+    # Service months that need wages queried: all fy_months + any service month cashed out in this FY
+    needed_service_months = list(set(fy_months) | {r["month"] for r in co_rows if r["month"]})
+    ph = ", ".join(["?"] * len(needed_service_months))
+
+    w_rows = conn.execute(f"""
+        SELECT l.annex_id, s.month, sum(s.total_amount) as total_wages
+        FROM monthly_attendance_summary s
+        JOIN contract_staff cs ON cs.id = s.staff_id
+        JOIN contract_staff_links l ON l.staff_id = cs.id
+        WHERE s.month IN ({ph})
+        GROUP BY l.annex_id, s.month
+    """, needed_service_months).fetchall()
+    wages_map = {(r["annex_id"], r["month"]): float(r["total_wages"] or 0.0) for r in w_rows}
+
+    # Invoices for fallback if wages not found
+    inv_rows = conn.execute("""
+        SELECT seller_mst, contract_no, service_year, service_month, tg_tttbso
+        FROM invoices
+        WHERE service_year IS NOT NULL AND service_month IS NOT NULL
+    """).fetchall()
+
+    def _norm_code(s):
+        return (s or "").replace("-", "").replace(" ", "").strip().lower()
+
+    inv_map = {}
+    for inv in inv_rows:
+        c_no = _norm_code(inv["contract_no"])
+        s_mst = _norm_code(inv["seller_mst"])
+        m_str = f"{inv['service_year']:04d}-{inv['service_month']:02d}"
+        if c_no and m_str in needed_service_months:
+            inv_map[(c_no, s_mst, m_str)] = float(inv["tg_tttbso"] or 0.0)
+
+    def get_service_amount(aid, aname, taxid, sm):
+        amt = wages_map.get((aid, sm), 0.0)
+        if amt == 0.0:
+            a_code = _norm_code(aname)
+            tax_code = _norm_code(taxid)
+            if (a_code, tax_code, sm) in inv_map:
+                amt = inv_map[(a_code, tax_code, sm)]
+            elif (a_code, "", sm) in inv_map:
+                amt = inv_map[(a_code, "", sm)]
+        return amt
+
+    filtered_rows = []
+    for a in annex_rows:
+        aid = a["annex_id"]
+        a_name = a["annex_name"]
+        a_tax = a["tax_id"]
+
+        months_data = {}
+        row_payroll_total = 0.0
+        row_cashout_total = 0.0
+        q_payroll = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+        q_cashout = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+
+        for m in fy_months:
+            # Concept 1: Payroll - locked payroll amount for service month m
+            p_amt = get_service_amount(aid, a_name, a_tax, m)
+
+            # Concept 2: Cash-out - actual payment disbursed to vendor in month m (based on cashout_date)
+            co_items = cashout_by_month.get((aid, m), [])
+            co_amt = 0.0
+            c_dates = []
+            for item in co_items:
+                c_amt = get_service_amount(aid, a_name, a_tax, item["service_month"])
+                co_amt += c_amt
+                c_dates.append(item["cashout_date"])
+
+            c_date_str = ", ".join(sorted(list(set(c_dates)))) if c_dates else ""
+
+            q_name = month_info[m]["quarter"]
+            q_payroll[q_name] += p_amt
+            q_cashout[q_name] += co_amt
+
+            row_payroll_total += p_amt
+            row_cashout_total += co_amt
+
+            months_data[m] = {
+                "payroll": p_amt,
+                "cashout": co_amt,
+                "cashout_dates": c_dates,
+                "cashout_date_str": c_date_str,
+                "amount": co_amt if co_amt > 0 else p_amt,
+                "cashout_date": c_dates[0] if c_dates else None
+            }
+
+        has_payroll = row_payroll_total > 0
+        has_cashout = row_cashout_total > 0
+        has_activity = has_payroll or has_cashout
+
+        if status_filter in ("cashout_only", "cashed_out") and not has_cashout:
+            continue
+        elif status_filter == "payroll_only" and not has_payroll:
+            continue
+        elif status_filter in ("all_active", "with_cashout", "with_payout") and not has_activity:
+            continue
+
+        filtered_rows.append({
+            "annex": a,
+            "months": months_data,
+            "q_payroll": q_payroll,
+            "q_cashout": q_cashout,
+            "q_totals": q_cashout,
+            "row_payroll_total": row_payroll_total,
+            "row_cashout_total": row_cashout_total,
+            "row_total": row_cashout_total if row_cashout_total > 0 else row_payroll_total,
+            "has_cashout": has_cashout,
+            "has_payroll": has_payroll,
+            "has_payout": has_activity
+        })
+
+    col_payroll_totals = {m: 0.0 for m in fy_months}
+    col_cashout_totals = {m: 0.0 for m in fy_months}
+    q_col_payroll_totals = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+    q_col_cashout_totals = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+    grand_payroll_total = 0.0
+    grand_cashout_total = 0.0
+
+    for item in filtered_rows:
+        grand_payroll_total += item["row_payroll_total"]
+        grand_cashout_total += item["row_cashout_total"]
+
+        for q_k in ("Q1", "Q2", "Q3", "Q4"):
+            q_col_payroll_totals[q_k] += item["q_payroll"][q_k]
+            q_col_cashout_totals[q_k] += item["q_cashout"][q_k]
+
+        for m in fy_months:
+            col_payroll_totals[m] += item["months"][m]["payroll"]
+            col_cashout_totals[m] += item["months"][m]["cashout"]
+
+    return {
+        "fy": fy,
+        "fy_name": f"FY{str(fy)[-2:]}",
+        "q1_months": q1_months,
+        "q2_months": q2_months,
+        "q3_months": q3_months,
+        "q4_months": q4_months,
+        "fy_months": fy_months,
+        "month_info": month_info,
+        "rows": filtered_rows,
+        "col_payroll_totals": col_payroll_totals,
+        "col_cashout_totals": col_cashout_totals,
+        "col_totals": col_cashout_totals,
+        "q_col_payroll_totals": q_col_payroll_totals,
+        "q_col_cashout_totals": q_col_cashout_totals,
+        "q_col_totals": q_col_cashout_totals,
+        "grand_payroll_total": grand_payroll_total,
+        "grand_cashout_total": grand_cashout_total,
+        "grand_total": grand_cashout_total if grand_cashout_total > 0 else grand_payroll_total,
+        "status_filter": status_filter
+    }
+
+
+def page_attendance_payout(filters: dict) -> str:
+    today = date.today()
+    default_fy = today.year if today.month >= 4 else today.year - 1
+
+    fy_raw = filters.get("fy")
+    if isinstance(fy_raw, list):
+        fy_raw = fy_raw[0] if fy_raw else None
+    try:
+        fy = int(fy_raw) if fy_raw else default_fy
+    except (ValueError, TypeError):
+        fy = default_fy
+
+    status_raw = filters.get("status")
+    if isinstance(status_raw, list):
+        status_filter = status_raw[0] if status_raw else "all_active"
+    else:
+        status_filter = status_raw or "all_active"
+
+    if status_filter in ("cashout_only", "cashed_out"):
+        status_filter = "cashout_only"
+    elif status_filter == "payroll_only":
+        status_filter = "payroll_only"
+    elif status_filter == "all":
+        status_filter = "all"
+    else:
+        status_filter = "all_active"
+
+    vendor_raw = filters.get("vendor_id")
+    if isinstance(vendor_raw, list):
+        vendor_raw = vendor_raw[0] if vendor_raw else None
+    vendor_filter = parse_int_or_none(vendor_raw)
+
+    q_raw = filters.get("q")
+    if isinstance(q_raw, list):
+        q_raw = q_raw[0] if q_raw else ""
+    q_filter = (q_raw or "").strip()
+
+    conn = db_connect()
+    try:
+        vendors = conn.execute("SELECT id, company_name, short_name FROM vendors WHERE deleted_at IS NULL AND purchasing = 0 ORDER BY company_name").fetchall()
+        data = get_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+    finally:
+        conn.close()
+
+    # Sub-nav
+    sub_nav = f"""
+    <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
+      <a href="/attendance" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
+      <a href="/attendance/monthly" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
+      <a href="/attendance/acceptance" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
+      <a href="/attendance/cashout?fy={fy}&status={status_filter}&vendor_id={vendor_filter or ''}&q={urllib.parse.quote(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💰 Cash-out</a>
+    </div>
+    """
+
+    # Status options
+    status_options_html = [
+        f'<option value="all_active" {"selected" if status_filter == "all_active" else ""}>All Active (Both Payroll & Cash-out)</option>',
+        f'<option value="cashout_only" {"selected" if status_filter == "cashout_only" else ""}>Cash-out Only (Hide Payroll)</option>',
+        f'<option value="payroll_only" {"selected" if status_filter == "payroll_only" else ""}>Payroll Only (Hide Cash-out)</option>',
+        f'<option value="all" {"selected" if status_filter == "all" else ""}>All Annexes</option>',
+    ]
+
+    # Vendor options
+    vendor_options_html = ['<option value="">-- All Vendors --</option>']
+    for v in vendors:
+        sel = "selected" if vendor_filter == v["id"] else ""
+        v_title = v["short_name"] or v["company_name"] or f"Vendor #{v['id']}"
+        vendor_options_html.append(f'<option value="{v["id"]}" {sel}>{escape(v_title)}</option>')
+
+    # Export URL
+    export_url = f"/attendance/cashout/export?fy={fy}&status={status_filter}&vendor_id={vendor_filter or ''}&q={urllib.parse.quote(q_filter)}"
+
+    col_min_w = "140px" if status_filter in ("all_active", "all") else "115px"
+    tbl_min_w = "1960px" if status_filter in ("all_active", "all") else "1600px"
+
+    # Table rows
+    table_rows_html = []
+    for idx, r in enumerate(data["rows"], 1):
+        a = r["annex"]
+        c_name = a["company_name"] or "-"
+        fn_no = a["framework_no"] or "-"
+        an_name = a["annex_name"] or "-"
+
+        m_cells = []
+        for m in data["fy_months"]:
+            cell_data = r["months"][m]
+            p_amt = cell_data["payroll"]
+            co_amt = cell_data["cashout"]
+            c_date_str = cell_data["cashout_date_str"]
+
+            border_style = ""
+            if m in (data["q1_months"][0], data["q2_months"][0], data["q3_months"][0], data["q4_months"][0]):
+                border_style += "border-left: 1px solid #cbd5e1; "
+            if m in (data["q1_months"][-1], data["q2_months"][-1], data["q3_months"][-1], data["q4_months"][-1]):
+                border_style += "border-right: 1px solid #cbd5e1; "
+
+            p_str = f"{int(round(p_amt)):,}" if p_amt > 0 else "-"
+            co_str = f"{int(round(co_amt)):,}" if co_amt > 0 else "-"
+
+            p_color = "#1e293b" if p_amt > 0 else "#94a3b8"
+            co_color = "#15803d" if co_amt > 0 else "#94a3b8"
+
+            co_tooltip = f"Actual Cash-out Disbursed on {escape(c_date_str)}" if (co_amt > 0 and c_date_str) else "Actual Cash-out Disbursed"
+
+            if status_filter == "cashout_only":
+                # Hide Payroll completely
+                if co_amt == 0:
+                    cell_content = '<div style="text-align:right; color:#cbd5e1; font-weight:normal; white-space:nowrap;">-</div>'
+                else:
+                    cell_content = f"""
+                    <div style="font-size:12px; line-height:1.4; white-space:nowrap;" title="{co_tooltip}">
+                      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;">
+                        <span style="font-size:10px; color:#166534; font-weight:600;">Cash-out:</span>
+                        <span style="font-family:monospace; font-weight:700; color:#15803d;">{co_str}</span>
+                      </div>
+                    </div>
+                    """
+            elif status_filter == "payroll_only":
+                # Hide Cash-out completely
+                if p_amt == 0:
+                    cell_content = '<div style="text-align:right; color:#cbd5e1; font-weight:normal; white-space:nowrap;">-</div>'
+                else:
+                    cell_content = f"""
+                    <div style="font-size:12px; line-height:1.4; white-space:nowrap;" title="Monthly Payroll Locked">
+                      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;">
+                        <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+                        <span style="font-family:monospace; font-weight:600; color:#1e293b;">{p_str}</span>
+                      </div>
+                    </div>
+                    """
+            else:
+                # Both: Line 1 Payroll, Line 2 Cash-out (strictly 2 lines, no wrapping, no cashout date text)
+                if p_amt == 0 and co_amt == 0:
+                    cell_content = '<div style="text-align:center; color:#cbd5e1; font-weight:normal; white-space:nowrap;">-</div>'
+                else:
+                    cell_content = f"""
+                    <div style="font-size:11.5px; line-height:1.4; white-space:nowrap;">
+                      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;" title="Monthly Payroll Locked">
+                        <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+                        <span style="font-family:monospace; font-weight:600; color:{p_color};">{p_str}</span>
+                      </div>
+                      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap; margin-top:3px;" title="{co_tooltip}">
+                        <span style="font-size:10px; color:#166534; font-weight:600;">Cash-out:</span>
+                        <span style="font-family:monospace; font-weight:700; color:{co_color};">{co_str}</span>
+                      </div>
+                    </div>
+                    """
+
+            m_cells.append(f'<td style="text-align:right; padding:6px 10px; min-width:{col_min_w}; vertical-align:middle; white-space:nowrap; {border_style}">{cell_content}</td>')
+
+        row_p_str = f"{int(round(r['row_payroll_total'])):,}" if r['row_payroll_total'] > 0 else "-"
+        row_co_str = f"{int(round(r['row_cashout_total'])):,}" if r['row_cashout_total'] > 0 else "-"
+
+        if status_filter == "cashout_only":
+            row_total_content = f"""
+            <div style="font-size:12px; line-height:1.4; white-space:nowrap; text-align:right;">
+              <span style="font-size:10px; color:#166534; font-weight:600;">Cash-out:</span>
+              <b style="font-family:monospace; color:#15803d; margin-left:4px;">{row_co_str}</b>
+            </div>
+            """
+        elif status_filter == "payroll_only":
+            row_total_content = f"""
+            <div style="font-size:12px; line-height:1.4; white-space:nowrap; text-align:right;">
+              <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+              <b style="font-family:monospace; color:#1e293b; margin-left:4px;">{row_p_str}</b>
+            </div>
+            """
+        else:
+            row_total_content = f"""
+            <div style="font-size:11.5px; line-height:1.4; white-space:nowrap;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;" title="Total FY Payroll">
+                <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+                <b style="font-family:monospace; color:#1e293b;">{row_p_str}</b>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap; margin-top:3px;" title="Total FY Cash-out">
+                <span style="font-size:10px; color:#166534; font-weight:600;">Cash-out:</span>
+                <b style="font-family:monospace; color:#15803d;">{row_co_str}</b>
+              </div>
+            </div>
+            """
+
+        table_rows_html.append(f"""
+        <tr style="border-bottom: 1px solid #e2e8f0;">
+          <td style="text-align:center; color:#64748b; font-size:12px; vertical-align:middle; white-space:nowrap;">{idx}</td>
+          <td style="vertical-align:middle; white-space:nowrap;"><b>{escape(c_name)}</b></td>
+          <td style="font-size:12px; color:#475569; vertical-align:middle; white-space:nowrap;">{escape(fn_no)}</td>
+          <td style="vertical-align:middle; white-space:nowrap;"><span style="font-weight:600; color:#0b57d0;">{escape(an_name)}</span></td>
+          {''.join(m_cells)}
+          <td style="text-align:right; font-family:monospace; background:#f8fafc; border-left:2px solid #cbd5e1; padding:6px 10px; vertical-align:middle; white-space:nowrap; min-width:160px;">
+            {row_total_content}
+          </td>
+        </tr>
+        """)
+
+    if not table_rows_html:
+        table_rows_html.append(f"""
+        <tr>
+          <td colspan="17" style="text-align:center; padding:36px; color:#64748b; font-size:14px;">
+            No annexes match the current filter in <b>{data['fy_name']}</b>.
+          </td>
+        </tr>
+        """)
+
+    # Bottom totals
+    footer_cells = []
+    for m in data["fy_months"]:
+        col_p = data["col_payroll_totals"][m]
+        col_co = data["col_cashout_totals"][m]
+        col_p_str = f"{int(round(col_p)):,}" if col_p > 0 else "-"
+        col_co_str = f"{int(round(col_co)):,}" if col_co > 0 else "-"
+
+        border_style = ""
+        if m in (data["q1_months"][0], data["q2_months"][0], data["q3_months"][0], data["q4_months"][0]):
+            border_style += "border-left: 1px solid #cbd5e1; "
+        if m in (data["q1_months"][-1], data["q2_months"][-1], data["q3_months"][-1], data["q4_months"][-1]):
+            border_style += "border-right: 1px solid #cbd5e1; "
+
+        if status_filter == "cashout_only":
+            footer_content = f"""
+            <div style="font-size:12px; text-align:right; white-space:nowrap;" title="Total Cash-out for month {m}">
+              <span style="font-size:10px; color:#166534; font-weight:600;">CO:</span>
+              <b style="color:#15803d; margin-left:4px;">{col_co_str}</b>
+            </div>
+            """
+        elif status_filter == "payroll_only":
+            footer_content = f"""
+            <div style="font-size:12px; text-align:right; white-space:nowrap;" title="Total Payroll for month {m}">
+              <span style="font-size:10px; color:#64748b; font-weight:600;">P:</span>
+              <b style="color:#1e293b; margin-left:4px;">{col_p_str}</b>
+            </div>
+            """
+        else:
+            footer_content = f"""
+            <div style="font-size:11.5px; line-height:1.4; white-space:nowrap;">
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; color:#475569; white-space:nowrap;" title="Total Payroll for month {m}">
+                <span style="font-size:10px; color:#64748b; font-weight:600;">P:</span>
+                <b>{col_p_str}</b>
+              </div>
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; color:#15803d; margin-top:3px; white-space:nowrap;" title="Total Cash-out for month {m}">
+                <span style="font-size:10px; color:#166534; font-weight:600;">CO:</span>
+                <b>{col_co_str}</b>
+              </div>
+            </div>
+            """
+
+        footer_cells.append(f"""
+        <td style="padding:8px 10px; font-family:monospace; min-width:{col_min_w}; vertical-align:middle; white-space:nowrap; {border_style}">
+          {footer_content}
+        </td>
+        """)
+
+    grand_p_str = f"{int(round(data['grand_payroll_total'])):,} VND"
+    grand_co_str = f"{int(round(data['grand_cashout_total'])):,} VND"
+
+    if status_filter == "cashout_only":
+        summary_banner = f"""Total FY Cash-out: <span style="font-weight:bold; font-family:monospace; color:#15803d; font-size:15px;">{grand_co_str}</span>"""
+        legend_html = f"""
+        <div style="display:flex; align-items:center; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
+          <span style="font-size:9.5px; color:#166534; background:#dcfce7; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #bbf7d0;">Cash-out</span>
+          <span>Actual vendor disbursements (Payroll hidden)</span>
+        </div>
+        """
+        grand_total_content = f"""
+        <div style="font-size:12px; text-align:right; white-space:nowrap;" title="Grand Total FY Cash-out">
+          <span style="font-size:10px; color:#166534; font-weight:600;">Cash-out:</span>
+          <b style="color:#15803d; margin-left:4px; font-size:13px;">{grand_co_str}</b>
+        </div>
+        """
+    elif status_filter == "payroll_only":
+        summary_banner = f"""Total FY Payroll: <span style="font-weight:bold; font-family:monospace; color:#0f172a; font-size:15px;">{grand_p_str}</span>"""
+        legend_html = f"""
+        <div style="display:flex; align-items:center; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
+          <span style="font-size:9.5px; color:#64748b; background:#f1f5f9; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #cbd5e1;">Payroll</span>
+          <span>Locked monthly payroll accruals (Cash-out hidden)</span>
+        </div>
+        """
+        grand_total_content = f"""
+        <div style="font-size:12px; text-align:right; white-space:nowrap;" title="Grand Total FY Payroll">
+          <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+          <b style="color:#1e293b; margin-left:4px; font-size:13px;">{grand_p_str}</b>
+        </div>
+        """
+    else:
+        summary_banner = f"""Total FY Payroll: <span style="font-weight:bold; font-family:monospace; color:#0f172a; font-size:14px;">{grand_p_str}</span>
+        &nbsp;&bull;&nbsp;
+        Total FY Cash-out: <span style="font-weight:bold; font-family:monospace; color:#15803d; font-size:15px;">{grand_co_str}</span>"""
+        legend_html = f"""
+        <div style="display:flex; align-items:center; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
+          <span style="display:inline-flex; align-items:center; gap:4px;">
+            <span style="font-size:9.5px; color:#64748b; background:#f1f5f9; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #cbd5e1;">Payroll</span>
+            <span>Locked accrual (Line 1)</span>
+          </span>
+          <span style="display:inline-flex; align-items:center; gap:4px;">
+            <span style="font-size:9.5px; color:#166534; background:#dcfce7; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #bbf7d0;">Cash-out</span>
+            <span>Vendor payment (Line 2)</span>
+          </span>
+        </div>
+        """
+        grand_total_content = f"""
+        <div style="font-size:11.5px; line-height:1.4; white-space:nowrap;">
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;" title="Grand Total FY Payroll">
+            <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+            <span style="font-weight:bold; color:#1e293b;">{grand_p_str}</span>
+          </div>
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap; margin-top:3px;" title="Grand Total FY Cash-out">
+            <span style="font-size:10px; color:#166534; font-weight:600;">Cash-out:</span>
+            <span style="font-weight:bold; color:#15803d;">{grand_co_str}</span>
+          </div>
+        </div>
+        """
+
+    body = f"""
+    {sub_nav}
+
+    <!-- Filters and Actions Card -->
+    <div class="card" style="margin-bottom: 16px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px;">
+        <form method="GET" action="/attendance/cashout" id="filterForm" class="filters" style="margin:0; display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end;">
+          <!-- Fiscal Year Calendar & Year Picker -->
+          <div style="position:relative;">
+            <div class="label" style="font-weight:600; font-size:12px; margin-bottom:4px;">Fiscal Year (FY)</div>
+            <div style="display:inline-flex; align-items:center; background:#fff; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.04); overflow:hidden;">
+              <button type="button" onclick="stepFY(-1)" title="Previous Fiscal Year (FY{str(fy-1)[-2:]})" style="background:#f8fafc; border:none; border-right:1px solid #cbd5e1; cursor:pointer; padding:7px 10px; color:#475569; font-size:12px; font-weight:bold; transition:background 0.15s;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f8fafc'">◀</button>
+              <button type="button" id="fyPickerBtn" onclick="toggleFyCalendar(event)" style="background:#fff; border:none; cursor:pointer; font-weight:700; font-size:13px; color:#0f172a; display:inline-flex; align-items:center; gap:6px; padding:6px 12px; transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'" title="Click to open calendar and select year">
+                <span>📅 <b>FY{str(fy)[-2:]}</b> ({fy})</span>
+                <span style="font-size:11px; font-weight:normal; color:#64748b;">(01/04/{fy} &ndash; 31/03/{fy+1})</span>
+                <span style="font-size:10px; color:#64748b;">▾</span>
+              </button>
+              <button type="button" onclick="stepFY(1)" title="Next Fiscal Year (FY{str(fy+1)[-2:]})" style="background:#f8fafc; border:none; border-left:1px solid #cbd5e1; cursor:pointer; padding:7px 10px; color:#475569; font-size:12px; font-weight:bold; transition:background 0.15s;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f8fafc'">▶</button>
+            </div>
+            <input type="hidden" name="fy" id="fyHiddenInput" value="{fy}">
+
+            <!-- Interactive Calendar Year Picker Popup -->
+            <div id="fyCalendarPopup" style="display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:100; background:#fff; border:1px solid #cbd5e1; border-radius:10px; box-shadow:0 12px 28px rgba(0,0,0,0.15); width:290px; padding:14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #e2e8f0; padding-bottom:8px;">
+                <button type="button" onclick="navDecade(-1, event)" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold; color:#334155; padding:3px 9px;">‹</button>
+                <span id="decadeTitle" style="font-weight:700; font-size:13px; color:#0f172a;"></span>
+                <button type="button" onclick="navDecade(1, event)" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold; color:#334155; padding:3px 9px;">›</button>
+              </div>
+              <div id="yearGrid" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-bottom:12px;">
+                <!-- Generated by JS -->
+              </div>
+              <div style="border-top:1px solid #e2e8f0; padding-top:10px;">
+                <div style="font-size:11px; color:#64748b; margin-bottom:4px; font-weight:600;">Or select from calendar month:</div>
+                <input type="month" id="fyMonthPicker" onchange="pickMonthFY(this.value)" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; border:1px solid #cbd5e1; border-radius:6px; background:#f8fafc;">
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="label" style="font-weight:600; font-size:12px; margin-bottom:4px;">Status</div>
+            <select name="status" onchange="this.form.submit()" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; background:#fff;">
+              {''.join(status_options_html)}
+            </select>
+          </div>
+          <div>
+            <div class="label" style="font-weight:600; font-size:12px; margin-bottom:4px;">Vendor</div>
+            <select name="vendor_id" onchange="this.form.submit()" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; background:#fff;">
+              {''.join(vendor_options_html)}
+            </select>
+          </div>
+          <div>
+            <div class="label" style="font-weight:600; font-size:12px; margin-bottom:4px;">Search</div>
+            <input type="text" name="q" value="{escape(q_filter)}" placeholder="Search vendor / annex..." style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; width:180px;">
+          </div>
+          <div>
+            <button type="submit" class="btn" style="padding:6px 14px; background:#4f46e5; color:#fff; border:none; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer;">Filter</button>
+          </div>
+        </form>
+
+        <div>
+          <a href="{export_url}" class="btn" style="background:#137333; color:#fff; text-decoration:none; padding:7px 16px; border-radius:6px; font-size:13px; font-weight:600; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 2px rgba(0,0,0,0.05);" title="Export this Cash-out report to CSV file">
+            📥 Export to CSV
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- Cash-out Table Card -->
+    <div class="card" style="padding: 0; overflow: hidden;">
+      <div style="padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+        <div>
+          <h3 style="margin:0; font-size:16px; color:#0f172a;">Fiscal Year Cash-out Overview - {data['fy_name']}</h3>
+          <p style="margin:4px 0 0; font-size:12px; color:#64748b;">
+            Period: 01/04/{fy} &rarr; 31/03/{fy+1} &bull; Ordered by Company Name &bull; Showing {len(data['rows'])} annexes
+          </p>
+        </div>
+        <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
+          <div style="font-size:13px; color:#475569;">
+            {summary_banner}
+          </div>
+          {legend_html}
+        </div>
+      </div>
+
+      <div style="overflow-x: auto;">
+        <table class="table" style="width:100%; border-collapse:collapse; min-width:{tbl_min_w}; font-size:13px; margin:0;">
+          <thead>
+            <tr style="background:#f1f5f9; border-bottom: 1px solid #cbd5e1;">
+              <th rowspan="2" style="text-align:center; width:36px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">#</th>
+              <th rowspan="2" style="text-align:left; min-width:190px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">Company (Vendor)</th>
+              <th rowspan="2" style="text-align:left; min-width:160px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">Framework Contract</th>
+              <th rowspan="2" style="text-align:left; min-width:140px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">Annex</th>
+              <th colspan="3" style="text-align:center; background:#e0f2fe; color:#0369a1; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; font-weight:700; padding:8px;">Quarter 1 (Q1)</th>
+              <th colspan="3" style="text-align:center; background:#fef3c7; color:#b45309; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; font-weight:700; padding:8px;">Quarter 2 (Q2)</th>
+              <th colspan="3" style="text-align:center; background:#ede9fe; color:#6d28d9; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; font-weight:700; padding:8px;">Quarter 3 (Q3)</th>
+              <th colspan="3" style="text-align:center; background:#dcfce7; color:#15803d; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; font-weight:700; padding:8px;">Quarter 4 (Q4)</th>
+              <th rowspan="2" style="text-align:right; min-width:160px; background:#f8fafc; border-left:2px solid #cbd5e1; vertical-align:middle; font-weight:700; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">Total {data['fy_name']}</th>
+            </tr>
+            <tr style="background:#f8fafc; border-bottom: 2px solid #cbd5e1; font-size:12px;">
+              <!-- Q1 Months -->
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; border-left:1px solid #cbd5e1; white-space:nowrap;">Apr<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(04/{fy})</span></th>
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; white-space:nowrap;">May<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(05/{fy})</span></th>
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; border-right:1px solid #cbd5e1; white-space:nowrap;">Jun<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(06/{fy})</span></th>
+              <!-- Q2 Months -->
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; border-left:1px solid #cbd5e1; white-space:nowrap;">Jul<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(07/{fy})</span></th>
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; white-space:nowrap;">Aug<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(08/{fy})</span></th>
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; border-right:1px solid #cbd5e1; white-space:nowrap;">Sep<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(09/{fy})</span></th>
+              <!-- Q3 Months -->
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; border-left:1px solid #cbd5e1; white-space:nowrap;">Oct<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(10/{fy})</span></th>
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; white-space:nowrap;">Nov<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(11/{fy})</span></th>
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; border-right:1px solid #cbd5e1; white-space:nowrap;">Dec<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(12/{fy})</span></th>
+              <!-- Q4 Months -->
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; border-left:1px solid #cbd5e1; white-space:nowrap;">Jan<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(01/{fy+1})</span></th>
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; white-space:nowrap;">Feb<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(02/{fy+1})</span></th>
+              <th style="text-align:right; padding:6px 10px; min-width:{col_min_w}; border-right:1px solid #cbd5e1; white-space:nowrap;">Mar<br><span style="font-size:11px; font-weight:normal; color:#64748b;">(03/{fy+1})</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {''.join(table_rows_html)}
+          </tbody>
+          <tfoot>
+            <tr style="background:#f1f5f9; border-top:2px solid #64748b; font-weight:bold;">
+              <td colspan="4" style="text-align:right; padding:10px 12px; font-weight:bold; vertical-align:middle; white-space:nowrap;">TOTAL:</td>
+              {''.join(footer_cells)}
+              <td style="text-align:right; padding:8px 10px; font-family:monospace; background:#e2e8f0; border-left:2px solid #cbd5e1; vertical-align:middle; min-width:160px; white-space:nowrap;">
+                {grand_total_content}
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </div>
+
+    <!-- Calendar Year Picker Script -->
+    <script>
+    let selectedFY = {fy};
+    let currentDecadeStart = Math.floor(selectedFY / 12) * 12;
+
+    function renderYearGrid() {{
+      const grid = document.getElementById('yearGrid');
+      const title = document.getElementById('decadeTitle');
+      if (!grid || !title) return;
+      grid.innerHTML = '';
+      const start = currentDecadeStart;
+      const end = start + 11;
+      title.textContent = `${{start}} - ${{end}}`;
+      for (let y = start; y <= end; y++) {{
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.textContent = y;
+        btn.style.padding = '8px 4px';
+        btn.style.fontSize = '12px';
+        btn.style.borderRadius = '6px';
+        btn.style.cursor = 'pointer';
+        btn.style.border = '1px solid ' + (y === selectedFY ? '#0b57d0' : '#e2e8f0');
+        btn.style.background = (y === selectedFY ? '#0b57d0' : '#f8fafc');
+        btn.style.color = (y === selectedFY ? '#fff' : '#1e293b');
+        btn.style.fontWeight = (y === selectedFY ? '700' : '500');
+        btn.onmouseover = function() {{ if (y !== selectedFY) this.style.background = '#e2e8f0'; }};
+        btn.onmouseout = function() {{ if (y !== selectedFY) this.style.background = '#f8fafc'; }};
+        btn.onclick = function(e) {{
+          e.preventDefault();
+          selectFY(y);
+        }};
+        grid.appendChild(btn);
+      }}
+    }}
+
+    function navDecade(direction, e) {{
+      if (e) e.stopPropagation();
+      currentDecadeStart += direction * 12;
+      renderYearGrid();
+    }}
+
+    function selectFY(year) {{
+      const input = document.getElementById('fyHiddenInput');
+      if (input) {{
+        input.value = year;
+        const popup = document.getElementById('fyCalendarPopup');
+        if (popup) popup.style.display = 'none';
+        input.form.submit();
+      }}
+    }}
+
+    function stepFY(delta) {{
+      const current = parseInt(document.getElementById('fyHiddenInput').value, 10) || selectedFY;
+      selectFY(current + delta);
+    }}
+
+    function pickMonthFY(monthVal) {{
+      if (!monthVal) return;
+      const parts = monthVal.split('-');
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const derivedFy = (m >= 4) ? y : y - 1;
+      selectFY(derivedFy);
+    }}
+
+    function toggleFyCalendar(e) {{
+      if (e) e.stopPropagation();
+      const popup = document.getElementById('fyCalendarPopup');
+      if (!popup) return;
+      if (popup.style.display === 'none' || !popup.style.display) {{
+        currentDecadeStart = Math.floor(selectedFY / 12) * 12;
+        renderYearGrid();
+        popup.style.display = 'block';
+      }} else {{
+        popup.style.display = 'none';
+      }}
+    }}
+
+    document.addEventListener('click', function(e) {{
+      const popup = document.getElementById('fyCalendarPopup');
+      const btn = document.getElementById('fyPickerBtn');
+      if (popup && popup.style.display === 'block') {{
+        if (!popup.contains(e.target) && (!btn || !btn.contains(e.target))) {{
+          popup.style.display = 'none';
+        }}
+      }}
+    }});
+    </script>
+    """
+
+    return layout(f"Timesheet & Payroll - Cash-out {data['fy_name']}", body)
+
+
+def handle_attendance_payout_export_get(handler):
+    import csv
+    import io
+    import urllib.parse
+    from datetime import datetime
+
+    parsed = urllib.parse.urlparse(handler.path)
+    qs = urllib.parse.parse_qs(parsed.query)
+
+    today = date.today()
+    default_fy = today.year if today.month >= 4 else today.year - 1
+
+    fy_raw = qs.get("fy", [default_fy])[0]
+    try:
+        fy = int(fy_raw)
+    except (ValueError, TypeError):
+        fy = default_fy
+
+    status_raw = qs.get("status", ["all_active"])[0]
+    if status_raw in ("cashed_out", "cashout_only"):
+        status_filter = "cashout_only"
+    elif status_raw == "payroll_only":
+        status_filter = "payroll_only"
+    elif status_raw == "all":
+        status_filter = "all"
+    else:
+        status_filter = "all_active"
+
+    vendor_filter = parse_int_or_none(qs.get("vendor_id", [""])[0])
+    q_filter = (qs.get("q", [""])[0] or "").strip()
+
+    conn = db_connect()
+    try:
+        data = get_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+    finally:
+        conn.close()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+
+    writer.writerow([f"Mizuho IT Outsourcing - Cash-out Report {data['fy_name']} (01/04/{fy} - 31/03/{fy+1})"])
+    writer.writerow([f"Filter: {status_filter} | Exported At: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"])
+    writer.writerow([])
+
+    if status_filter == "cashout_only":
+        csv_header = [
+            "No.", "Company", "Framework Contract", "Annex",
+            f"Q1 - Apr (04/{fy}) Cash-out", f"Q1 - May (05/{fy}) Cash-out", f"Q1 - Jun (06/{fy}) Cash-out", "Q1 Cash-out Subtotal",
+            f"Q2 - Jul (07/{fy}) Cash-out", f"Q2 - Aug (08/{fy}) Cash-out", f"Q2 - Sep (09/{fy}) Cash-out", "Q2 Cash-out Subtotal",
+            f"Q3 - Oct (10/{fy}) Cash-out", f"Q3 - Nov (11/{fy}) Cash-out", f"Q3 - Dec (12/{fy}) Cash-out", "Q3 Cash-out Subtotal",
+            f"Q4 - Jan (01/{fy+1}) Cash-out", f"Q4 - Feb (02/{fy+1}) Cash-out", f"Q4 - Mar (03/{fy+1}) Cash-out", "Q4 Cash-out Subtotal",
+            f"Total FY Cash-out"
+        ]
+        writer.writerow(csv_header)
+        for idx, r in enumerate(data["rows"], 1):
+            a = r["annex"]
+            row = [idx, a["company_name"] or "", a["framework_no"] or "", a["annex_name"] or ""]
+            for m in data["q1_months"]: row.append(int(round(r["months"][m]["cashout"])))
+            row.append(int(round(r["q_cashout"]["Q1"])))
+            for m in data["q2_months"]: row.append(int(round(r["months"][m]["cashout"])))
+            row.append(int(round(r["q_cashout"]["Q2"])))
+            for m in data["q3_months"]: row.append(int(round(r["months"][m]["cashout"])))
+            row.append(int(round(r["q_cashout"]["Q3"])))
+            for m in data["q4_months"]: row.append(int(round(r["months"][m]["cashout"])))
+            row.append(int(round(r["q_cashout"]["Q4"])))
+            row.append(int(round(r["row_cashout_total"])))
+            writer.writerow(row)
+
+        tot_row = ["TOTAL", "", "", ""]
+        for m in data["q1_months"]: tot_row.append(int(round(data["col_cashout_totals"][m])))
+        tot_row.append(int(round(data["q_col_cashout_totals"]["Q1"])))
+        for m in data["q2_months"]: tot_row.append(int(round(data["col_cashout_totals"][m])))
+        tot_row.append(int(round(data["q_col_cashout_totals"]["Q2"])))
+        for m in data["q3_months"]: tot_row.append(int(round(data["col_cashout_totals"][m])))
+        tot_row.append(int(round(data["q_col_cashout_totals"]["Q3"])))
+        for m in data["q4_months"]: tot_row.append(int(round(data["col_cashout_totals"][m])))
+        tot_row.append(int(round(data["q_col_cashout_totals"]["Q4"])))
+        tot_row.append(int(round(data["grand_cashout_total"])))
+        writer.writerow(tot_row)
+
+    elif status_filter == "payroll_only":
+        csv_header = [
+            "No.", "Company", "Framework Contract", "Annex",
+            f"Q1 - Apr (04/{fy}) Payroll", f"Q1 - May (05/{fy}) Payroll", f"Q1 - Jun (06/{fy}) Payroll", "Q1 Payroll Subtotal",
+            f"Q2 - Jul (07/{fy}) Payroll", f"Q2 - Aug (08/{fy}) Payroll", f"Q2 - Sep (09/{fy}) Payroll", "Q2 Payroll Subtotal",
+            f"Q3 - Oct (10/{fy}) Payroll", f"Q3 - Nov (11/{fy}) Payroll", f"Q3 - Dec (12/{fy}) Payroll", "Q3 Payroll Subtotal",
+            f"Q4 - Jan (01/{fy+1}) Payroll", f"Q4 - Feb (02/{fy+1}) Payroll", f"Q4 - Mar (03/{fy+1}) Payroll", "Q4 Payroll Subtotal",
+            f"Total FY Payroll"
+        ]
+        writer.writerow(csv_header)
+        for idx, r in enumerate(data["rows"], 1):
+            a = r["annex"]
+            row = [idx, a["company_name"] or "", a["framework_no"] or "", a["annex_name"] or ""]
+            for m in data["q1_months"]: row.append(int(round(r["months"][m]["payroll"])))
+            row.append(int(round(r["q_payroll"]["Q1"])))
+            for m in data["q2_months"]: row.append(int(round(r["months"][m]["payroll"])))
+            row.append(int(round(r["q_payroll"]["Q2"])))
+            for m in data["q3_months"]: row.append(int(round(r["months"][m]["payroll"])))
+            row.append(int(round(r["q_payroll"]["Q3"])))
+            for m in data["q4_months"]: row.append(int(round(r["months"][m]["payroll"])))
+            row.append(int(round(r["q_payroll"]["Q4"])))
+            row.append(int(round(r["row_payroll_total"])))
+            writer.writerow(row)
+
+        tot_row = ["TOTAL", "", "", ""]
+        for m in data["q1_months"]: tot_row.append(int(round(data["col_payroll_totals"][m])))
+        tot_row.append(int(round(data["q_col_payroll_totals"]["Q1"])))
+        for m in data["q2_months"]: tot_row.append(int(round(data["col_payroll_totals"][m])))
+        tot_row.append(int(round(data["q_col_payroll_totals"]["Q2"])))
+        for m in data["q3_months"]: tot_row.append(int(round(data["col_payroll_totals"][m])))
+        tot_row.append(int(round(data["q_col_payroll_totals"]["Q3"])))
+        for m in data["q4_months"]: tot_row.append(int(round(data["col_payroll_totals"][m])))
+        tot_row.append(int(round(data["q_col_payroll_totals"]["Q4"])))
+        tot_row.append(int(round(data["grand_payroll_total"])))
+        writer.writerow(tot_row)
+
+    else:
+        # all_active or all
+        csv_header = [
+            "No.", "Company", "Framework Contract", "Annex",
+            f"Q1 - Apr (04/{fy}) Payroll", f"Q1 - Apr (04/{fy}) Cash-out",
+            f"Q1 - May (05/{fy}) Payroll", f"Q1 - May (05/{fy}) Cash-out",
+            f"Q1 - Jun (06/{fy}) Payroll", f"Q1 - Jun (06/{fy}) Cash-out",
+            "Q1 Payroll Subtotal", "Q1 Cash-out Subtotal",
+            f"Q2 - Jul (07/{fy}) Payroll", f"Q2 - Jul (07/{fy}) Cash-out",
+            f"Q2 - Aug (08/{fy}) Payroll", f"Q2 - Aug (08/{fy}) Cash-out",
+            f"Q2 - Sep (09/{fy}) Payroll", f"Q2 - Sep (09/{fy}) Cash-out",
+            "Q2 Payroll Subtotal", "Q2 Cash-out Subtotal",
+            f"Q3 - Oct (10/{fy}) Payroll", f"Q3 - Oct (10/{fy}) Cash-out",
+            f"Q3 - Nov (11/{fy}) Payroll", f"Q3 - Nov (11/{fy}) Cash-out",
+            f"Q3 - Dec (12/{fy}) Payroll", f"Q3 - Dec (12/{fy}) Cash-out",
+            "Q3 Payroll Subtotal", "Q3 Cash-out Subtotal",
+            f"Q4 - Jan (01/{fy+1}) Payroll", f"Q4 - Jan (01/{fy+1}) Cash-out",
+            f"Q4 - Feb (02/{fy+1}) Payroll", f"Q4 - Feb (02/{fy+1}) Cash-out",
+            f"Q4 - Mar (03/{fy+1}) Payroll", f"Q4 - Mar (03/{fy+1}) Cash-out",
+            "Q4 Payroll Subtotal", "Q4 Cash-out Subtotal",
+            f"Total FY Payroll", f"Total FY Cash-out"
+        ]
+        writer.writerow(csv_header)
+
+        for idx, r in enumerate(data["rows"], 1):
+            a = r["annex"]
+            row = [idx, a["company_name"] or "", a["framework_no"] or "", a["annex_name"] or ""]
+            for m in data["q1_months"]:
+                row.append(int(round(r["months"][m]["payroll"])))
+                row.append(int(round(r["months"][m]["cashout"])))
+            row.append(int(round(r["q_payroll"]["Q1"])))
+            row.append(int(round(r["q_cashout"]["Q1"])))
+            for m in data["q2_months"]:
+                row.append(int(round(r["months"][m]["payroll"])))
+                row.append(int(round(r["months"][m]["cashout"])))
+            row.append(int(round(r["q_payroll"]["Q2"])))
+            row.append(int(round(r["q_cashout"]["Q2"])))
+            for m in data["q3_months"]:
+                row.append(int(round(r["months"][m]["payroll"])))
+                row.append(int(round(r["months"][m]["cashout"])))
+            row.append(int(round(r["q_payroll"]["Q3"])))
+            row.append(int(round(r["q_cashout"]["Q3"])))
+            for m in data["q4_months"]:
+                row.append(int(round(r["months"][m]["payroll"])))
+                row.append(int(round(r["months"][m]["cashout"])))
+            row.append(int(round(r["q_payroll"]["Q4"])))
+            row.append(int(round(r["q_cashout"]["Q4"])))
+            row.append(int(round(r["row_payroll_total"])))
+            row.append(int(round(r["row_cashout_total"])))
+            writer.writerow(row)
+
+        tot_row = ["TOTAL", "", "", ""]
+        for m in data["q1_months"]:
+            tot_row.append(int(round(data["col_payroll_totals"][m])))
+            tot_row.append(int(round(data["col_cashout_totals"][m])))
+        tot_row.append(int(round(data["q_col_payroll_totals"]["Q1"])))
+        tot_row.append(int(round(data["q_col_cashout_totals"]["Q1"])))
+        for m in data["q2_months"]:
+            tot_row.append(int(round(data["col_payroll_totals"][m])))
+            tot_row.append(int(round(data["col_cashout_totals"][m])))
+        tot_row.append(int(round(data["q_col_payroll_totals"]["Q2"])))
+        tot_row.append(int(round(data["q_col_cashout_totals"]["Q2"])))
+        for m in data["q3_months"]:
+            tot_row.append(int(round(data["col_payroll_totals"][m])))
+            tot_row.append(int(round(data["col_cashout_totals"][m])))
+        tot_row.append(int(round(data["q_col_payroll_totals"]["Q3"])))
+        tot_row.append(int(round(data["q_col_cashout_totals"]["Q3"])))
+        for m in data["q4_months"]:
+            tot_row.append(int(round(data["col_payroll_totals"][m])))
+            tot_row.append(int(round(data["col_cashout_totals"][m])))
+        tot_row.append(int(round(data["q_col_payroll_totals"]["Q4"])))
+        tot_row.append(int(round(data["q_col_cashout_totals"]["Q4"])))
+        tot_row.append(int(round(data["grand_payroll_total"])))
+        tot_row.append(int(round(data["grand_cashout_total"])))
+        writer.writerow(tot_row)
+
+    csv_bytes = output.getvalue().encode("utf-8-sig")
+    fn = f"cashout_{data['fy_name']}.csv"
+    handler.send_response(200)
+    handler.send_header("Content-Type", "text/csv; charset=utf-8")
+    handler.send_header("Content-Length", str(len(csv_bytes)))
+    handler.send_header("Content-Disposition", f'attachment; filename="{fn}"')
+    handler.end_headers()
+    handler.wfile.write(csv_bytes)
+
+
+page_attendance_cashout = page_attendance_payout
+handle_attendance_cashout_export_get = handle_attendance_payout_export_get
 
 
 def handle_attendance_monthly_save_post(handler):
