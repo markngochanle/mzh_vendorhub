@@ -2,6 +2,7 @@
 import calendar
 import csv
 import io
+import json
 import sqlite3
 import unicodedata
 import urllib.parse
@@ -2718,6 +2719,8 @@ def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None
         SELECT 
             a.id as annex_id,
             a.annex_name,
+            a.start_date,
+            a.end_date,
             c.id as contract_id,
             c.framework_no,
             v.id as vendor_id,
@@ -2771,7 +2774,12 @@ def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None
         FROM monthly_attendance_summary s
         JOIN contract_staff cs ON cs.id = s.staff_id
         JOIN contract_staff_links l ON l.staff_id = cs.id
+        JOIN contract_annexes a ON a.id = l.annex_id
         WHERE s.month IN ({ph})
+          AND (l.joining_date IS NULL OR l.joining_date = '' OR substr(l.joining_date, 1, 7) <= s.month)
+          AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '' OR substr(l.tentative_leaving_date, 1, 7) >= s.month)
+          AND (a.start_date IS NULL OR a.start_date = '' OR substr(a.start_date, 1, 7) <= s.month)
+          AND (a.end_date IS NULL OR a.end_date = '' OR substr(a.end_date, 1, 7) >= s.month)
         GROUP BY l.annex_id, s.month
     """, needed_service_months).fetchall()
     wages_map = {(r["annex_id"], r["month"]): float(r["total_wages"] or 0.0) for r in w_rows}
@@ -2794,7 +2802,11 @@ def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None
         if c_no and m_str in needed_service_months:
             inv_map[(c_no, s_mst, m_str)] = float(inv["tg_tttbso"] or 0.0)
 
-    def get_service_amount(aid, aname, taxid, sm):
+    def get_service_amount(aid, aname, taxid, a_start, a_end, sm):
+        if a_start and sm < a_start[:7]:
+            return 0.0
+        if a_end and sm > a_end[:7]:
+            return 0.0
         amt = wages_map.get((aid, sm), 0.0)
         if amt == 0.0:
             a_code = _norm_code(aname)
@@ -2805,11 +2817,29 @@ def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None
                 amt = inv_map[(a_code, "", sm)]
         return amt
 
+    def _format_dmy(date_str):
+        if not date_str:
+            return ""
+        parts = date_str.strip().split("-")
+        if len(parts) == 3:
+            return f"{parts[2]}/{parts[1]}/{parts[0]}"
+        return date_str
+
+    def _format_my(month_str):
+        if not month_str:
+            return ""
+        parts = month_str.strip().split("-")
+        if len(parts) == 2:
+            return f"{parts[1]}/{parts[0]}"
+        return month_str
+
     filtered_rows = []
     for a in annex_rows:
         aid = a["annex_id"]
         a_name = a["annex_name"]
         a_tax = a["tax_id"]
+        a_start = a["start_date"]
+        a_end = a["end_date"]
 
         months_data = {}
         row_payroll_total = 0.0
@@ -2819,16 +2849,28 @@ def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None
 
         for m in fy_months:
             # Concept 1: Payroll - locked payroll amount for service month m
-            p_amt = get_service_amount(aid, a_name, a_tax, m)
+            p_amt = get_service_amount(aid, a_name, a_tax, a_start, a_end, m)
 
             # Concept 2: Cash-out - actual payment disbursed to vendor in month m (based on cashout_date)
             co_items = cashout_by_month.get((aid, m), [])
             co_amt = 0.0
             c_dates = []
+            cashout_breakdown = []
             for item in co_items:
-                c_amt = get_service_amount(aid, a_name, a_tax, item["service_month"])
+                c_amt = get_service_amount(aid, a_name, a_tax, a_start, a_end, item["service_month"])
                 co_amt += c_amt
                 c_dates.append(item["cashout_date"])
+                w_amt = wages_map.get((aid, item["service_month"]), 0.0)
+                basis_str = "Timesheet lock" if w_amt > 0 else "Invoiced / Contract"
+                cashout_breakdown.append({
+                    "service_month": item["service_month"],
+                    "service_month_formatted": _format_my(item["service_month"]),
+                    "cashout_date": item["cashout_date"],
+                    "cashout_date_formatted": _format_dmy(item["cashout_date"]),
+                    "amount": c_amt,
+                    "amount_formatted": f"{int(round(c_amt)):,} VND",
+                    "basis": basis_str
+                })
 
             c_date_str = ", ".join(sorted(list(set(c_dates)))) if c_dates else ""
 
@@ -2844,6 +2886,7 @@ def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None
                 "cashout": co_amt,
                 "cashout_dates": c_dates,
                 "cashout_date_str": c_date_str,
+                "cashout_breakdown": cashout_breakdown,
                 "amount": co_amt if co_amt > 0 else p_amt,
                 "cashout_date": c_dates[0] if c_dates else None
             }
@@ -2987,8 +3030,10 @@ def page_attendance_payout(filters: dict) -> str:
     # Export URL
     export_url = f"/attendance/cashout/export?fy={fy}&status={status_filter}&vendor_id={vendor_filter or ''}&q={urllib.parse.quote(q_filter)}"
 
-    col_min_w = "140px" if status_filter in ("all_active", "all") else "115px"
-    tbl_min_w = "1960px" if status_filter in ("all_active", "all") else "1600px"
+    col_min_w = "145px" if status_filter in ("all_active", "all") else "120px"
+    tbl_min_w = "2020px" if status_filter in ("all_active", "all") else "1650px"
+
+    month_info = data.get("month_info", {})
 
     # Table rows
     table_rows_html = []
@@ -3004,6 +3049,7 @@ def page_attendance_payout(filters: dict) -> str:
             p_amt = cell_data["payroll"]
             co_amt = cell_data["cashout"]
             c_date_str = cell_data["cashout_date_str"]
+            cashout_breakdown = cell_data.get("cashout_breakdown", [])
 
             border_style = ""
             if m in (data["q1_months"][0], data["q2_months"][0], data["q3_months"][0], data["q4_months"][0]):
@@ -3017,7 +3063,40 @@ def page_attendance_payout(filters: dict) -> str:
             p_color = "#1e293b" if p_amt > 0 else "#94a3b8"
             co_color = "#15803d" if co_amt > 0 else "#94a3b8"
 
-            co_tooltip = f"Actual Cash-out Disbursed on {escape(c_date_str)}" if (co_amt > 0 and c_date_str) else "Actual Cash-out Disbursed"
+            m_meta = month_info.get(m, {})
+            m_label = f"{m_meta.get('name', '')} ({m_meta.get('sub', m)})"
+
+            # Construct informative fallback title and structured breakdown for interactive popover
+            if co_amt > 0 and cashout_breakdown:
+                if len(cashout_breakdown) == 1:
+                    b = cashout_breakdown[0]
+                    co_title = (
+                        f"Cash-out: {b['amount_formatted']}&#10;"
+                        f"• Paying for Service Month: {b['service_month_formatted']}&#10;"
+                        f"• Payment Date: {b['cashout_date_formatted']}&#10;"
+                        f"• Basis: {b['basis']}"
+                    )
+                else:
+                    lines = [f"Cash-out Total: {int(round(co_amt)):,} VND ({len(cashout_breakdown)} disbursements):"]
+                    for idx_b, b in enumerate(cashout_breakdown, 1):
+                        lines.append(f"{idx_b}. For Month {b['service_month_formatted']}: {b['amount_formatted']} (Paid {b['cashout_date_formatted']} - {b['basis']})")
+                    co_title = "&#10;".join(lines)
+                bd_json = escape(json.dumps(cashout_breakdown), quote=True)
+                hover_attrs = f'data-bd="{bd_json}" data-m="{escape(m_label)}" onmouseenter="showCoTip(this, event)" onmouseleave="hideCoTip()"'
+                co_cursor = "cursor:pointer;"
+                co_border_style = "border-bottom:1px dotted #16a34a;"
+            elif co_amt > 0 and c_date_str:
+                co_title = f"Actual Cash-out Disbursed on {escape(c_date_str)}"
+                hover_attrs = ""
+                co_cursor = ""
+                co_border_style = ""
+            else:
+                co_title = "No Cash-out in this month"
+                hover_attrs = ""
+                co_cursor = ""
+                co_border_style = ""
+
+            p_title = f"Locked Monthly Payroll for {escape(m_label)}: {p_str} VND" if p_amt > 0 else f"No locked payroll in {escape(m_label)}"
 
             if status_filter == "cashout_only":
                 # Hide Payroll completely
@@ -3025,10 +3104,10 @@ def page_attendance_payout(filters: dict) -> str:
                     cell_content = '<div style="text-align:right; color:#cbd5e1; font-weight:normal; white-space:nowrap;">-</div>'
                 else:
                     cell_content = f"""
-                    <div style="font-size:12px; line-height:1.4; white-space:nowrap;" title="{co_tooltip}">
-                      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;">
+                    <div style="font-size:12px; line-height:1.4; white-space:nowrap;">
+                      <div class="co-item" {hover_attrs} style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap; {co_cursor}">
                         <span style="font-size:10px; color:#166534; font-weight:600;">Cash-out:</span>
-                        <span style="font-family:monospace; font-weight:700; color:#15803d;">{co_str}</span>
+                        <span style="font-family:monospace; font-weight:700; color:#15803d; {co_border_style}">{co_str}</span>
                       </div>
                     </div>
                     """
@@ -3038,7 +3117,7 @@ def page_attendance_payout(filters: dict) -> str:
                     cell_content = '<div style="text-align:right; color:#cbd5e1; font-weight:normal; white-space:nowrap;">-</div>'
                 else:
                     cell_content = f"""
-                    <div style="font-size:12px; line-height:1.4; white-space:nowrap;" title="Monthly Payroll Locked">
+                    <div style="font-size:12px; line-height:1.4; white-space:nowrap;" title="{p_title}">
                       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;">
                         <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
                         <span style="font-family:monospace; font-weight:600; color:#1e293b;">{p_str}</span>
@@ -3052,13 +3131,13 @@ def page_attendance_payout(filters: dict) -> str:
                 else:
                     cell_content = f"""
                     <div style="font-size:11.5px; line-height:1.4; white-space:nowrap;">
-                      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;" title="Monthly Payroll Locked">
+                      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;" title="{p_title}">
                         <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
                         <span style="font-family:monospace; font-weight:600; color:{p_color};">{p_str}</span>
                       </div>
-                      <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap; margin-top:3px;" title="{co_tooltip}">
+                      <div class="co-item" {hover_attrs} style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap; margin-top:3px; {co_cursor}">
                         <span style="font-size:10px; color:#166534; font-weight:600;">Cash-out:</span>
-                        <span style="font-family:monospace; font-weight:700; color:{co_color};">{co_str}</span>
+                        <span style="font-family:monospace; font-weight:700; color:{co_color}; {co_border_style}">{co_str}</span>
                       </div>
                     </div>
                     """
@@ -3172,9 +3251,10 @@ def page_attendance_payout(filters: dict) -> str:
     if status_filter == "cashout_only":
         summary_banner = f"""Total FY Cash-out: <span style="font-weight:bold; font-family:monospace; color:#15803d; font-size:15px;">{grand_co_str}</span>"""
         legend_html = f"""
-        <div style="display:flex; align-items:center; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
+        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
           <span style="font-size:9.5px; color:#166534; background:#dcfce7; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #bbf7d0;">Cash-out</span>
           <span>Actual vendor disbursements (Payroll hidden)</span>
+          <span style="color:#64748b; margin-left:6px;">💡 <i>Hover Cash-out amounts to view service month & payment breakdown</i></span>
         </div>
         """
         grand_total_content = f"""
@@ -3186,7 +3266,7 @@ def page_attendance_payout(filters: dict) -> str:
     elif status_filter == "payroll_only":
         summary_banner = f"""Total FY Payroll: <span style="font-weight:bold; font-family:monospace; color:#0f172a; font-size:15px;">{grand_p_str}</span>"""
         legend_html = f"""
-        <div style="display:flex; align-items:center; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
+        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
           <span style="font-size:9.5px; color:#64748b; background:#f1f5f9; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #cbd5e1;">Payroll</span>
           <span>Locked monthly payroll accruals (Cash-out hidden)</span>
         </div>
@@ -3202,7 +3282,7 @@ def page_attendance_payout(filters: dict) -> str:
         &nbsp;&bull;&nbsp;
         Total FY Cash-out: <span style="font-weight:bold; font-family:monospace; color:#15803d; font-size:15px;">{grand_co_str}</span>"""
         legend_html = f"""
-        <div style="display:flex; align-items:center; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
+        <div style="display:flex; align-items:center; flex-wrap:wrap; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
           <span style="display:inline-flex; align-items:center; gap:4px;">
             <span style="font-size:9.5px; color:#64748b; background:#f1f5f9; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #cbd5e1;">Payroll</span>
             <span>Locked accrual (Line 1)</span>
@@ -3211,6 +3291,7 @@ def page_attendance_payout(filters: dict) -> str:
             <span style="font-size:9.5px; color:#166534; background:#dcfce7; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #bbf7d0;">Cash-out</span>
             <span>Vendor payment (Line 2)</span>
           </span>
+          <span style="color:#64748b; margin-left:6px;">💡 <i>Hover Cash-out amounts to view service month & payment breakdown</i></span>
         </div>
         """
         grand_total_content = f"""
@@ -3446,6 +3527,94 @@ def page_attendance_payout(filters: dict) -> str:
         }}
       }}
     }});
+
+    // --- Interactive Floating Cash-out Breakdown Tooltip ---
+    let coTipEl = null;
+
+    function getCoTipEl() {{
+      if (!coTipEl) {{
+        coTipEl = document.createElement('div');
+        coTipEl.id = 'coFloatingTooltip';
+        coTipEl.style.cssText = 'position:fixed; z-index:999999; pointer-events:none; background:#0f172a; color:#f8fafc; border-radius:8px; padding:10px 14px; font-size:12px; box-shadow:0 12px 28px rgba(0,0,0,0.3); border:1px solid #334155; min-width:260px; max-width:340px; line-height:1.45; transition:opacity 0.12s ease; opacity:0; display:none;';
+        document.body.appendChild(coTipEl);
+      }}
+      return coTipEl;
+    }}
+
+    function showCoTip(target, e) {{
+      const raw = target.getAttribute('data-bd');
+      if (!raw) return;
+      try {{
+        const items = JSON.parse(raw);
+        if (!items || items.length === 0) return;
+        const mLabel = target.getAttribute('data-m') || '';
+        const tip = getCoTipEl();
+        
+        let html = `<div style="font-weight:700; color:#4ade80; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid #334155; padding-bottom:5px;">
+          <span style="display:flex; align-items:center; gap:5px;">💳 <b>Cash-out Details</b></span>
+          <span style="font-size:11px; color:#94a3b8; font-weight:normal;">Paid in ${{mLabel}}</span>
+        </div>`;
+        
+        items.forEach((it) => {{
+          html += `<div style="background:#1e293b; border-radius:6px; padding:7px 10px; margin-bottom:6px; border-left:3px solid #22c55e;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
+              <span style="color:#94a3b8; font-size:11px;">Paying for Month:</span>
+              <b style="color:#38bdf8; font-family:monospace;">${{it.service_month_formatted || it.service_month}}</b>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
+              <span style="color:#94a3b8; font-size:11px;">Payment Date:</span>
+              <span style="color:#f1f5f9; font-family:monospace;">${{it.cashout_date_formatted || it.cashout_date}}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
+              <span style="color:#94a3b8; font-size:11px;">Basis:</span>
+              <span style="color:#cbd5e1;">${{it.basis}}</span>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:4px; border-top:1px dashed #334155; padding-top:3px;">
+              <span style="color:#94a3b8; font-size:11px;">Amount:</span>
+              <b style="color:#4ade80; font-family:monospace;">${{it.amount_formatted}}</b>
+            </div>
+          </div>`;
+        }});
+        
+        if (items.length > 1) {{
+          const totalAmt = items.reduce((sum, x) => sum + (x.amount || 0), 0);
+          html += `<div style="display:flex; justify-content:space-between; font-weight:700; color:#f8fafc; padding-top:2px; font-size:12px;">
+            <span>Total Disbursed:</span>
+            <span style="color:#4ade80; font-family:monospace;">${{Math.round(totalAmt).toLocaleString()}} VND</span>
+          </div>`;
+        }}
+        
+        tip.innerHTML = html;
+        tip.style.display = 'block';
+        
+        const rect = target.getBoundingClientRect();
+        const tipWidth = tip.offsetWidth || 280;
+        const tipHeight = tip.offsetHeight || 160;
+        
+        let left = rect.left + (rect.width / 2) - (tipWidth / 2);
+        if (left < 10) left = 10;
+        if (left + tipWidth > window.innerWidth - 10) left = window.innerWidth - tipWidth - 10;
+        
+        let top = rect.bottom + 8;
+        if (top + tipHeight > window.innerHeight - 10) {{
+          top = rect.top - tipHeight - 8;
+          if (top < 10) top = rect.bottom + 8;
+        }}
+        
+        tip.style.left = left + 'px';
+        tip.style.top = top + 'px';
+        tip.style.opacity = '1';
+      }} catch(err) {{
+        console.error(err);
+      }}
+    }}
+
+    function hideCoTip() {{
+      if (coTipEl) {{
+        coTipEl.style.opacity = '0';
+        coTipEl.style.display = 'none';
+      }}
+    }}
     </script>
     """
 

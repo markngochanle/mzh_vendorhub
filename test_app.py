@@ -2346,6 +2346,19 @@ class TestProjects(BaseTestCase):
         self.assertEqual(r0["months"]["2026-06"]["cashout"], 50000000.0)
         self.assertEqual(r0["months"]["2026-06"]["cashout_date_str"], "2026-06-15")
         self.assertEqual(r0["months"]["2026-06"]["payroll"], 0.0)
+        # Check cashout breakdown details for tooltip
+        self.assertIn("cashout_breakdown", r0["months"]["2026-06"])
+        bd0 = r0["months"]["2026-06"]["cashout_breakdown"][0]
+        self.assertEqual(bd0["service_month"], "2026-05")
+        self.assertEqual(bd0["service_month_formatted"], "05/2026")
+        self.assertEqual(bd0["cashout_date"], "2026-06-15")
+        self.assertEqual(bd0["cashout_date_formatted"], "15/06/2026")
+        self.assertEqual(bd0["amount"], 50000000.0)
+        self.assertEqual(bd0["basis"], "Timesheet lock")
+        self.assertIn("showCoTip", payout_html)
+        self.assertIn("data-bd=", payout_html)
+        self.assertIn("&quot;service_month_formatted&quot;: &quot;05/2026&quot;", payout_html)
+        self.assertIn("Paying for Month:", payout_html)
 
         # 4. Test blank cashout date logic
         # Annex 2 with payroll locked in 2026-07 but NO cashout date set (blank)
@@ -2400,6 +2413,74 @@ class TestProjects(BaseTestCase):
         self.assertIn("Q1 - May (05/2026) Payroll", csv_po)
         self.assertNotIn(") Cash-out", csv_po)
 
+    def test_attendance_payout_annex_effective_dates_isolation(self):
+        """Verify that an annex only receives payroll for months within its validity and staff assignment dates."""
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO vendors (company_name, purchasing, tax_id) VALUES ('Annex Date Vendor', 0, '0108888888')")
+        v_id = cur.lastrowid
+        cur.execute("INSERT INTO contracts (buyer_vendor_id, seller_vendor_id, framework_no) VALUES (?, ?, 'CONT-DATE-01')", (self.buyer_id, v_id))
+        c_id = cur.lastrowid
+
+        # Annex A: April to September 2026
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date) 
+            VALUES (?, 'Annex Early Period', '2026-04-01', '2026-09-30')
+        """, (c_id,))
+        a1_id = cur.lastrowid
+
+        # Annex B: October to November 2026
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date) 
+            VALUES (?, 'Annex Late Period', '2026-10-01', '2026-11-30')
+        """, (c_id,))
+        a2_id = cur.lastrowid
+
+        cur.execute("INSERT INTO contract_staff (full_name_vi, vendor_id) VALUES ('Reassigned Staff', ?)", (v_id,))
+        s_id = cur.lastrowid
+
+        # Staff link 1: assigned to Annex A during April-September
+        cur.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, joining_date, tentative_leaving_date)
+            VALUES (?, ?, ?, 60000000, '2026-04-01', '2026-09-30')
+        """, (s_id, c_id, a1_id))
+
+        # Staff link 2: extended/reassigned to Annex B during October-November
+        cur.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, joining_date, tentative_leaving_date)
+            VALUES (?, ?, ?, 70000000, '2026-10-01', '2026-11-30')
+        """, (s_id, c_id, a2_id))
+
+        # Attendance record for May 2026 (60M)
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, daily_rate, total_amount, locked)
+            VALUES (?, '2026-05', 22, 22, 2727272, 60000000, 1)
+        """, (s_id,))
+
+        # Attendance record for October 2026 (70M)
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, daily_rate, total_amount, locked)
+            VALUES (?, '2026-10', 22, 22, 3181818, 70000000, 1)
+        """, (s_id,))
+        self.conn.commit()
+
+        data = attendance.get_payout_data(self.conn, 2026, "all_active", None, "CONT-DATE-01")
+        annex_map = {r["annex"]["annex_id"]: r for r in data["rows"]}
+
+        self.assertIn(a1_id, annex_map)
+        self.assertIn(a2_id, annex_map)
+
+        row_a1 = annex_map[a1_id]
+        row_a2 = annex_map[a2_id]
+
+        # Annex A: has 60M in May, but 0 in October (outside its date range)
+        self.assertEqual(row_a1["months"]["2026-05"]["payroll"], 60000000.0)
+        self.assertEqual(row_a1["months"]["2026-10"]["payroll"], 0.0)
+
+        # Annex B: has 0 in May (starts in October), and 70M in October
+        self.assertEqual(row_a2["months"]["2026-05"]["payroll"], 0.0)
+        self.assertEqual(row_a2["months"]["2026-10"]["payroll"], 70000000.0)
+
 
 if __name__ == "__main__":
     unittest.main()
+
