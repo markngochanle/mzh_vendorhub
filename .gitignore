@@ -8,3 +8,7 @@ vendor_management.db
 app.log
 .DS_Store
 playwright/screenshots/
+build/
+dist/
+.venv/
+*.spec.bak

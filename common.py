@@ -7,11 +7,83 @@ from html import escape
 from datetime import datetime
 from pathlib import Path
 
+import sqlite3
+import urllib.parse
+from html import escape
+from datetime import datetime
+from pathlib import Path
 import os
-DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().with_name("db.sqlite3")))
+import sys
+import configparser
 
-HOST = "127.0.0.1"
-PORT = int(os.environ.get("PORT", "8800"))
+def get_base_dir() -> Path:
+    """
+    Get the application base directory.
+    When running as a PyInstaller bundle (--onefile), sys.frozen is True
+    and sys.executable points to the .exe file. In that case, the base dir
+    is the directory containing the .exe file (so config and db reside next to it).
+    When running from source code, it is the directory of this file.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parent
+
+BASE_DIR = get_base_dir()
+CONFIG_FILE = BASE_DIR / "config.ini"
+
+def load_config() -> configparser.ConfigParser:
+    config = configparser.ConfigParser()
+    if CONFIG_FILE.exists():
+        try:
+            config.read(str(CONFIG_FILE), encoding="utf-8")
+        except Exception:
+            pass
+    else:
+        # Create default config.ini if missing
+        config["database"] = {
+            "db_path": "db.sqlite3"
+        }
+        config["server"] = {
+            "host": "127.0.0.1",
+            "port": "8800"
+        }
+        try:
+            with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+                f.write("# ==========================================\n")
+                f.write("# File cấu hình ứng dụng Quản lý Vendor / Hợp đồng\n")
+                f.write("# ==========================================\n\n")
+                f.write("[database]\n")
+                f.write("# Đường dẫn tới file CSDL SQLite. Có thể đặt tên file (cùng thư mục với file exe)\n")
+                f.write("# hoặc đường dẫn tương đối, hoặc đường dẫn tuyệt đối (vd: C:\\data\\db.sqlite3)\n")
+                f.write("db_path = db.sqlite3\n\n")
+                f.write("[server]\n")
+                f.write("# Địa chỉ IP và cổng chạy ứng dụng\n")
+                f.write("host = 127.0.0.1\n")
+                f.write("port = 8800\n")
+        except Exception:
+            pass
+    return config
+
+_app_config = load_config()
+
+def is_absolute_path(p: str) -> bool:
+    if os.path.isabs(p):
+        return True
+    if len(p) >= 3 and p[0].isalpha() and p[1] == ":" and p[2] in ("\\", "/"):
+        return True
+    if p.startswith("\\\\"):
+        return True
+    return False
+
+# Cấu hình DB_PATH: ưu tiên biến môi trường DB_PATH, kế tiếp là config.ini, mặc định db.sqlite3
+_raw_db_path = os.environ.get("DB_PATH") or _app_config.get("database", "db_path", fallback="db.sqlite3").strip()
+if is_absolute_path(_raw_db_path):
+    DB_PATH = _raw_db_path
+else:
+    DB_PATH = str(BASE_DIR / _raw_db_path)
+
+HOST = os.environ.get("HOST") or _app_config.get("server", "host", fallback="127.0.0.1").strip()
+PORT = int(os.environ.get("PORT") or _app_config.get("server", "port", fallback="8800").strip())
 LIST_LIMIT = 2000
 
 

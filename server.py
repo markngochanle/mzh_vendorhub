@@ -16,20 +16,19 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 from html import escape
 
+from common import (
+    init_db, layout, send_html, HOST, PORT, DB_PATH, db_connect, BASE_DIR
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(str(Path(__file__).resolve().with_name("app.log")), encoding="utf-8")
+        logging.FileHandler(str(BASE_DIR / "app.log"), encoding="utf-8")
     ]
 )
 logger = logging.getLogger("server")
-
-
-from common import (
-    init_db, layout, send_html, HOST, PORT, DB_PATH, db_connect
-)
 
 from invoices import (
     page_invoices_list,
