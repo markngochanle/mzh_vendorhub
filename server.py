@@ -123,6 +123,12 @@ from projects import (
     handle_projects_assign_export_csv,
 )
 
+from payments import (
+    page_payments_fixed_price,
+    page_payments_recurring,
+    handle_recurring_cashout_post,
+)
+
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
@@ -175,7 +181,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/invoice":
                 invoice_id_raw = qs.get("id", [""])[0]
                 if not invoice_id_raw.isdigit():
-                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai invoice id</div>"), status=400)
+                    send_html(self, layout("Error", "<div class='card danger'>Missing or invalid invoice ID</div>"), status=400)
                     return
                 send_html(self, page_invoice_detail(int(invoice_id_raw)))
                 return
@@ -183,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/edit-invoice":
                 invoice_id_raw = qs.get("id", [""])[0]
                 if not invoice_id_raw.isdigit():
-                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai invoice id</div>"), status=400)
+                    send_html(self, layout("Error", "<div class='card danger'>Missing or invalid invoice ID</div>"), status=400)
                     return
                 send_html(self, page_edit_invoice(int(invoice_id_raw)))
                 return
@@ -191,7 +197,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/raw":
                 invoice_id_raw = qs.get("id", [""])[0]
                 if not invoice_id_raw.isdigit():
-                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai invoice id</div>"), status=400)
+                    send_html(self, layout("Error", "<div class='card danger'>Missing or invalid invoice ID</div>"), status=400)
                     return
                 send_html(self, page_raw_xml(int(invoice_id_raw)))
                 return
@@ -236,7 +242,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/vendor/edit":
                 vendor_id_raw = qs.get("id", [""])[0]
                 if not vendor_id_raw.isdigit():
-                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai vendor id</div>"), status=400)
+                    send_html(self, layout("Error", "<div class='card danger'>Missing or invalid vendor ID</div>"), status=400)
                     return
                 vendor_id = int(vendor_id_raw)
 
@@ -249,7 +255,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not vendor:
                     send_html(
                         self,
-                        layout("Không tìm thấy", f"<div class='card'>Không tìm thấy vendor id={vendor_id}. <a href='/vendors'>Quay lại</a></div>"),
+                        layout("Not Found", f"<div class='card'>Vendor ID={vendor_id} not found. <a href='/vendors'>Back</a></div>"),
                         status=404,
                     )
                     return
@@ -279,7 +285,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/contract/edit":
                 cid = qs.get("id", [""])[0]
                 if not cid.isdigit():
-                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai contract id</div>"), status=400)
+                    send_html(self, layout("Error", "<div class='card danger'>Missing or invalid contract ID</div>"), status=400)
                     return
 
                 conn = db_connect()
@@ -295,7 +301,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not c:
                     send_html(
                         self,
-                        layout("Không tìm thấy", f"<div class='card'>Không tìm thấy contract id={cid}. <a href='/contracts'>Quay lại</a></div>"),
+                        layout("Not Found", f"<div class='card'>Contract ID={cid} not found. <a href='/contracts'>Back</a></div>"),
                         status=404,
                     )
                     return
@@ -307,7 +313,7 @@ class Handler(BaseHTTPRequestHandler):
                 cid = qs.get("contract_id", [""])[0]
                 aid = qs.get("annex_id", [""])[0]
                 if not cid.isdigit():
-                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai contract id</div>"), status=400)
+                    send_html(self, layout("Error", "<div class='card danger'>Missing or invalid contract ID</div>"), status=400)
                     return
                 annex_id = int(aid) if aid.isdigit() else None
                 send_html(self, page_contract_assign_staff(contract_id=int(cid), annex_id=annex_id))
@@ -316,7 +322,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/contract/edit-staff-link":
                 lid = qs.get("id", [""])[0]
                 if not lid.isdigit():
-                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai link id</div>"), status=400)
+                    send_html(self, layout("Error", "<div class='card danger'>Missing or invalid link ID</div>"), status=400)
                     return
                 # Find contract_id and annex_id for this link
                 conn = db_connect()
@@ -325,7 +331,7 @@ class Handler(BaseHTTPRequestHandler):
                 finally:
                     conn.close()
                 if not link:
-                    send_html(self, layout("Không tìm thấy", "<div class='card'>Không tìm thấy allocation</div>"), status=404)
+                    send_html(self, layout("Not Found", "<div class='card'>Staff allocation not found</div>"), status=404)
                     return
                 send_html(self, page_contract_assign_staff(contract_id=link["contract_id"], annex_id=link["annex_id"], link_id=int(lid)))
                 return
@@ -333,7 +339,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/annex/new":
                 cid = qs.get("contract_id", [""])[0]
                 if not cid.isdigit():
-                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai contract_id</div>"), status=400)
+                    send_html(self, layout("Error", "<div class='card danger'>Missing or invalid contract ID</div>"), status=400)
                     return
                 send_html(self, page_annex_form("new", None, int(cid), None))
                 return
@@ -341,7 +347,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/annex/edit":
                 aid = qs.get("id", [""])[0]
                 if not aid.isdigit():
-                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai annex id</div>"), status=400)
+                    send_html(self, layout("Error", "<div class='card danger'>Missing or invalid annex ID</div>"), status=400)
                     return
 
                 conn = db_connect()
@@ -353,7 +359,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not a:
                     send_html(
                         self,
-                        layout("Không tìm thấy", f"<div class='card'>Không tìm thấy annex id={aid}. <a href='/contracts'>Quay lại</a></div>"),
+                        layout("Not Found", f"<div class='card'>Annex ID={aid} not found. <a href='/contracts'>Back</a></div>"),
                         status=404,
                     )
                     return
@@ -459,6 +465,21 @@ class Handler(BaseHTTPRequestHandler):
                 handle_attendance_payout_export_get(self)
                 return
 
+            # ---------------- Payments (Fixed Price & Recurring) ----------------
+            if path == "/payments/fixed-price":
+                q = qs.get("q", [""])[0]
+                vendor_id = qs.get("vendor_id", [""])[0]
+                milestone_type = qs.get("milestone_type", [""])[0]
+                status = qs.get("status", [""])[0]
+                send_html(self, page_payments_fixed_price(q=q, vendor_id=vendor_id, milestone_type=milestone_type, status=status, return_to=self.path))
+                return
+
+            if path == "/payments/recurring":
+                month = qs.get("month", [""])[0]
+                q = qs.get("q", [""])[0]
+                send_html(self, page_payments_recurring(month=month, q=q, return_to=self.path))
+                return
+
             # ---------------- Projects ----------------
             if path == "/projects":
                 err = qs.get("error", [None])[0]
@@ -499,7 +520,7 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/staff/edit":
                 sid = qs.get("id", [""])[0]
                 if not sid.isdigit():
-                    send_html(self, layout("Lỗi", "<div class='card danger'>Thiếu hoặc sai staff id</div>"), status=400)
+                    send_html(self, layout("Error", "<div class='card danger'>Missing or invalid staff ID</div>"), status=400)
                     return
 
                 conn = db_connect()
@@ -511,7 +532,7 @@ class Handler(BaseHTTPRequestHandler):
                 if not staff_row:
                     send_html(
                         self,
-                        layout("Không tìm thấy", f"<div class='card'>Không tìm thấy staff id={sid}. <a href='/staff'>Quay lại</a></div>"),
+                        layout("Not Found", f"<div class='card'>Staff ID={sid} not found. <a href='/staff'>Back</a></div>"),
                         status=404,
                     )
                     return
@@ -525,14 +546,14 @@ class Handler(BaseHTTPRequestHandler):
             # ---------------- 404 ----------------
             send_html(
                 self,
-                layout("404", f"<div class='card'>Không có đường dẫn: <code>{escape(path)}</code>. <a href='/'>Trang chủ</a></div>"),
+                layout("404 Not Found", f"<div class='card'>Path not found: <code>{escape(path)}</code>. <a href='/'>Home</a></div>"),
                 status=404,
             )
 
         except sqlite3.OperationalError as e:
             send_html(
                 self,
-                layout("Lỗi SQLite", f"<div class='card danger'><b>Lỗi SQLite:</b> <code>{escape(str(e))}</code></div>"),
+                layout("SQLite Error", f"<div class='card danger'><b>SQLite Error:</b> <code>{escape(str(e))}</code></div>"),
                 status=500,
             )
 
@@ -637,7 +658,7 @@ class Handler(BaseHTTPRequestHandler):
                 handle_annex_restore_post(self)
                 return
 
-            # ---------------- Milestones ----------------
+            # ---------------- Milestones & Recurring Payments ----------------
             if path == "/contract/milestone/create":
                 handle_milestone_create_post(self)
                 return
@@ -652,6 +673,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/contract/milestone/cashout":
                 handle_milestone_cashout_post(self)
+                return
+
+            if path == "/payments/recurring/cashout":
+                handle_recurring_cashout_post(self)
                 return
 
             # ---------------- Projects ----------------
@@ -723,7 +748,7 @@ class Handler(BaseHTTPRequestHandler):
         except sqlite3.OperationalError as e:
             send_html(
                 self,
-                layout("Lỗi SQLite", f"<div class='card danger'><b>Lỗi SQLite:</b> <code>{escape(str(e))}</code></div>"),
+                layout("SQLite Error", f"<div class='card danger'><b>SQLite Error:</b> <code>{escape(str(e))}</code></div>"),
                 status=500,
             )
 

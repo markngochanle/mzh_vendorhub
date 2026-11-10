@@ -266,7 +266,11 @@ def init_db():
         # -------- Fixed Price & Contract Classification Migrations --------
         ensure_column(conn, "contracts", "contract_type", "TEXT NOT NULL DEFAULT 'FRAMEWORK'")
         ensure_column(conn, "contracts", "billing_type", "TEXT NOT NULL DEFAULT 'TM'")
+        ensure_column(conn, "contracts", "recurring_fee", "REAL NULL")
+        ensure_column(conn, "contracts", "recurring_period", "TEXT NOT NULL DEFAULT 'MONTHLY'")
         ensure_column(conn, "contract_annexes", "billing_type", "TEXT NOT NULL DEFAULT 'TM'")
+        ensure_column(conn, "contract_annexes", "recurring_fee", "REAL NULL")
+        ensure_column(conn, "contract_annexes", "recurring_period", "TEXT NOT NULL DEFAULT 'MONTHLY'")
 
         # -------- contract_milestones --------
         cur.execute("""
@@ -290,6 +294,28 @@ def init_db():
                 FOREIGN KEY(contract_id) REFERENCES contracts(id),
                 FOREIGN KEY(annex_id) REFERENCES contract_annexes(id),
                 FOREIGN KEY(invoice_id) REFERENCES invoices(id)
+            )
+        """)
+        conn.commit()
+
+        # -------- recurring_payouts --------
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS recurring_payouts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                contract_id INTEGER NOT NULL,
+                annex_id INTEGER NULL,
+                service_month TEXT NOT NULL,
+                amount REAL NOT NULL DEFAULT 0.0,
+                status TEXT NOT NULL DEFAULT 'PENDING',
+                invoice_id INTEGER NULL,
+                cashout_date TEXT NULL,
+                note TEXT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(contract_id) REFERENCES contracts(id),
+                FOREIGN KEY(annex_id) REFERENCES contract_annexes(id),
+                FOREIGN KEY(invoice_id) REFERENCES invoices(id),
+                UNIQUE(contract_id, annex_id, service_month)
             )
         """)
         conn.commit()
@@ -584,7 +610,14 @@ def layout(title: str, body_html: str):
         </div>
       </div>
       <a href="/projects" class="nav-link">Projects</a>
-      <a href="/attendance" class="nav-link">Timesheet & Payroll</a>
+      <div class="nav-dropdown">
+        <a href="/attendance" class="nav-link nav-dropdown-toggle">Payments <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
+        <div class="nav-dropdown-menu">
+          <a href="/attendance" class="nav-dropdown-item">Timesheet & Payroll (T&M)</a>
+          <a href="/payments/fixed-price" class="nav-dropdown-item">Fixed Price (Milestones)</a>
+          <a href="/payments/recurring" class="nav-dropdown-item">Recurring Services (Internet/SaaS)</a>
+        </div>
+      </div>
       <a href="/audit-logs" class="nav-link">Audit Logs</a>
       <a href="/playwright" class="nav-link">UAT Runner</a>
       <a href="/unit-tests" class="nav-link">Unit Tests</a>
@@ -1050,7 +1083,7 @@ def layout(title: str, body_html: str):
       document.querySelectorAll('.nav-link').forEach(link => {{
         const path = window.location.pathname;
         const href = link.getAttribute('href');
-        if (path === href || (href !== '/' && path.startsWith(href))) {{
+        if (path === href || (href !== '/' && path.startsWith(href)) || (href === '/attendance' && path.startsWith('/payments'))) {{
           link.classList.add('active');
         }}
       }});

@@ -2123,8 +2123,8 @@ class TestProjects(BaseTestCase):
         html = common.layout("Test Title", "<p>Content</p>")
         self.assertIn("Assign Staff to Project", html)
         self.assertIn("/projects/assign#add-staff-section", html)
-        self.assertIn('<a href="/attendance" class="nav-link">Timesheet & Payroll</a>', html)
-        self.assertNotIn('<a href="/attendance" class="nav-link">Attendance</a>', html)
+        self.assertIn('Timesheet & Payroll (T&M)', html)
+        self.assertIn('Payments', html)
 
         # 2. Verify /projects/assign page contains Add New Staff member to Project form with id="add-staff-section"
         cur = self.conn.cursor()
@@ -2567,7 +2567,7 @@ class TestFixedPriceMilestones(BaseTestCase):
             self.conn, "FP-2026-001", None, None, 100000000.0
         )
         self.assertEqual(st, "ok")
-        self.assertIn("Khớp mốc Fixed Price", msg)
+        self.assertIn("Matched Fixed Price Milestone", msg)
 
         # Mismatch amount (e.g. 80M)
         st_mis, l_sum, a_sum, msg_mis = invoices.check_invoice_payroll_reconciliation(
@@ -2577,14 +2577,14 @@ class TestFixedPriceMilestones(BaseTestCase):
 
         # 6. Test UI rendering
         html_contract = contracts.page_contract_form("edit", c, [])
-        self.assertIn("Kế hoạch thanh toán / Mốc tiến độ", html_contract)
+        self.assertIn("Payment Milestones & Schedule", html_contract)
         self.assertIn("Tạm ứng đợt 1", html_contract)
         self.assertIn("Nghiệm thu UAT", html_contract)
 
         html_list = contracts.page_contracts_list(q="FP-2026-001", status="active", return_to="/contracts")
         self.assertIn("Standalone", html_list)
         self.assertIn("Fixed Price", html_list)
-        self.assertIn("3 mốc", html_list)
+        self.assertIn("3 milestone(s)", html_list)
 
         # 7. Delete Milestone 3
         m3_id = ms[2]["id"]
@@ -2646,8 +2646,122 @@ class TestFixedPriceMilestones(BaseTestCase):
 
         # 5. Verify Annex Edit page renders milestones card
         html_annex = contracts.page_annex_form("edit", annex, c_id)
-        self.assertIn("Kế hoạch thanh toán / Mốc tiến độ", html_annex)
+        self.assertIn("Payment Milestones & Schedule", html_annex)
         self.assertIn("Giai đoạn 1", html_annex)
+
+
+class TestRecurringAndPaymentsDashboards(BaseTestCase):
+    def test_recurring_contract_and_invoice_reconciliation(self):
+        import payments
+
+        # 1. Create a Recurring contract (e.g. Internet Leased Line 15M/month)
+        body = (
+            f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}"
+            f"&framework_no=INTERNET-VNPT-2026&framework_name=Internet+Leased+Line+100Mbps"
+            f"&contract_type=STANDALONE&billing_type=RECURRING"
+            f"&recurring_fee=15000000&recurring_period=MONTHLY"
+            f"&start_date=2026-01-01&end_date=2026-12-31"
+        ).encode()
+        h = MockHandler(body=body, headers={"content-length": str(len(body))})
+        contracts.handle_contract_create_post(h)
+        self.assertEqual(h.response_status, 302)
+
+        c = self.conn.execute("SELECT * FROM contracts WHERE framework_no='INTERNET-VNPT-2026'").fetchone()
+        self.assertIsNotNone(c)
+        self.assertEqual(c["billing_type"], "RECURRING")
+        self.assertEqual(float(c["recurring_fee"]), 15000000.0)
+        self.assertEqual(c["recurring_period"], "MONTHLY")
+
+        # 2. Test invoice reconciliation
+        # Match 15,000,000 VND
+        st, l_sum, a_sum, msg = invoices.check_invoice_payroll_reconciliation(
+            self.conn, "INTERNET-VNPT-2026", 2026, 11, 15000000.0
+        )
+        self.assertEqual(st, "ok")
+        self.assertIn("Matched Recurring Fee", msg)
+        self.assertEqual(l_sum, 15000000.0)
+
+        # Mismatch 18,000,000 VND
+        st_mis, l_sum, a_sum, msg_mis = invoices.check_invoice_payroll_reconciliation(
+            self.conn, "INTERNET-VNPT-2026", 2026, 11, 18000000.0
+        )
+        self.assertEqual(st_mis, "mismatch")
+        self.assertIn("does not match expected recurring fee", msg_mis)
+
+        # 3. Test Recurring dashboard view
+        html_rec = payments.page_payments_recurring(month="2026-11")
+        self.assertIn("INTERNET-VNPT-2026", html_rec)
+        self.assertIn("FPT SOFTWARE", html_rec)
+        self.assertIn("15,000,000 VND", html_rec)
+        self.assertIn("Commitment for 2026-11", html_rec)
+
+        # 4. Test Recurring cashout handler (Pay)
+        body_cashout = (
+            f"contract_id={c['id']}&service_month=2026-11&amount=15000000"
+            f"&cashout_date=2026-11-20&action=pay"
+        ).encode()
+        h_co = MockHandler(body=body_cashout, headers={"content-length": str(len(body_cashout))})
+        payments.handle_recurring_cashout_post(h_co)
+        self.assertEqual(h_co.response_status, 302)
+
+        payout = self.conn.execute("SELECT * FROM recurring_payouts WHERE contract_id=? AND service_month='2026-11'", (c["id"],)).fetchone()
+        self.assertIsNotNone(payout)
+        self.assertEqual(payout["status"], "PAID")
+        self.assertEqual(payout["cashout_date"], "2026-11-20")
+
+        # 5. Test Recurring cashout handler (Cancel)
+        body_cancel = (
+            f"contract_id={c['id']}&service_month=2026-11&action=cancel"
+        ).encode()
+        h_cancel = MockHandler(body=body_cancel, headers={"content-length": str(len(body_cancel))})
+        payments.handle_recurring_cashout_post(h_cancel)
+        self.assertEqual(h_cancel.response_status, 302)
+
+        payout_cancelled = self.conn.execute("SELECT * FROM recurring_payouts WHERE contract_id=? AND service_month='2026-11'", (c["id"],)).fetchone()
+        self.assertIsNone(payout_cancelled)
+
+    def test_fixed_price_dashboard_view(self):
+        import payments
+
+        # 1. Create a contract and milestone
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (
+              buyer_vendor_id, seller_vendor_id, framework_no, framework_name,
+              contract_type, billing_type, contract_value, is_active, created_at, updated_at
+            ) VALUES (?, ?, 'FP-DASH-01', 'Core System Revamp', 'STANDALONE', 'FIXED_PRICE', 500000000, 1, datetime('now'), datetime('now'))
+        """, (self.buyer_id, self.seller_id))
+        c_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_milestones (
+              contract_id, milestone_name, milestone_type, percentage, amount, planned_date, status, created_at, updated_at
+            ) VALUES (?, 'Phase 1 Delivery', 'DELIVERY', 40.0, 200000000, '2026-06-30', 'PENDING', datetime('now'), datetime('now'))
+        """, (c_id,))
+        self.conn.commit()
+
+        # 2. View Fixed Price dashboard
+        html_fp = payments.page_payments_fixed_price()
+        self.assertIn("FP-DASH-01", html_fp)
+        self.assertIn("Phase 1 Delivery", html_fp)
+        self.assertIn("200,000,000", html_fp)
+        self.assertIn("Delivery", html_fp)
+        self.assertIn("Total Milestones Committed", html_fp)
+
+    def test_payments_server_routes(self):
+        # Test GET /payments/fixed-price via server Handler
+        stub_fp = StubHandler("/payments/fixed-price", method="GET")
+        stub_fp.do_GET()
+        out_fp = stub_fp.get_output_text()
+        self.assertIn("Fixed Price Payments", out_fp)
+        self.assertIn("Milestones Committed", out_fp)
+
+        # Test GET /payments/recurring via server Handler
+        stub_rec = StubHandler("/payments/recurring", method="GET")
+        stub_rec.do_GET()
+        out_rec = stub_rec.get_output_text()
+        self.assertIn("Recurring Services", out_rec)
+        self.assertIn("Commitment for", out_rec)
 
 
 if __name__ == "__main__":

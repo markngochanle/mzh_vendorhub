@@ -165,7 +165,7 @@ def check_invoice_payroll_reconciliation(conn, contract_no_str, year, month, inv
 
         target_name = fp_contract["framework_no"] if fp_contract else fp_annex["annex_name"]
         if not milestones:
-            return 'no_payroll', 0.0, 0.0, f"Hợp đồng Fixed Price '{target_name}' chưa có mốc thanh toán nào."
+            return 'no_payroll', 0.0, 0.0, f"Fixed Price Contract '{target_name}' has no milestones configured."
 
         inv_amt = float(invoice_amount or 0.0)
         matched_m = None
@@ -176,10 +176,42 @@ def check_invoice_payroll_reconciliation(conn, contract_no_str, year, month, inv
 
         total_ms_amount = sum(float(m["amount"] or 0.0) for m in milestones)
         if matched_m:
-            return 'ok', float(matched_m["amount"]), float(matched_m["amount"]), f"Khớp mốc Fixed Price: '{matched_m['milestone_name']}' ({matched_m['amount']:,.0f} VND)"
+            return 'ok', float(matched_m["amount"]), float(matched_m["amount"]), f"Matched Fixed Price Milestone: '{matched_m['milestone_name']}' ({matched_m['amount']:,.0f} VND)"
         else:
             m_list_str = ", ".join(f"{m['milestone_name']}: {m['amount']:,.0f}" for m in milestones[:3])
-            return 'mismatch', total_ms_amount, total_ms_amount, f"Hợp đồng Fixed Price '{target_name}': Số tiền hóa đơn ({inv_amt:,.0f} VND) chưa khớp với mốc nào ({m_list_str}...)"
+            return 'mismatch', total_ms_amount, total_ms_amount, f"Fixed Price Contract '{target_name}': Invoice amount ({inv_amt:,.0f} VND) does not match any milestone ({m_list_str}...)"
+
+    # 2. Check if contract or annex is Recurring (Internet, SaaS, Utilities)
+    rec_contract = conn.execute("""
+        SELECT * FROM contracts
+        WHERE is_active = 1 AND billing_type = 'RECURRING' AND (
+            LOWER(TRIM(framework_no)) = ? OR framework_no LIKE ?
+        )
+    """, (contract_no_clean.lower(), f"%{contract_no_clean}%")).fetchone()
+
+    rec_annex = None
+    if not rec_contract:
+        rec_annex = conn.execute("""
+            SELECT a.*, c.framework_no FROM contract_annexes a
+            JOIN contracts c ON c.id = a.contract_id
+            WHERE a.is_active = 1 AND a.billing_type = 'RECURRING' AND (
+                LOWER(TRIM(a.annex_name)) = ? OR a.annex_name LIKE ?
+            )
+        """, (contract_no_clean.lower(), f"%{contract_no_clean}%")).fetchone()
+
+    if rec_contract or rec_annex:
+        rec_obj = rec_contract if rec_contract else rec_annex
+        target_name = rec_contract["framework_no"] if rec_contract else rec_annex["annex_name"]
+        fee = rec_obj["recurring_fee"] if (rec_obj["recurring_fee"] is not None and rec_obj["recurring_fee"] > 0) else (rec_obj["contract_value"] if rec_contract else rec_obj["value"])
+        fee = float(fee or 0.0)
+        inv_amt = float(invoice_amount or 0.0)
+
+        if fee > 0 and abs(fee - inv_amt) < 1.0:
+            return 'ok', fee, fee, f"Matched Recurring Fee: '{target_name}' ({fee:,.0f} VND)"
+        elif fee > 0:
+            return 'mismatch', fee, fee, f"Recurring Contract '{target_name}': Invoice amount ({inv_amt:,.0f} VND) does not match expected recurring fee ({fee:,.0f} VND)"
+        else:
+            return 'ok', inv_amt, inv_amt, f"Matched Recurring Contract '{target_name}' (Fee not specified)"
 
     # 2. Time & Material flow: requires service month and year
     if year is None or month is None:
