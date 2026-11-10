@@ -1,5 +1,6 @@
 # contracts.py
 
+import urllib.parse
 from html import escape
 from common import (
     db_connect, layout, LIST_LIMIT, now_iso,
@@ -254,11 +255,12 @@ def render_milestones_card(contract_id: int, annex_id: int | None, milestones: l
         pct_display = f"{m['percentage']:.1f}%" if m["percentage"] is not None else "-"
         amt_display = f"{float(m['amount']):,.0f}" if m["amount"] is not None else "0"
 
-        inv_display = "-"
+        imp_url = f"/invoice/new?billing_type=FIXED_PRICE&milestone_id={m['id']}&return_to={urllib.parse.quote(return_to)}"
+        inv_display = f"<a href='{imp_url}' style='font-size:11px; color:#0b57d0; text-decoration:none; font-weight:600;'>📥 Import Inv</a>"
         if m["shdon"]:
-            inv_display = f"Inv: <b>{escape(m['shdon'])}</b>"
+            inv_display = f"Inv: <b>{escape(m['shdon'])}</b> <a href='{imp_url}' style='font-size:10px; color:#2563eb;' title='Re-import'>↺</a>"
         elif m["invoice_id"]:
-            inv_display = f"Inv #{m['invoice_id']}"
+            inv_display = f"Inv #{m['invoice_id']} <a href='{imp_url}' style='font-size:10px; color:#2563eb;' title='Re-import'>↺</a>"
 
         cashout_html = ""
         if is_paid and m["cashout_date"]:
@@ -402,7 +404,12 @@ def render_milestones_card(contract_id: int, annex_id: int | None, milestones: l
           <b style="font-size:15px;">💰 Payment Milestones & Schedule</b>
           {alloc_badge}
         </div>
-        <button class="btn-secondary" type="button" onclick="var f=document.getElementById('{form_id}'); f.style.display=(f.style.display==='none'?'block':'none');">+ Add Payment Milestone</button>
+        <div style="display:flex; gap:8px;">
+          <a href="/invoice/new" style="text-decoration:none;">
+            <button class="btn-secondary" type="button" style="color:#0b57d0; border-color:#0b57d0;">📄 + Import Invoice</button>
+          </a>
+          <button class="btn-secondary" type="button" onclick="var f=document.getElementById('{form_id}'); f.style.display=(f.style.display==='none'?'block':'none');">+ Add Payment Milestone</button>
+        </div>
       </div>
 
       <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-bottom:14px;">

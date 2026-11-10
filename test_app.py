@@ -20,6 +20,7 @@ import invoices
 import attendance
 import server
 import projects
+import payments
 
 
 class MockHeaders(dict):
@@ -2179,12 +2180,12 @@ class TestProjects(BaseTestCase):
         self.assertIn('forward to Attendance acceptance', invoice_html)
         self.assertIn('/attendance/acceptance?month=2026-08', invoice_html)
 
-        # 4. Test /invoice/new without parameters (default month link)
+        # 4. Test /invoice/new without parameters (default: origin is Invoices List)
         handler_no_params = StubHandler("/invoice/new", "GET")
         handler_no_params.do_GET()
         invoice_html_default = handler_no_params.get_output_text()
-        self.assertIn('forward to Attendance acceptance', invoice_html_default)
-        self.assertIn('href="/attendance/acceptance"', invoice_html_default)
+        self.assertIn('Back to Invoices List', invoice_html_default)
+        self.assertNotIn('forward to Attendance acceptance', invoice_html_default)
 
         # 5. Test locking import button when invoice already exists for this annex & month
         seller_tax_id = self.conn.execute("SELECT tax_id FROM vendors WHERE id = ?", (self.seller_id,)).fetchone()["tax_id"]
@@ -2762,6 +2763,235 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         out_rec = stub_rec.get_output_text()
         self.assertIn("Recurring Services", out_rec)
         self.assertIn("Commitment for", out_rec)
+
+
+class TestMultiModelInvoiceImport(BaseTestCase):
+    def test_page_new_invoice_renders_three_tabs_and_preselected_model(self):
+        # 1. Default load (origin is Invoices List)
+        stub_def = StubHandler("/invoice/new", method="GET")
+        stub_def.do_GET()
+        html_def = stub_def.get_output_text()
+        self.assertIn("Time & Material (T&M)", html_def)
+        self.assertIn("Fixed Price (Milestones)", html_def)
+        self.assertIn("Recurring Services (Internet / SaaS)", html_def)
+        self.assertIn('Back to Invoices List', html_def)
+        self.assertNotIn('forward to Attendance acceptance', html_def)
+
+        # 2. Pre-selected Fixed Price model (origin is Fixed Price payments)
+        stub_fp = StubHandler("/invoice/new?billing_type=FIXED_PRICE&contract_no=MHB/FSOFT/FP-2026-001", method="GET")
+        stub_fp.do_GET()
+        html_fp = stub_fp.get_output_text()
+        self.assertIn('value="FIXED_PRICE"', html_fp)
+        self.assertIn('id="tab_fp"', html_fp)
+        self.assertIn('Back to Invoices List', html_fp)
+        self.assertIn('forward to Fixed Price Payments', html_fp)
+        self.assertNotIn('forward to Attendance acceptance', html_fp)
+
+    def test_import_invoice_for_fixed_price_milestone(self):
+        # 1. Setup Fixed Price contract with Milestone
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (
+              buyer_vendor_id, seller_vendor_id, framework_no, framework_name,
+              contract_type, billing_type, contract_value, is_active, created_at, updated_at
+            ) VALUES (?, ?, 'FP-INV-001', 'Fixed Price Project', 'STANDALONE', 'FIXED_PRICE', 100000000, 1, datetime('now'), datetime('now'))
+        """, (self.buyer_id, self.seller_id))
+        c_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_milestones (
+              contract_id, milestone_name, milestone_type, percentage, amount, planned_date, status, created_at, updated_at
+            ) VALUES (?, 'Milestone 1 Advance 50M', 'ADVANCE', 50.0, 50000000, '2026-05-15', 'PENDING', datetime('now'), datetime('now'))
+        """, (c_id,))
+        m_id = cur.lastrowid
+        self.conn.commit()
+
+        # Verify payments fixed-price dashboard renders Import Invoice button for this milestone
+        html_fp_dash = payments.page_payments_fixed_price()
+        self.assertIn("📥 Import Invoice", html_fp_dash)
+        self.assertIn(f"milestone_id={m_id}", html_fp_dash)
+        self.assertIn("contract_no=FP-INV-001", html_fp_dash)
+
+        # Verify page_new_invoice pre-populates target milestone details
+        stub_new = StubHandler(f"/invoice/new?billing_type=FIXED_PRICE&contract_no=FP-INV-001&milestone_id={m_id}", method="GET")
+        stub_new.do_GET()
+        html_new_inv = stub_new.get_output_text()
+        self.assertIn("Target Payment Milestone", html_new_inv)
+        self.assertIn("Milestone 1 Advance 50M", html_new_inv)
+        self.assertIn("50,000,000 VND", html_new_inv)
+
+        # 2. Post XML invoice targeting this milestone
+        xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+        <HDon>
+          <DLHDon>
+            <TTChung>
+              <KHHDon>1C26TUU</KHHDon>
+              <SHDon>0088881</SHDon>
+              <NLap>2026-05-20</NLap>
+              <DVTTe>VND</DVTTe>
+            </TTChung>
+            <NDHDon>
+              <NBan><Ten>FPT</Ten><MST>0102135934</MST></NBan>
+              <NMua><Ten>MIZUHO</Ten><MST>0100234567</MST></NMua>
+              <TToan><TgTTTBSo>50000000</TgTTTBSo></TToan>
+            </NDHDon>
+          </DLHDon>
+        </HDon>
+        """
+        boundary = "----WebKitFormBoundaryFPTest123"
+        body = f"""--{boundary}
+Content-Disposition: form-data; name="import_type"
+
+paste
+--{boundary}
+Content-Disposition: form-data; name="billing_type"
+
+FIXED_PRICE
+--{boundary}
+Content-Disposition: form-data; name="contract_no_fp"
+
+FP-INV-001
+--{boundary}
+Content-Disposition: form-data; name="milestone_id"
+
+{m_id}
+--{boundary}
+Content-Disposition: form-data; name="xml_content"
+
+{xml_content}
+--{boundary}--""".replace("\n", "\r\n").encode("utf-8")
+
+        handler = MockHandler(
+            body=body,
+            headers={
+                "content-type": f"multipart/form-data; boundary={boundary}",
+                "content-length": str(len(body))
+            }
+        )
+        invoices.handle_new_invoice_post(handler)
+
+        # Refresh connection
+        self.conn.close()
+        self.conn = common.db_connect()
+
+        # 3. Verify invoice saved with milestone_id
+        inv = self.conn.execute("SELECT * FROM invoices WHERE shdon='0088881'").fetchone()
+        self.assertIsNotNone(inv)
+        self.assertEqual(inv["contract_no"], "FP-INV-001")
+        self.assertEqual(inv["milestone_id"], m_id)
+
+        # 4. Verify milestone status updated to INVOICED and invoice_id linked
+        m = self.conn.execute("SELECT * FROM contract_milestones WHERE id=?", (m_id,)).fetchone()
+        self.assertEqual(m["status"], "INVOICED")
+        self.assertEqual(m["invoice_id"], inv["id"])
+
+        # 5. Verify payments fixed-price dashboard now shows the invoice and re-import option
+        html_fp_after = payments.page_payments_fixed_price()
+        self.assertIn("0088881", html_fp_after)
+        self.assertIn("↺ Re-import", html_fp_after)
+
+    def test_import_invoice_for_recurring_service(self):
+        # 1. Setup Recurring Service Contract (e.g. 15,000,000 VND / month)
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (
+              buyer_vendor_id, seller_vendor_id, framework_no, framework_name,
+              contract_type, billing_type, recurring_fee, recurring_period, is_active, created_at, updated_at
+            ) VALUES (?, ?, 'REC-INV-001', 'Dedicated Leased Line', 'STANDALONE', 'RECURRING', 15000000, 'MONTHLY', 1, datetime('now'), datetime('now'))
+        """, (self.buyer_id, self.seller_id))
+        c_id = cur.lastrowid
+        self.conn.commit()
+
+        # 2. Post XML invoice targeting recurring billing month 2026-11
+        xml_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+        <HDon>
+          <DLHDon>
+            <TTChung>
+              <KHHDon>1C26TUU</KHHDon>
+              <SHDon>0088882</SHDon>
+              <NLap>2026-11-25</NLap>
+              <DVTTe>VND</DVTTe>
+            </TTChung>
+            <NDHDon>
+              <NBan><Ten>VNPT</Ten><MST>0102135934</MST></NBan>
+              <NMua><Ten>MIZUHO</Ten><MST>0100234567</MST></NMua>
+              <TToan><TgTTTBSo>15000000</TgTTTBSo></TToan>
+            </NDHDon>
+          </DLHDon>
+        </HDon>
+        """
+        boundary = "----WebKitFormBoundaryRecTest123"
+        body = f"""--{boundary}
+Content-Disposition: form-data; name="import_type"
+
+paste
+--{boundary}
+Content-Disposition: form-data; name="billing_type"
+
+RECURRING
+--{boundary}
+Content-Disposition: form-data; name="contract_no_rec"
+
+REC-INV-001
+--{boundary}
+Content-Disposition: form-data; name="recurring_month"
+
+2026-11
+--{boundary}
+Content-Disposition: form-data; name="xml_content"
+
+{xml_content}
+--{boundary}--""".replace("\n", "\r\n").encode("utf-8")
+
+        handler = MockHandler(
+            body=body,
+            headers={
+                "content-type": f"multipart/form-data; boundary={boundary}",
+                "content-length": str(len(body))
+            }
+        )
+        invoices.handle_new_invoice_post(handler)
+
+        # Refresh connection
+        self.conn.close()
+        self.conn = common.db_connect()
+
+        # 3. Verify invoice saved with service_year=2026 and service_month=11
+        inv = self.conn.execute("SELECT * FROM invoices WHERE shdon='0088882'").fetchone()
+        self.assertIsNotNone(inv)
+        self.assertEqual(inv["contract_no"], "REC-INV-001")
+        self.assertEqual(inv["service_year"], 2026)
+        self.assertEqual(inv["service_month"], 11)
+
+        # 4. Verify reconciliation check
+        st, l_sum, a_sum, msg = invoices.check_invoice_payroll_reconciliation(
+            self.conn, "REC-INV-001", 2026, 11, 15000000.0
+        )
+        self.assertEqual(st, "ok")
+        self.assertIn("Matched Recurring Fee", msg)
+
+    def test_logo_and_favicon_static_routes_and_layout(self):
+        # 1. Test layout contains logo image and browser favicon link
+        html = common.layout("Test Title", "<div>Content</div>")
+        self.assertIn('<link rel="icon" type="image/png" href="/logo.png">', html)
+        self.assertIn('<img src="/logo.png"', html)
+        self.assertIn('height:64px', html)
+        self.assertIn('alt="Mizuho Logo"', html)
+        self.assertIn('Mizuho IT Outsourcing Vendor Hub</h1>', html)
+
+        # 2. Test GET /logo.png via server StubHandler
+        stub_logo = StubHandler("/logo.png", method="GET")
+        stub_logo.do_GET()
+        self.assertEqual(stub_logo.response_status, 200)
+        self.assertIn("image/png", stub_logo.response_headers.get("content-type", ""))
+        self.assertGreater(len(stub_logo.wfile.getvalue()), 1000)
+
+        # 3. Test GET /favicon.ico via server StubHandler
+        stub_fav = StubHandler("/favicon.ico", method="GET")
+        stub_fav.do_GET()
+        self.assertEqual(stub_fav.response_status, 200)
+        self.assertIn("image/png", stub_fav.response_headers.get("content-type", ""))
+        self.assertGreater(len(stub_fav.wfile.getvalue()), 1000)
 
 
 if __name__ == "__main__":

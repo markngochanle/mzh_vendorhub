@@ -7,6 +7,7 @@
 from html import escape
 from datetime import datetime, date
 import calendar
+import urllib.parse
 
 from common import (
     db_connect, layout, LIST_LIMIT, now_iso,
@@ -164,9 +165,10 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
             <option value="PAID" {"selected" if status=="PAID" else ""}>Paid</option>
           </select>
         </div>
-        <div class="actions">
+        <div class="actions" style="display:flex; align-items:center; width:100%; gap:10px; margin-top:8px;">
           <button type="submit">Filter</button>
           <a class="muted" href="/payments/fixed-price">Reset</a>
+          <a href="/invoice/new" style="margin-left:auto; text-decoration:none;"><button class="btn-secondary" type="button" style="color:#0b57d0; border-color:#0b57d0; font-weight:600;">📄 + Import Invoice</button></a>
         </div>
       </form>
     </div>
@@ -206,12 +208,34 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
         pct_disp = f"{r['percentage']:.1f}%" if r["percentage"] is not None else "-"
         amt_disp = f"{float(r['amount']):,.0f}" if r["amount"] is not None else "0"
 
-        # Linked invoice
-        inv_display = "-"
+        # Linked invoice & Import invoice for this milestone
+        contract_target = r["annex_name"] if r["annex_id"] else r["framework_no"]
+        import_inv_url = f"/invoice/new?billing_type=FIXED_PRICE&contract_no={urllib.parse.quote(contract_target or '')}&milestone_id={r['id']}&return_to={urllib.parse.quote(return_to)}"
+
         if r["shdon"]:
-            inv_display = f'<a href="/invoice?id={r["invoice_id"]}"><b>{escape(r["shdon"])}</b></a>'
+            inv_display = f"""
+            <div>
+              <a href="/invoice?id={r['invoice_id']}"><b>{escape(r['shdon'])}</b></a>
+              <div style="margin-top:2px;">
+                <a href="{import_inv_url}" style="font-size:10px; color:#2563eb; text-decoration:none;" title="Import replacement invoice">↺ Re-import</a>
+              </div>
+            </div>
+            """
         elif r["invoice_id"]:
-            inv_display = f'<a href="/invoice?id={r["invoice_id"]}">Invoice #{r["invoice_id"]}</a>'
+            inv_display = f"""
+            <div>
+              <a href="/invoice?id={r['invoice_id']}">Invoice #{r['invoice_id']}</a>
+              <div style="margin-top:2px;">
+                <a href="{import_inv_url}" style="font-size:10px; color:#2563eb; text-decoration:none;" title="Import replacement invoice">↺ Re-import</a>
+              </div>
+            </div>
+            """
+        else:
+            inv_display = f"""
+            <a href="{import_inv_url}" class="btn-secondary" style="font-size:11px; padding:3px 8px; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-weight:600; color:#0b57d0; border-color:#0b57d0; background:#f0f7ff; border-radius:6px; white-space:nowrap;" title="Import Invoice for this milestone">
+              📥 Import Invoice
+            </a>
+            """
 
         # Cashout control
         if is_paid and r["cashout_date"]:
@@ -546,9 +570,10 @@ def page_payments_recurring(month: str | None = None, q: str = "", *, return_to:
           <a href="/payments/recurring?month={next_month}&q={escape(q)}"><button class="btn-secondary" type="button">{next_month} →</button></a>
         </div>
         <div style="display:flex; align-items:center; gap:8px;">
-          <input type="text" name="q" placeholder="Search service / contract / vendor..." value="{escape(q)}" style="min-width:260px;">
+          <input type="text" name="q" placeholder="Search service / contract / vendor..." value="{escape(q)}" style="min-width:240px;">
           <button type="submit">Filter</button>
           <a class="muted" href="/payments/recurring?month={month}">Reset</a>
+          <a href="/invoice/new" style="text-decoration:none;"><button class="btn-secondary" type="button" style="color:#0b57d0; border-color:#0b57d0; font-weight:600;">📄 + Import Invoice</button></a>
         </div>
       </form>
     </div>

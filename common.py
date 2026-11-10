@@ -629,6 +629,9 @@ def layout(title: str, body_html: str):
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{escape(title)} - Mizuho IT Outsourcing Vendor Hub</title>
+  <link rel="icon" type="image/png" href="/logo.png">
+  <link rel="shortcut icon" type="image/png" href="/logo.png">
+  <link rel="apple-touch-icon" href="/logo.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
@@ -690,19 +693,19 @@ def layout(title: str, body_html: str):
       justify-content: space-between;
       border-bottom: 1px solid var(--border);
       background: var(--bg-card);
-      padding: 16px 24px;
+      padding: 12px 24px;
       box-shadow: var(--shadow-sm);
     }}
     .logo-area {{
       display: flex;
       align-items: center;
-      gap: 10px;
+      gap: 14px;
     }}
     .logo-icon {{
       font-size: 24px;
     }}
     .logo-title {{
-      font-size: 18px;
+      font-size: 20px;
       font-weight: 700;
       margin: 0;
       background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
@@ -1063,8 +1066,10 @@ def layout(title: str, body_html: str):
 <body>
   <div class="header">
     <div class="logo-area">
-      <span class="logo-icon">💼</span>
-      <h1 class="logo-title">Mizuho IT Outsourcing Vendor Hub</h1>
+      <a href="/" style="display:flex; align-items:center; gap:14px; text-decoration:none;">
+        <img src="/logo.png" alt="Mizuho Logo" style="height:64px; width:auto; max-width:96px; object-fit:contain; border-radius:6px; display:inline-block; vertical-align:middle;">
+        <h1 class="logo-title">Mizuho IT Outsourcing Vendor Hub</h1>
+      </a>
     </div>
     <div class="db-indicator">
       <span class="pulse"></span>
@@ -1389,6 +1394,15 @@ def send_html(handler, html_text: str, status=200):
     handler.send_response(status)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Content-Length", str(len(data)))
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
+def send_bytes(handler, data: bytes, content_type: str = "image/png", status=200):
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(data)))
+    handler.send_header("Cache-Control", "public, max-age=86400")
     handler.end_headers()
     handler.wfile.write(data)
 

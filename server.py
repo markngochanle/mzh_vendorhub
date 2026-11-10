@@ -28,7 +28,7 @@ logger = logging.getLogger("server")
 
 
 from common import (
-    init_db, layout, send_html, HOST, PORT, DB_PATH, db_connect
+    init_db, layout, send_html, send_bytes, HOST, PORT, DB_PATH, db_connect
 )
 
 from invoices import (
@@ -134,12 +134,34 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         logger.info("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), format % args))
 
+    def do_HEAD(self):
+        parsed = urlparse(self.path)
+        path = parsed.path
+        if path in ("/logo.png", "/favicon.ico"):
+            logo_file = Path(__file__).resolve().parent / "logo.png"
+            if logo_file.exists():
+                self.send_response(200)
+                self.send_header("Content-Type", "image/png")
+                self.send_header("Content-Length", str(logo_file.stat().st_size))
+                self.send_header("Cache-Control", "public, max-age=86400")
+                self.end_headers()
+                return
+        self.send_response(200)
+        self.end_headers()
+
     def do_GET(self):
         parsed = urlparse(self.path)
         path = parsed.path
         qs = parse_qs(parsed.query)
 
         try:
+            # ---------------- Static Assets ----------------
+            if path in ("/logo.png", "/favicon.ico"):
+                logo_file = Path(__file__).resolve().parent / "logo.png"
+                if logo_file.exists():
+                    send_bytes(self, logo_file.read_bytes(), content_type="image/png")
+                    return
+
             # ---------------- Invoices ----------------
             if path == "/dashboard":
                 page_dashboard(self)
@@ -208,6 +230,18 @@ class Handler(BaseHTTPRequestHandler):
                 contract_no = qs.get("contract_no", [""])[0] or qs.get("annex", [""])[0]
                 return_month = qs.get("return_month", [""])[0]
                 from_attendance = qs.get("from", [""])[0] in ("acceptance", "attendance") or bool(return_month)
+                billing_type = qs.get("billing_type", [""])[0]
+                milestone_id = qs.get("milestone_id", [""])[0]
+                return_to = qs.get("return_to", [""])[0]
+                if not return_to:
+                    referer = self.headers.get("Referer", "")
+                    if referer:
+                        try:
+                            ref_parsed = urlparse(referer)
+                            if ref_parsed.path and ref_parsed.path != "/invoice/new" and not ref_parsed.path.startswith("/invoice/create"):
+                                return_to = ref_parsed.path + (("?" + ref_parsed.query) if ref_parsed.query else "")
+                        except Exception:
+                            pass
 
                 month_param = qs.get("month", [""])[0]
                 if month_param and "-" in month_param:
@@ -224,7 +258,10 @@ class Handler(BaseHTTPRequestHandler):
                     service_month=service_month,
                     contract_no=contract_no,
                     return_month=return_month,
-                    from_attendance=from_attendance
+                    from_attendance=from_attendance,
+                    billing_type=billing_type,
+                    milestone_id=milestone_id,
+                    return_to=return_to
                 ))
                 return
 

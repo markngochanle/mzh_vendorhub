@@ -963,7 +963,7 @@ def page_invoices_list(filters: dict, *, return_to: str):
         <button type="submit">Filter</button>
         <a class="muted" href="/">This Year</a>
         <a class="muted" href="/?year=&month=&day=&q=&vendor_id=&project_id=&mgs_status=">Show All</a>
-        <a href="/invoice/new" style="margin-left: auto;"><button class="btn-secondary" type="button">+ Import Invoice</button></a>
+        <a href="/invoice/new" style="margin-left: auto; text-decoration:none;"><button type="button" style="background:#0b57d0; color:#fff; border:1px solid #0b57d0; font-weight:600; padding:6px 14px; border-radius:6px; cursor:pointer;">+ Import Invoice</button></a>
       </div>
     </form>
     """
@@ -1472,13 +1472,28 @@ def db_insert_or_duplicate(
     service_month,
     service_day,
     contract_no,
-    source_path: str
+    source_path: str,
+    milestone_id: int | None = None
 ) -> tuple[int, bool]:
     khhdon = (invoice.get("khhdon") or "").strip()
     shdon = (invoice.get("shdon") or "").strip()
 
     if not khhdon or not shdon:
-        raise ValueError("Thiếu KHHDon hoặc SHDon trong XML")
+        raise ValueError("Missing Series (KHHDon) or Invoice Number (SHDon) in XML")
+
+    # If service_year or service_month is not provided, fallback to invoice issue date (nlap)
+    nlap = (invoice.get("nlap") or "").strip()
+    if (service_year is None or service_month is None) and len(nlap) >= 7 and "-" in nlap:
+        try:
+            parts = nlap.split("-")
+            if service_year is None:
+                service_year = int(parts[0])
+            if service_month is None:
+                service_month = int(parts[1])
+            if service_day is None and len(parts) >= 3 and parts[2][:2].isdigit():
+                service_day = int(parts[2][:2])
+        except Exception:
+            pass
 
     cur = conn.cursor()
     row = cur.execute(
@@ -1496,7 +1511,7 @@ def db_insert_or_duplicate(
             seller_name, seller_mst, seller_address,
             buyer_name, buyer_mst, buyer_address, buyer_bank_name,
             tg_tcthue, tg_tthue, ttcktmai, tg_tttbso,
-            source_path, raw_xml
+            source_path, raw_xml, milestone_id
         )
         VALUES (
             ?, ?, ?, ?,
@@ -1504,7 +1519,7 @@ def db_insert_or_duplicate(
             ?, ?, ?,
             ?, ?, ?, ?,
             ?, ?, ?, ?,
-            ?, ?
+            ?, ?, ?
         )
     """, (
         service_year, service_month, service_day, contract_no,
@@ -1512,9 +1527,51 @@ def db_insert_or_duplicate(
         invoice["seller_name"], invoice["seller_mst"], invoice["seller_address"],
         invoice["buyer_name"], invoice["buyer_mst"], invoice["buyer_address"], invoice["buyer_bank_name"],
         invoice["tg_tcthue"], invoice["tg_tthue"], invoice["ttcktmai"], invoice["tg_tttbso"],
-        source_path, invoice["raw_xml"],
+        source_path, invoice["raw_xml"], milestone_id
     ))
     invoice_id = cur.lastrowid
+
+    # If milestone_id was explicitly provided, bind it
+    if milestone_id:
+        cur.execute("""
+            UPDATE contract_milestones
+            SET invoice_id = ?, status = CASE WHEN status = 'PAID' THEN 'PAID' ELSE 'INVOICED' END
+            WHERE id = ?
+        """, (invoice_id, milestone_id))
+    elif contract_no:
+        # Auto-match with unlinked milestone under this contract or annex
+        c_clean = contract_no.strip()
+        inv_amt = float(invoice["tg_tttbso"] or 0.0)
+        m_row = cur.execute("""
+            SELECT m.id FROM contract_milestones m
+            JOIN contracts c ON c.id = m.contract_id
+            WHERE (LOWER(TRIM(c.framework_no)) = ? OR c.framework_no LIKE ?)
+              AND m.invoice_id IS NULL
+              AND ABS(m.amount - ?) < 1.0
+            ORDER BY m.planned_date ASC, m.id ASC
+            LIMIT 1
+        """, (c_clean.lower(), f"%{c_clean}%", inv_amt)).fetchone()
+
+        if not m_row:
+            m_row = cur.execute("""
+                SELECT m.id FROM contract_milestones m
+                JOIN contract_annexes a ON a.id = m.annex_id
+                WHERE (LOWER(TRIM(a.annex_name)) = ? OR a.annex_name LIKE ?)
+                  AND m.invoice_id IS NULL
+                  AND ABS(m.amount - ?) < 1.0
+                ORDER BY m.planned_date ASC, m.id ASC
+                LIMIT 1
+            """, (c_clean.lower(), f"%{c_clean}%", inv_amt)).fetchone()
+
+        if m_row:
+            matched_mid = m_row[0]
+            cur.execute("UPDATE invoices SET milestone_id = ? WHERE id = ?", (matched_mid, invoice_id))
+            cur.execute("""
+                UPDATE contract_milestones
+                SET invoice_id = ?, status = CASE WHEN status = 'PAID' THEN 'PAID' ELSE 'INVOICED' END
+                WHERE id = ?
+            """, (invoice_id, matched_mid))
+
     log_action(cur, "IMPORT_INVOICE", "invoices", invoice_id, f"Imported new invoice '{invoice['khhdon']}/{invoice['shdon']}' from {invoice['seller_name']}")
     return invoice_id, False
 
@@ -1604,11 +1661,144 @@ def page_new_invoice(
     service_day: str | int | None = None,
     contract_no: str | None = None,
     return_month: str | None = None,
-    from_attendance: bool = False
+    from_attendance: bool = False,
+    billing_type: str | None = None,
+    milestone_id: str | int | None = None,
+    return_to: str | None = None
 ):
     import urllib.parse
+    import json
     error_html = f"<div class='card danger'><b>Error:</b> {escape(error_msg)}</div>" if error_msg else ""
-    
+
+    conn = db_connect()
+    try:
+        # Load all active contracts
+        c_rows = conn.execute("""
+            SELECT c.id, c.framework_no, c.framework_name, c.contract_type, c.billing_type, c.contract_value,
+                   c.recurring_fee, c.recurring_period,
+                   COALESCE(sv.company_name, sv.company_name_vi) AS seller_name, sv.tax_id AS seller_tax
+            FROM contracts c
+            JOIN vendors sv ON sv.id = c.seller_vendor_id
+            WHERE c.is_active = 1
+            ORDER BY c.id DESC
+        """).fetchall()
+
+        # Load all active annexes
+        a_rows = conn.execute("""
+            SELECT a.id, a.contract_id, a.annex_name, a.value, a.billing_type, a.recurring_fee, a.recurring_period,
+                   c.framework_no, COALESCE(sv.company_name, sv.company_name_vi) AS seller_name
+            FROM contract_annexes a
+            JOIN contracts c ON c.id = a.contract_id
+            JOIN vendors sv ON sv.id = c.seller_vendor_id
+            WHERE a.is_active = 1 AND c.is_active = 1
+            ORDER BY a.id DESC
+        """).fetchall()
+
+        # Load all milestones for Fixed Price
+        m_rows = conn.execute("""
+            SELECT m.id, m.contract_id, m.annex_id, m.milestone_name, m.milestone_type, m.amount, m.percentage, m.planned_date, m.status, m.invoice_id,
+                   c.framework_no, COALESCE(sv.company_name, sv.company_name_vi) AS seller_name, sv.tax_id AS seller_tax,
+                   a.annex_name
+            FROM contract_milestones m
+            JOIN contracts c ON c.id = m.contract_id
+            LEFT JOIN contract_annexes a ON a.id = m.annex_id
+            JOIN vendors sv ON sv.id = c.seller_vendor_id
+            WHERE c.is_active = 1
+            ORDER BY m.planned_date ASC, m.id ASC
+        """).fetchall()
+    finally:
+        conn.close()
+
+    # If milestone_id is passed, look up the target milestone to pre-populate details
+    target_milestone = None
+    if milestone_id:
+        mid_str = str(milestone_id).strip()
+        for m in m_rows:
+            if str(m["id"]) == mid_str:
+                target_milestone = m
+                break
+        if target_milestone:
+            billing_type = "FIXED_PRICE"
+            if not contract_no:
+                contract_no = target_milestone["annex_name"] if target_milestone["annex_id"] else target_milestone["framework_no"]
+
+    # Determine default billing_type
+    b_type = (billing_type or "").strip().upper()
+    if not b_type:
+        if contract_no:
+            c_clean = contract_no.strip().lower()
+            for c in c_rows:
+                if (c["framework_no"] or "").strip().lower() == c_clean:
+                    b_type = c["billing_type"] or "TM"
+                    break
+            if not b_type:
+                for a in a_rows:
+                    if (a["annex_name"] or "").strip().lower() == c_clean:
+                        b_type = a["billing_type"] or "TM"
+                        break
+        if not b_type:
+            b_type = "TM" if from_attendance else "TM"
+
+    # Build T&M contract options
+    tm_opts = ['<option value="">-- Select T&M Contract / Annex --</option>']
+    for c in c_rows:
+        if c["billing_type"] == "TM":
+            sel = "selected" if (contract_no and c["framework_no"] == contract_no) else ""
+            tm_opts.append(f'<option value="{escape(c["framework_no"] or "")}" {sel}>{escape(c["framework_no"] or "")} - {escape(c["seller_name"])}</option>')
+    for a in a_rows:
+        if a["billing_type"] == "TM":
+            sel = "selected" if (contract_no and a["annex_name"] == contract_no) else ""
+            tm_opts.append(f'<option value="{escape(a["annex_name"] or "")}" {sel}>{escape(a["framework_no"] or "")} / {escape(a["annex_name"] or "")} - {escape(a["seller_name"])}</option>')
+
+    # Build Fixed Price contract options
+    fp_opts = ['<option value="">-- Select Fixed Price Contract / Annex --</option>']
+    for c in c_rows:
+        if c["billing_type"] == "FIXED_PRICE":
+            sel = "selected" if (contract_no and c["framework_no"] == contract_no) else ""
+            val_txt = f"{int(round(c['contract_value'])):,} VND" if c["contract_value"] else "No value"
+            fp_opts.append(f'<option value="{escape(c["framework_no"] or "")}" data-cid="{c["id"]}" data-aid="" {sel}>{escape(c["framework_no"] or "")} - {escape(c["seller_name"])} ({val_txt})</option>')
+    for a in a_rows:
+        if a["billing_type"] == "FIXED_PRICE":
+            sel = "selected" if (contract_no and a["annex_name"] == contract_no) else ""
+            val_txt = f"{int(round(a['value'])):,} VND" if a["value"] else "No value"
+            fp_opts.append(f'<option value="{escape(a["annex_name"] or "")}" data-cid="{a["contract_id"]}" data-aid="{a["id"]}" {sel}>{escape(a["framework_no"] or "")} / {escape(a["annex_name"] or "")} - {escape(a["seller_name"])} ({val_txt})</option>')
+
+    # Build Recurring contract options
+    rec_opts = ['<option value="">-- Select Recurring Service / Subscription --</option>']
+    for c in c_rows:
+        if c["billing_type"] == "RECURRING":
+            sel = "selected" if (contract_no and c["framework_no"] == contract_no) else ""
+            fee_txt = f"{int(round(c['recurring_fee'])):,} VND/{c['recurring_period']}" if c["recurring_fee"] else "Fee not set"
+            rec_opts.append(f'<option value="{escape(c["framework_no"] or "")}" {sel}>{escape(c["framework_no"] or "")} - {escape(c["seller_name"])} ({fee_txt})</option>')
+    for a in a_rows:
+        if a["billing_type"] == "RECURRING":
+            sel = "selected" if (contract_no and a["annex_name"] == contract_no) else ""
+            fee_txt = f"{int(round(a['recurring_fee'])):,} VND/{a['recurring_period']}" if a["recurring_fee"] else "Fee not set"
+            rec_opts.append(f'<option value="{escape(a["annex_name"] or "")}" {sel}>{escape(a["framework_no"] or "")} / {escape(a["annex_name"] or "")} - {escape(a["seller_name"])} ({fee_txt})</option>')
+
+    # JSON milestones for dynamic JS filtering
+    milestones_list = []
+    for m in m_rows:
+        milestones_list.append({
+            "id": m["id"],
+            "contract_id": m["contract_id"],
+            "annex_id": m["annex_id"],
+            "name": m["milestone_name"],
+            "type": m["milestone_type"],
+            "amount": float(m["amount"] or 0.0),
+            "status": m["status"],
+            "invoice_id": m["invoice_id"]
+        })
+    milestones_json = json.dumps(milestones_list)
+
+    now = datetime.now()
+    default_rec_month = f"{now.year:04d}-{now.month:02d}"
+    if service_year and service_month:
+        try:
+            default_rec_month = f"{int(service_year):04d}-{int(service_month):02d}"
+        except Exception:
+            pass
+
     target_month = (return_month or "").strip()
     if not target_month and service_year and service_month:
         try:
@@ -1619,54 +1809,165 @@ def page_new_invoice(
         except Exception:
             pass
 
-    if target_month:
-        acceptance_url = f"/attendance/acceptance?month={urllib.parse.quote(target_month)}"
-    else:
-        acceptance_url = "/attendance/acceptance"
+    # Determine dynamic forward / return navigation link based on origin screen
+    forward_nav_link = ""
+    if from_attendance or (return_month and not return_to) or (return_to and "attendance/acceptance" in return_to):
+        acc_url = f"/attendance/acceptance?month={urllib.parse.quote(target_month)}" if target_month else "/attendance/acceptance"
+        forward_nav_link = f'<a href="{acc_url}" style="color:#0b57d0; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:13px;">forward to Attendance acceptance &rarr;</a>'
+    elif return_to and ("payments/fixed-price" in return_to or "fixed-price" in return_to):
+        forward_nav_link = f'<a href="{escape(return_to)}" style="color:#0b57d0; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:13px;">forward to Fixed Price Payments &rarr;</a>'
+    elif b_type == "FIXED_PRICE":
+        fp_url = return_to if return_to else "/payments/fixed-price"
+        forward_nav_link = f'<a href="{escape(fp_url)}" style="color:#0b57d0; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:13px;">forward to Fixed Price Payments &rarr;</a>'
+    elif return_to and ("payments/recurring" in return_to or "recurring" in return_to):
+        forward_nav_link = f'<a href="{escape(return_to)}" style="color:#0b57d0; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:13px;">forward to Recurring Services &rarr;</a>'
+    elif b_type == "RECURRING":
+        rec_url = return_to if return_to else (f"/payments/recurring?month={target_month}" if target_month else "/payments/recurring")
+        forward_nav_link = f'<a href="{escape(rec_url)}" style="color:#0b57d0; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:13px;">forward to Recurring Services &rarr;</a>'
+    elif return_to and ("contract" in return_to or "annex" in return_to):
+        forward_nav_link = f'<a href="{escape(return_to)}" style="color:#0b57d0; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:13px;">return to Contract Details &rarr;</a>'
+    elif return_to and return_to not in ("/", "/invoices"):
+        forward_nav_link = f'<a href="{escape(return_to)}" style="color:#0b57d0; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-size:13px;">return to Previous Page &rarr;</a>'
+
+    milestone_banner_html = ""
+    if target_milestone:
+        c_title = target_milestone["annex_name"] or target_milestone["framework_no"] or ""
+        v_title = target_milestone["seller_name"] or ""
+        p_date = target_milestone["planned_date"] or ""
+        pct_txt = f"({target_milestone['percentage']:.0f}%)" if target_milestone["percentage"] is not None else ""
+        milestone_banner_html = f"""
+        <div style="background:#ffffff; border:1px solid #bfdbfe; border-left:4px solid #2563eb; border-radius:8px; padding:12px 16px; margin-bottom:14px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
+          <div>
+            <div style="display:flex; align-items:center; gap:8px;">
+              <span style="font-size:11px; font-weight:700; color:#1d4ed8; text-transform:uppercase; letter-spacing:0.5px;">🎯 Target Payment Milestone</span>
+              <span class="tag tag-info" style="font-size:10px; padding:1px 6px;">Pre-filled from Payments</span>
+            </div>
+            <div style="font-size:15px; font-weight:700; color:#0f172a; margin-top:3px;">
+              {escape(target_milestone['milestone_name'])} — <span style="color:#0b57d0; font-family:monospace;">{float(target_milestone['amount']):,.0f} VND</span> {pct_txt}
+            </div>
+            <div style="font-size:12px; color:#475569; margin-top:2px;">
+              Contract: <b>{escape(c_title)}</b> • Vendor: <b>{escape(v_title)}</b> {f"• Planned Date: <b>{escape(p_date)}</b>" if p_date else ""}
+            </div>
+          </div>
+          <div>
+            <a href="{escape(return_to or '/payments/fixed-price')}" style="font-size:12px; color:#2563eb; font-weight:600; text-decoration:none;">← Return to Milestones</a>
+          </div>
+        </div>
+        """
 
     body = f"""
     {error_html}
     <div class="card">
-      <div class="actions" style="margin-bottom:10px; display:flex; justify-content:space-between; align-items:center;">
-        <a href="/">← Back to List</a>
-        <a href="{acceptance_url}" style="color:#0b57d0; font-weight:600; text-decoration:none; display:inline-flex; align-items:center; gap:4px;">forward to Attendance acceptance &rarr;</a>
+      <div class="actions" style="margin-bottom:14px; display:flex; justify-content:space-between; align-items:center;">
+        <a href="/">← Back to Invoices List</a>
+        <div style="display:flex; align-items:center; gap:16px;">
+          {forward_nav_link}
+          <span style="font-size:12px;" class="muted">Supported files: Electronic Invoice XML (*.xml)</span>
+        </div>
       </div>
-      
+
+      <!-- 1. Model Selector Tabs -->
+      <div style="margin-bottom: 20px;">
+        <div class="label" style="margin-bottom: 8px; font-weight: 700; color: #1e293b; font-size:13px;">1. Select Payment & Contract Model</div>
+        <div style="background:#e2e8f0; border-radius:8px; padding:4px; display:inline-flex; gap:4px; flex-wrap:wrap;">
+          <button type="button" id="tab_tm" onclick="switchBillingType('TM')" style="border:none; cursor:pointer; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; transition:all 0.15s; background:{'#4f46e5' if b_type=='TM' else 'transparent'}; color:{'#fff' if b_type=='TM' else '#334155'};">
+            💵 Time & Material (T&M)
+          </button>
+          <button type="button" id="tab_fp" onclick="switchBillingType('FIXED_PRICE')" style="border:none; cursor:pointer; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; transition:all 0.15s; background:{'#4f46e5' if b_type=='FIXED_PRICE' else 'transparent'}; color:{'#fff' if b_type=='FIXED_PRICE' else '#334155'};">
+            🎯 Fixed Price (Milestones)
+          </button>
+          <button type="button" id="tab_rec" onclick="switchBillingType('RECURRING')" style="border:none; cursor:pointer; padding:8px 16px; border-radius:6px; font-weight:600; font-size:13px; transition:all 0.15s; background:{'#4f46e5' if b_type=='RECURRING' else 'transparent'}; color:{'#fff' if b_type=='RECURRING' else '#334155'};">
+            🌐 Recurring Services (Internet / SaaS)
+          </button>
+        </div>
+      </div>
+
       <form method="POST" action="/invoice/create" enctype="multipart/form-data">
         <input type="hidden" name="return_month" value="{escape(str(return_month or ''))}">
         <input type="hidden" name="from_attendance" value="{'1' if from_attendance else '0'}">
-        
-        <h3>Service & Contract Information (Applies to all imported invoices)</h3>
-        <div class="grid">
-          <div>
-            <div class="label">Service Year (service_year)</div>
-            <input type="number" name="service_year" placeholder="YYYY" value="{escape(str(service_year or ''))}">
+        <input type="hidden" name="return_to" value="{escape(str(return_to or ''))}">
+        <input type="hidden" name="billing_type" id="active_billing_type" value="{b_type}">
+
+        <!-- Section T&M -->
+        <div id="sec_billing_tm" style="display:{'block' if b_type=='TM' else 'none'}; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:16px; margin-bottom:20px;">
+          <b style="font-size:14px; display:block; margin-bottom:10px; color:#1e293b;">Time & Material Contract & Service Period</b>
+          <div class="grid">
+            <div style="grid-column: span 2;">
+              <div class="label">Contract / Annex</div>
+              <select name="contract_no_tm" id="tm_contract_select" style="width:100%;" onchange="if(this.value) document.getElementById('manual_contract_no').value=this.value;">
+                {''.join(tm_opts)}
+              </select>
+            </div>
+            <div>
+              <div class="label">Service Year (YYYY) *</div>
+              <input type="number" name="service_year" placeholder="2026" value="{escape(str(service_year or ''))}" style="width:100%;">
+            </div>
+            <div>
+              <div class="label">Service Month (MM) *</div>
+              <input type="number" name="service_month" placeholder="11" value="{escape(str(service_month or ''))}" style="width:100%;">
+            </div>
+            <div>
+              <div class="label">Service Day (Optional)</div>
+              <input type="number" name="service_day" placeholder="DD" value="{escape(str(service_day or ''))}" style="width:100%;">
+            </div>
+            <div>
+              <div class="label">Manual Contract No (if not in list)</div>
+              <input type="text" name="contract_no" id="manual_contract_no" placeholder="e.g. MHB/FPT/2025/001" style="width:100%;" value="{escape(str(contract_no or ''))}">
+            </div>
           </div>
-          <div>
-            <div class="label">Month (service_month)</div>
-            <input type="number" name="service_month" placeholder="MM" value="{escape(str(service_month or ''))}">
-          </div>
-          <div>
-            <div class="label">Day (service_day)</div>
-            <input type="number" name="service_day" placeholder="DD" value="{escape(str(service_day or ''))}">
-          </div>
-          <div>
-            <div class="label">Contract No (contract_no)</div>
-            <input type="text" name="contract_no" placeholder="e.g. MHB/FPT/2025/001" style="width:100%;" value="{escape(str(contract_no or ''))}">
-          </div>
+          <div class="muted" style="margin-top:8px; font-size:12px;">ℹ️ T&M invoices are matched against monthly staff attendance timesheets and payroll.</div>
         </div>
 
-        <h3 style="margin-top: 24px;">Invoice Import Method</h3>
+        <!-- Section Fixed Price -->
+        <div id="sec_billing_fp" style="display:{'block' if b_type=='FIXED_PRICE' else 'none'}; background:#eff6ff; border:1px solid #bfdbfe; border-radius:8px; padding:16px; margin-bottom:20px;">
+          {milestone_banner_html}
+          <b style="font-size:14px; display:block; margin-bottom:10px; color:#1e40af;">Fixed Price Contract & Milestone</b>
+          <div class="grid">
+            <div style="grid-column: span 2;">
+              <div class="label">Fixed Price Contract / Project *</div>
+              <select name="contract_no_fp" id="fp_contract_select" style="width:100%;" onchange="onFpContractChange()">
+                {''.join(fp_opts)}
+              </select>
+            </div>
+            <div style="grid-column: span 2;">
+              <div class="label">Payment Milestone (Bind directly to deliverable)</div>
+              <select name="milestone_id" id="milestone_select" style="width:100%;">
+                <option value="">-- Auto-match milestone by amount --</option>
+              </select>
+            </div>
+          </div>
+          <div class="muted" style="margin-top:8px; font-size:12px;">ℹ️ Fixed Price invoices are reconciled deliverable-by-deliverable against milestones. Service month/timesheet is not required.</div>
+        </div>
+
+        <!-- Section Recurring -->
+        <div id="sec_billing_rec" style="display:{'block' if b_type=='RECURRING' else 'none'}; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:8px; padding:16px; margin-bottom:20px;">
+          <b style="font-size:14px; display:block; margin-bottom:10px; color:#166534;">Recurring Subscription / Utility Service</b>
+          <div class="grid">
+            <div style="grid-column: span 2;">
+              <div class="label">Service Contract (Internet / SaaS / License) *</div>
+              <select name="contract_no_rec" id="rec_contract_select" style="width:100%;">
+                {''.join(rec_opts)}
+              </select>
+            </div>
+            <div>
+              <div class="label">Billing Month (Kỳ cước) *</div>
+              <input type="month" name="recurring_month" value="{escape(default_rec_month)}" style="width:100%; padding:6px 8px; font-weight:600;">
+            </div>
+          </div>
+          <div class="muted" style="margin-top:8px; font-size:12px;">ℹ️ Recurring invoices are reconciled automatically against monthly recurring fees without timesheets.</div>
+        </div>
+
+        <h3 style="margin-top: 24px; font-size:15px;">2. Invoice Import Method</h3>
         <div style="margin-bottom: 16px; display: flex; gap: 20px;">
-          <label>
+          <label style="cursor:pointer;">
             <input type="radio" name="import_type" value="file" checked onclick="switchImportType('file')">
             Upload file from computer
           </label>
-          <label>
+          <label style="cursor:pointer;">
             <input type="radio" name="import_type" value="path" onclick="switchImportType('path')">
             Local path on server (File/Directory)
           </label>
-          <label>
+          <label style="cursor:pointer;">
             <input type="radio" name="import_type" value="paste" onclick="switchImportType('paste')">
             Paste XML content
           </label>
@@ -1675,7 +1976,7 @@ def page_new_invoice(
         <!-- Section 1: Upload File -->
         <div id="sec-file">
           <div class="label" style="margin-bottom: 8px;">Select one or more XML invoice files</div>
-          <input type="file" name="xml_files" multiple accept=".xml" style="width: 100%; border: 1px dashed #ccc; padding: 20px; border-radius: 8px; background: #fafafa;">
+          <input type="file" name="xml_files" multiple accept=".xml" style="width: 100%; border: 1px dashed #ccc; padding: 20px; border-radius: 8px; background: #fafafa; cursor:pointer;">
         </div>
 
         <!-- Section 2: Local Path -->
@@ -1687,22 +1988,82 @@ def page_new_invoice(
         <!-- Section 3: Paste XML -->
         <div id="sec-paste" style="display: none;">
           <div class="label" style="margin-bottom: 8px;">Paste XML invoice code below</div>
-          <textarea name="xml_content" placeholder="&lt;HDon&gt;...&lt;/HDon&gt;"></textarea>
+          <textarea name="xml_content" placeholder="&lt;HDon&gt;...&lt;/HDon&gt;" style="width:100%; height:120px; font-family:monospace;"></textarea>
         </div>
 
         <div class="actions" style="margin-top:24px;">
-          <button type="submit" style="background: #0b57d0; color: #fff; border-color: #0b57d0; font-weight: 600; padding: 10px 20px;">Import Invoice</button>
+          <button type="submit" style="background: #0b57d0; color: #fff; border-color: #0b57d0; font-weight: 600; padding: 10px 24px;">Import Invoice</button>
           <a class="muted" href="/">Cancel</a>
         </div>
       </form>
     </div>
 
     <script>
+      const allMilestones = {milestones_json};
+
+      function switchBillingType(type) {{
+        document.getElementById('sec_billing_tm').style.display = (type === 'TM') ? 'block' : 'none';
+        document.getElementById('sec_billing_fp').style.display = (type === 'FIXED_PRICE') ? 'block' : 'none';
+        document.getElementById('sec_billing_rec').style.display = (type === 'RECURRING') ? 'block' : 'none';
+
+        document.getElementById('tab_tm').style.background = (type === 'TM') ? '#4f46e5' : 'transparent';
+        document.getElementById('tab_tm').style.color = (type === 'TM') ? '#fff' : '#334155';
+
+        document.getElementById('tab_fp').style.background = (type === 'FIXED_PRICE') ? '#4f46e5' : 'transparent';
+        document.getElementById('tab_fp').style.color = (type === 'FIXED_PRICE') ? '#fff' : '#334155';
+
+        document.getElementById('tab_rec').style.background = (type === 'RECURRING') ? '#4f46e5' : 'transparent';
+        document.getElementById('tab_rec').style.color = (type === 'RECURRING') ? '#fff' : '#334155';
+
+        document.getElementById('active_billing_type').value = type;
+
+        if (type === 'FIXED_PRICE') {{
+          onFpContractChange();
+        }}
+      }}
+
+      function onFpContractChange() {{
+        const sel = document.getElementById('fp_contract_select');
+        const opt = sel.options[sel.selectedIndex];
+        if (!opt) return;
+        const cid = opt.getAttribute('data-cid');
+        const aid = opt.getAttribute('data-aid');
+        const mSel = document.getElementById('milestone_select');
+        mSel.innerHTML = '<option value="">-- Auto-match milestone by amount --</option>';
+
+        const selectedMid = "{milestone_id or ''}";
+
+        allMilestones.forEach(m => {{
+          let match = false;
+          if (aid && aid !== '') {{
+            match = (String(m.annex_id) === String(aid));
+          }} else if (cid && cid !== '') {{
+            match = (String(m.contract_id) === String(cid) && !m.annex_id);
+          }}
+          if (match) {{
+            const isSel = (String(m.id) === String(selectedMid)) ? 'selected' : '';
+            const statusNote = m.invoice_id ? ' [Already Invoiced]' : ` [${{m.status}}]`;
+            mSel.innerHTML += `<option value="${{m.id}}" ${{isSel}}>${{m.name}} (${{Math.round(m.amount).toLocaleString()}} VND)${{statusNote}}</option>`;
+          }}
+        }});
+
+        if (selectedMid) {{
+          mSel.value = selectedMid;
+        }}
+      }}
+
       function switchImportType(type) {{
         document.getElementById('sec-file').style.display = type === 'file' ? 'block' : 'none';
         document.getElementById('sec-path').style.display = type === 'path' ? 'block' : 'none';
         document.getElementById('sec-paste').style.display = type === 'paste' ? 'block' : 'none';
       }}
+
+      // Init on load
+      document.addEventListener('DOMContentLoaded', function() {{
+        if ('{b_type}' === 'FIXED_PRICE') {{
+          onFpContractChange();
+        }}
+      }});
     </script>
     """
     return layout("Import New Invoice", body)
@@ -1714,41 +2075,59 @@ def handle_new_invoice_post(handler):
         send_html(handler, page_new_invoice("Valid form data was not received."))
         return
 
-    # Extract common fields
-    sy_raw = form.get("service_year", [""])[0].strip()
-    sm_raw = form.get("service_month", [""])[0].strip()
-    sd_raw = form.get("service_day", [""])[0].strip()
-    contract_no = form.get("contract_no", [""])[0].strip()
+    billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip().upper()
     import_type = form.get("import_type", ["file"])[0].strip()
     return_month = form.get("return_month", [""])[0].strip()
     from_attendance = form.get("from_attendance", ["0"])[0].strip() == "1"
+    return_to = form.get("return_to", [""])[0].strip() or None
+
+    service_year = None
+    service_month = None
+    service_day = None
+    contract_no = None
+    milestone_id = None
+
+    if billing_type == "FIXED_PRICE":
+        contract_no = (form.get("contract_no_fp", [""])[0] or form.get("contract_no", [""])[0]).strip() or None
+        milestone_id_raw = (form.get("milestone_id", [""])[0] or "").strip()
+        milestone_id = parse_int_or_none(milestone_id_raw)
+    elif billing_type == "RECURRING":
+        contract_no = (form.get("contract_no_rec", [""])[0] or form.get("contract_no", [""])[0]).strip() or None
+        rec_month = form.get("recurring_month", [""])[0].strip()
+        if rec_month and "-" in rec_month:
+            parts = rec_month.split("-")
+            service_year = int(parts[0])
+            service_month = int(parts[1])
+    else:  # TM
+        contract_no = (form.get("contract_no_tm", [""])[0] or form.get("contract_no", [""])[0]).strip() or None
+        sy_raw = form.get("service_year", [""])[0].strip()
+        sm_raw = form.get("service_month", [""])[0].strip()
+        sd_raw = form.get("service_day", [""])[0].strip()
+        service_year = parse_int_or_none(sy_raw)
+        service_month = parse_int_or_none(sm_raw)
+        service_day = parse_int_or_none(sd_raw)
 
     def render_err(msg):
         return page_new_invoice(
             error_msg=msg,
-            service_year=sy_raw,
-            service_month=sm_raw,
-            service_day=sd_raw,
+            service_year=service_year,
+            service_month=service_month,
+            service_day=service_day,
             contract_no=contract_no,
             return_month=return_month,
-            from_attendance=from_attendance
+            from_attendance=from_attendance,
+            billing_type=billing_type,
+            milestone_id=milestone_id,
+            return_to=return_to
         )
 
-    service_year = parse_int_or_none(sy_raw)
-    service_month = parse_int_or_none(sm_raw)
-    service_day = parse_int_or_none(sd_raw)
-    contract_no = contract_no if contract_no != "" else None
-
-    # Validate dates
-    if service_month is not None and not (1 <= service_month <= 12):
-        send_html(handler, render_err("Month must be between 1 and 12, or empty"))
-        return
-    if service_day is not None and not (1 <= service_day <= 31):
-        send_html(handler, render_err("Day must be between 1 and 31, or empty"))
-        return
-    if service_year is not None and not (1900 <= service_year <= 2100):
-        send_html(handler, render_err("Year should be between 1900 and 2100, or empty"))
-        return
+    if billing_type == "TM":
+        if service_month is not None and not (1 <= service_month <= 12):
+            send_html(handler, render_err("Month must be between 1 and 12, or empty"))
+            return
+        if service_year is not None and not (1900 <= service_year <= 2100):
+            send_html(handler, render_err("Year should be between 1900 and 2100, or empty"))
+            return
 
     # Collect XML items to process: list of tuples (filename/source, xml_bytes)
     xml_items = []
@@ -1767,18 +2146,18 @@ def handle_new_invoice_post(handler):
         if not local_path_raw:
             send_html(handler, render_err("Please enter the directory or XML file path."))
             return
-        
+
         path_obj = Path(local_path_raw)
         if not path_obj.exists():
             send_html(handler, render_err(f"Path does not exist on server: {local_path_raw}"))
             return
-        
+
         try:
             for xml_file in iter_local_xml_files(path_obj):
                 try:
                     xml_bytes = xml_file.read_bytes()
                     xml_items.append((str(xml_file), xml_bytes))
-                except Exception as ex:
+                except Exception:
                     pass
         except Exception as e:
             send_html(handler, render_err(f"Error traversing path: {str(e)}"))
@@ -1794,7 +2173,7 @@ def handle_new_invoice_post(handler):
             send_html(handler, render_err("Please paste the XML invoice code."))
             return
         xml_items.append(("Pasted from Clipboard", xml_content_raw.encode("utf-8")))
-    
+
     else:
         send_html(handler, render_err("Invalid import method."))
         return
@@ -1802,13 +2181,13 @@ def handle_new_invoice_post(handler):
     # Process XML items
     conn = db_connect()
     results = []
-    
+
     try:
         for source_name, xml_bytes in xml_items:
             try:
                 # 1. Parse XML
                 invoice, tax_lines = parse_xml_bytes(xml_bytes, source_name)
-                
+
                 # 2. Insert or duplicate check
                 invoice_id, is_dup = db_insert_or_duplicate(
                     conn,
@@ -1817,9 +2196,10 @@ def handle_new_invoice_post(handler):
                     service_month=service_month,
                     service_day=service_day,
                     contract_no=contract_no,
-                    source_path=source_name
+                    source_path=source_name,
+                    milestone_id=milestone_id
                 )
-                
+
                 if is_dup:
                     results.append({
                         "source": source_name,
@@ -1836,7 +2216,7 @@ def handle_new_invoice_post(handler):
                 results.append({
                     "source": source_name,
                     "status": "OK",
-                    "detail": f"Successfully imported Series={invoice['khhdon']} No={invoice['shdon']} (Tax rates: {', '.join(tl.get('tsuat','') for tl in tax_lines)})",
+                    "detail": f"Successfully imported Series={invoice['khhdon']} No={invoice['shdon']} ({invoice['tg_tttbso']:,.0f} VND)",
                     "id": invoice_id
                 })
 
@@ -1887,21 +2267,44 @@ def handle_new_invoice_post(handler):
         except Exception:
             pass
 
-    acceptance_link_btn = ""
-    if from_attendance or target_month:
-        import urllib.parse
-        acc_url = f"/attendance/acceptance?month={urllib.parse.quote(target_month)}" if target_month else "/attendance/acceptance"
-        acceptance_link_btn = f'<a href="{acc_url}"><button type="button" class="btn-secondary">Forward to Attendance acceptance &rarr;</button></a>'
+    # Dynamic post-import navigation buttons based on billing_type and return_to
+    nav_buttons = []
+    if return_to:
+        if "fixed-price" in return_to:
+            btn_txt = "Return to Fixed Price Payments &rarr;"
+        elif "recurring" in return_to:
+            btn_txt = "Return to Recurring Services &rarr;"
+        elif "acceptance" in return_to:
+            btn_txt = "Forward to Attendance acceptance &rarr;"
+        elif "contract" in return_to or "annex" in return_to:
+            btn_txt = "Return to Contract Details &rarr;"
+        elif "attendance" in return_to:
+            btn_txt = "Return to Timesheet & Payroll &rarr;"
+        elif return_to == "/":
+            btn_txt = "Return to Invoices List &rarr;"
+        else:
+            btn_txt = "Return to Previous Page &rarr;"
+        nav_buttons.append(f'<a href="{escape(return_to)}"><button type="button" class="btn-secondary" style="color:#0b57d0; border-color:#0b57d0; font-weight:600;">{btn_txt}</button></a>')
+    elif billing_type == "FIXED_PRICE":
+        nav_buttons.append('<a href="/payments/fixed-price"><button type="button" class="btn-secondary" style="color:#0b57d0; border-color:#0b57d0; font-weight:600;">View Fixed Price Payments &rarr;</button></a>')
+    elif billing_type == "RECURRING":
+        rec_m = target_month or f"{now.year:04d}-{now.month:02d}"
+        nav_buttons.append(f'<a href="/payments/recurring?month={rec_m}"><button type="button" class="btn-secondary" style="color:#0b57d0; border-color:#0b57d0; font-weight:600;">View Recurring Services ({rec_m}) &rarr;</button></a>')
+    else:  # TM
+        if from_attendance or target_month:
+            import urllib.parse
+            acc_url = f"/attendance/acceptance?month={urllib.parse.quote(target_month)}" if target_month else "/attendance/acceptance"
+            nav_buttons.append(f'<a href="{acc_url}"><button type="button" class="btn-secondary">Forward to Attendance acceptance &rarr;</button></a>')
 
     summary_html = f"""
     <div class="card">
-      <h2>Import Results</h2>
+      <h2>Invoice Import Results</h2>
       <div style="margin-bottom:14px; font-size:16px;">
         Success: <b style="color:green;">{success_count}</b> | 
         Duplicate: <b style="color:orange;">{dup_count}</b> | 
         Error: <b style="color:red;">{fail_count}</b>
       </div>
-      
+
       <table>
         <thead>
           <tr>
@@ -1915,10 +2318,10 @@ def handle_new_invoice_post(handler):
         </tbody>
       </table>
 
-      <div class="actions" style="margin-top:20px; display:flex; gap:10px; align-items:center;">
+      <div class="actions" style="margin-top:20px; display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
         <a href="/"><button type="button" style="background:#0b57d0; color:#fff; border-color:#0b57d0; font-weight:600;">Invoices List</button></a>
-        <a href="/invoice/new"><button type="button" class="btn-secondary">Import More Invoices</button></a>
-        {acceptance_link_btn}
+        <a href="/invoice/new?billing_type={billing_type}&contract_no={escape(contract_no or '')}"><button type="button" class="btn-secondary">+ Import More Invoices</button></a>
+        {' '.join(nav_buttons)}
       </div>
     </div>
     """
