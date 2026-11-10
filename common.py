@@ -263,6 +263,37 @@ def init_db():
         """)
         conn.commit()
 
+        # -------- Fixed Price & Contract Classification Migrations --------
+        ensure_column(conn, "contracts", "contract_type", "TEXT NOT NULL DEFAULT 'FRAMEWORK'")
+        ensure_column(conn, "contracts", "billing_type", "TEXT NOT NULL DEFAULT 'TM'")
+        ensure_column(conn, "contract_annexes", "billing_type", "TEXT NOT NULL DEFAULT 'TM'")
+
+        # -------- contract_milestones --------
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS contract_milestones (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                contract_id INTEGER NOT NULL,
+                annex_id INTEGER NULL,
+                milestone_name TEXT NOT NULL,
+                milestone_type TEXT NOT NULL DEFAULT 'DELIVERY',
+                percentage REAL NULL,
+                amount REAL NOT NULL DEFAULT 0.0,
+                planned_date TEXT NULL,
+                actual_date TEXT NULL,
+                status TEXT NOT NULL DEFAULT 'PENDING',
+                acceptance_doc_no TEXT NULL,
+                invoice_id INTEGER NULL,
+                cashout_date TEXT NULL,
+                note TEXT NULL,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY(contract_id) REFERENCES contracts(id),
+                FOREIGN KEY(annex_id) REFERENCES contract_annexes(id),
+                FOREIGN KEY(invoice_id) REFERENCES invoices(id)
+            )
+        """)
+        conn.commit()
+
         # -------- invoices --------
         cur.execute("""
             CREATE TABLE IF NOT EXISTS invoices (
@@ -309,6 +340,8 @@ def init_db():
             conn.commit()
         except sqlite3.OperationalError:
             pass
+
+        ensure_column(conn, "invoices", "milestone_id", "INTEGER NULL")
 
         # -------- invoice_tax_lines --------
         cur.execute("""
@@ -965,6 +998,26 @@ def layout(title: str, body_html: str):
       background: var(--danger-bg);
       color: var(--danger);
     }}
+    .tag-active {{
+      border-color: #a7f3d0;
+      background: #ecfdf5;
+      color: #047857;
+    }}
+    .tag-info {{
+      border-color: #bae6fd;
+      background: #e0f2fe;
+      color: #0369a1;
+    }}
+    .tag-warning {{
+      border-color: #fde68a;
+      background: #fef3c7;
+      color: #b45309;
+    }}
+    .tag-purple {{
+      border-color: #ddd6fe;
+      background: #f5f3ff;
+      color: #6d28d9;
+    }}
     
     .actions {{
       display: flex;
@@ -1365,3 +1418,23 @@ def fmt_money(amount, currency: str | None = None):
     except (ValueError, TypeError):
         s = str(amount)
     return f"{s} {currency}" if currency else s
+
+
+def get_milestones_for_contract(conn: sqlite3.Connection, contract_id: int, annex_id: int | None = None) -> list:
+    if annex_id is not None:
+        return conn.execute("""
+            SELECT m.*, i.shdon, i.khhdon, i.tg_tttbso
+            FROM contract_milestones m
+            LEFT JOIN invoices i ON i.id = m.invoice_id
+            WHERE m.contract_id = ? AND m.annex_id = ?
+            ORDER BY m.planned_date ASC, m.id ASC
+        """, (contract_id, annex_id)).fetchall()
+    else:
+        return conn.execute("""
+            SELECT m.*, i.shdon, i.khhdon, i.tg_tttbso
+            FROM contract_milestones m
+            LEFT JOIN invoices i ON i.id = m.invoice_id
+            WHERE m.contract_id = ? AND m.annex_id IS NULL
+            ORDER BY m.planned_date ASC, m.id ASC
+        """, (contract_id,)).fetchall()
+

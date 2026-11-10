@@ -2481,6 +2481,175 @@ class TestProjects(BaseTestCase):
         self.assertEqual(row_a2["months"]["2026-10"]["payroll"], 70000000.0)
 
 
+class TestFixedPriceMilestones(BaseTestCase):
+    def test_standalone_fixed_price_contract_and_milestones(self):
+        # 1. Create Standalone Fixed Price Contract
+        body = (
+            f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}"
+            f"&framework_no=FP-2026-001&framework_name=Core+Banking+Module"
+            f"&contract_type=STANDALONE&billing_type=FIXED_PRICE"
+            f"&contract_value=500000000&start_date=2026-01-01&end_date=2026-12-31"
+        ).encode()
+        handler = MockHandler(body=body, headers={"content-length": str(len(body))})
+        contracts.handle_contract_create_post(handler)
+        self.assertEqual(handler.response_status, 302)
+
+        c = self.conn.execute("SELECT * FROM contracts WHERE framework_no='FP-2026-001'").fetchone()
+        self.assertIsNotNone(c)
+        self.assertEqual(c["contract_type"], "STANDALONE")
+        self.assertEqual(c["billing_type"], "FIXED_PRICE")
+        self.assertEqual(float(c["contract_value"]), 500000000.0)
+        c_id = c["id"]
+
+        # 2. Add Milestones to this contract
+        # Milestone 1: Advance payment 20% = 100M
+        body_m1 = (
+            f"contract_id={c_id}&annex_id=&milestone_name=T%E1%BA%A1m+%E1%BB%A9ng+20%25"
+            f"&milestone_type=ADVANCE&percentage=20&amount=100000000"
+            f"&planned_date=2026-01-15&status=PENDING"
+        ).encode()
+        h_m1 = MockHandler(body=body_m1, headers={"content-length": str(len(body_m1))})
+        contracts.handle_milestone_create_post(h_m1)
+        self.assertEqual(h_m1.response_status, 302)
+
+        # Milestone 2: UAT 50% = 250M
+        body_m2 = (
+            f"contract_id={c_id}&annex_id=&milestone_name=Nghi%E1%BB%87m+thu+UAT"
+            f"&milestone_type=ACCEPTANCE&percentage=50&amount=250000000"
+            f"&planned_date=2026-06-30&status=PENDING"
+        ).encode()
+        h_m2 = MockHandler(body=body_m2, headers={"content-length": str(len(body_m2))})
+        contracts.handle_milestone_create_post(h_m2)
+
+        # Milestone 3: Golive 30% = 150M
+        body_m3 = (
+            f"contract_id={c_id}&annex_id=&milestone_name=B%C3%A0n+giao+to%C3%A0n+di%E1%BB%87n"
+            f"&milestone_type=DELIVERY&percentage=30&amount=150000000"
+            f"&planned_date=2026-11-30&status=PENDING"
+        ).encode()
+        h_m3 = MockHandler(body=body_m3, headers={"content-length": str(len(body_m3))})
+        contracts.handle_milestone_create_post(h_m3)
+
+        ms = common.get_milestones_for_contract(self.conn, c_id, annex_id=None)
+        self.assertEqual(len(ms), 3)
+        self.assertEqual(sum(float(m["amount"]) for m in ms), 500000000.0)
+
+        m1_id = ms[0]["id"]
+
+        # 3. Update Milestone 1
+        body_update = (
+            f"id={m1_id}&milestone_name=T%E1%BA%A1m+%E1%BB%A9ng+%C4%91%E1%BB%A3t+1"
+            f"&milestone_type=ADVANCE&percentage=20&amount=100000000"
+            f"&planned_date=2026-01-15&actual_date=2026-01-16&status=ACCEPTED"
+            f"&acceptance_doc_no=BBNT-ADV-01&cashout_date=&note=Ghi+chu"
+        ).encode()
+        h_up = MockHandler(body=body_update, headers={"content-length": str(len(body_update))})
+        contracts.handle_milestone_update_post(h_up)
+        self.assertEqual(h_up.response_status, 302)
+
+        m1_updated = self.conn.execute("SELECT * FROM contract_milestones WHERE id=?", (m1_id,)).fetchone()
+        self.assertEqual(m1_updated["acceptance_doc_no"], "BBNT-ADV-01")
+        self.assertEqual(m1_updated["status"], "ACCEPTED")
+
+        # 4. Cashout Milestone 1
+        body_co = f"id={m1_id}&cashout_date=2026-01-20".encode()
+        h_co = MockHandler(body=body_co, headers={"content-length": str(len(body_co))})
+        contracts.handle_milestone_cashout_post(h_co)
+        self.assertEqual(h_co.response_status, 302)
+
+        m1_paid = self.conn.execute("SELECT * FROM contract_milestones WHERE id=?", (m1_id,)).fetchone()
+        self.assertEqual(m1_paid["cashout_date"], "2026-01-20")
+        self.assertEqual(m1_paid["status"], "PAID")
+
+        # 5. Test Invoice Reconciliation for Fixed Price Contract
+        # Matching amount 100M
+        st, l_sum, a_sum, msg = invoices.check_invoice_payroll_reconciliation(
+            self.conn, "FP-2026-001", None, None, 100000000.0
+        )
+        self.assertEqual(st, "ok")
+        self.assertIn("Khớp mốc Fixed Price", msg)
+
+        # Mismatch amount (e.g. 80M)
+        st_mis, l_sum, a_sum, msg_mis = invoices.check_invoice_payroll_reconciliation(
+            self.conn, "FP-2026-001", None, None, 80000000.0
+        )
+        self.assertEqual(st_mis, "mismatch")
+
+        # 6. Test UI rendering
+        html_contract = contracts.page_contract_form("edit", c, [])
+        self.assertIn("Kế hoạch thanh toán / Mốc tiến độ", html_contract)
+        self.assertIn("Tạm ứng đợt 1", html_contract)
+        self.assertIn("Nghiệm thu UAT", html_contract)
+
+        html_list = contracts.page_contracts_list(q="FP-2026-001", status="active", return_to="/contracts")
+        self.assertIn("Standalone", html_list)
+        self.assertIn("Fixed Price", html_list)
+        self.assertIn("3 mốc", html_list)
+
+        # 7. Delete Milestone 3
+        m3_id = ms[2]["id"]
+        body_del = f"id={m3_id}".encode()
+        h_del = MockHandler(body=body_del, headers={"content-length": str(len(body_del))})
+        contracts.handle_milestone_delete_post(h_del)
+        self.assertEqual(h_del.response_status, 302)
+
+        remaining_ms = common.get_milestones_for_contract(self.conn, c_id, annex_id=None)
+        self.assertEqual(len(remaining_ms), 2)
+
+    def test_framework_contract_with_fixed_price_annex(self):
+        # 1. Create Framework Contract
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (
+              buyer_vendor_id, seller_vendor_id, framework_no, framework_name,
+              contract_type, billing_type, is_active, created_at, updated_at
+            ) VALUES (?, ?, 'MSA-FIXED-01', 'Framework for Solutions', 'FRAMEWORK', 'TM', 1, datetime('now'), datetime('now'))
+        """, (self.buyer_id, self.seller_id))
+        c_id = cur.lastrowid
+        self.conn.commit()
+
+        # 2. Create Fixed Price Annex under this contract
+        body_a = (
+            f"contract_id={c_id}&annex_name=ANNEX-FP-PHASE1&billing_type=FIXED_PRICE"
+            f"&value=300000000&start_date=2026-03-01&end_date=2026-08-31"
+        ).encode()
+        h_a = MockHandler(body=body_a, headers={"content-length": str(len(body_a))})
+        contracts.handle_annex_create_post(h_a)
+        self.assertEqual(h_a.response_status, 302)
+
+        annex = self.conn.execute("SELECT * FROM contract_annexes WHERE annex_name='ANNEX-FP-PHASE1'").fetchone()
+        self.assertIsNotNone(annex)
+        self.assertEqual(annex["billing_type"], "FIXED_PRICE")
+        a_id = annex["id"]
+
+        # 3. Add Milestone to this Annex
+        body_m = (
+            f"contract_id={c_id}&annex_id={a_id}&milestone_name=Giai+%C4%91o%E1%BA%A1n+1"
+            f"&milestone_type=DELIVERY&percentage=100&amount=300000000"
+            f"&planned_date=2026-08-15&status=PENDING"
+        ).encode()
+        h_m = MockHandler(body=body_m, headers={"content-length": str(len(body_m))})
+        contracts.handle_milestone_create_post(h_m)
+        self.assertEqual(h_m.response_status, 302)
+
+        ms = common.get_milestones_for_contract(self.conn, c_id, annex_id=a_id)
+        self.assertEqual(len(ms), 1)
+        self.assertEqual(ms[0]["annex_id"], a_id)
+        self.assertEqual(float(ms[0]["amount"]), 300000000.0)
+
+        # 4. Verify Invoice reconciliation on Annex level
+        st, l_sum, a_sum, msg = invoices.check_invoice_payroll_reconciliation(
+            self.conn, "ANNEX-FP-PHASE1", None, None, 300000000.0
+        )
+        self.assertEqual(st, "ok")
+        self.assertIn("Giai đoạn 1", msg)
+
+        # 5. Verify Annex Edit page renders milestones card
+        html_annex = contracts.page_annex_form("edit", annex, c_id)
+        self.assertIn("Kế hoạch thanh toán / Mốc tiến độ", html_annex)
+        self.assertIn("Giai đoạn 1", html_annex)
+
+
 if __name__ == "__main__":
     unittest.main()
 

@@ -3,7 +3,8 @@
 from html import escape
 from common import (
     db_connect, layout, LIST_LIMIT, now_iso,
-    read_post_form, redirect, send_html, safe_return_to, log_action, to_float_or_none
+    read_post_form, redirect, send_html, safe_return_to, log_action, to_float_or_none,
+    get_milestones_for_contract
 )
 
 def vendor_label(row):
@@ -58,7 +59,10 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
               COALESCE(bv.company_name, bv.company_name_vi) AS buyer_name, bv.tax_id AS buyer_tax,
               COALESCE(sv.company_name, sv.company_name_vi) AS seller_name, sv.tax_id AS seller_tax,
               (SELECT COUNT(*) FROM contract_annexes a WHERE a.contract_id=c.id AND a.is_active=1) AS annex_count,
-              (SELECT SUM(a.value) FROM contract_annexes a WHERE a.contract_id=c.id AND a.is_active=1) AS annexes_sum
+              (SELECT SUM(a.value) FROM contract_annexes a WHERE a.contract_id=c.id AND a.is_active=1) AS annexes_sum,
+              (SELECT COUNT(*) FROM contract_milestones m WHERE m.contract_id=c.id AND m.annex_id IS NULL) AS milestone_count,
+              (SELECT SUM(m.amount) FROM contract_milestones m WHERE m.contract_id=c.id AND m.annex_id IS NULL) AS milestones_sum,
+              (SELECT COUNT(*) FROM contract_milestones m WHERE m.contract_id=c.id AND m.annex_id IS NULL AND (m.status='PAID' OR m.cashout_date IS NOT NULL)) AS paid_milestone_count
             FROM contracts c
             JOIN vendors bv ON bv.id = c.buyer_vendor_id
             JOIN vendors sv ON sv.id = c.seller_vendor_id
@@ -87,7 +91,7 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
         <div class="actions">
           <button type="submit">Filter</button>
           <a class="muted" href="/contracts">Reset</a>
-          <a href="/contract/new"><button class="btn-secondary" type="button">+ Add Framework Contract</button></a>
+          <a href="/contract/new"><button class="btn-secondary" type="button">+ Add Contract</button></a>
         </div>
       </form>
     </div>
@@ -99,6 +103,12 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
         if int(r["is_active"]) == 0:
             tag = '<span class="tag tag-deactive">Deleted</span>'
 
+        c_type = r["contract_type"] or "FRAMEWORK"
+        b_type = r["billing_type"] or "TM"
+
+        type_badge = '<span class="tag tag-purple">Framework</span>' if c_type == 'FRAMEWORK' else '<span class="tag tag-info">Standalone</span>'
+        billing_badge = '<span class="tag tag-active">T&M</span>' if b_type == 'TM' else '<span class="tag tag-warning">Fixed Price</span>'
+
         buyer = f"{(r['buyer_name'] or '').strip()} ({(r['buyer_tax'] or '').strip()})"
         seller = f"{(r['seller_name'] or '').strip()} ({(r['seller_tax'] or '').strip()})"
 
@@ -109,6 +119,17 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
             val_display = f"{int(round(r['annexes_sum'])):,} <span class='muted' style='font-size:10px;'>(sum of annexes)</span>"
         else:
             val_display = '<span class="muted">No value</span>'
+
+        # Structure / Annexes / Milestones column
+        if c_type == 'STANDALONE':
+            m_cnt = r["milestone_count"] or 0
+            p_cnt = r["paid_milestone_count"] or 0
+            if m_cnt > 0:
+                annex_display = f"<b>{m_cnt} mốc</b> <span class='muted' style='font-size:11px;'>({p_cnt} đã chi)</span>"
+            else:
+                annex_display = '<span class="muted" style="font-size:11px;">Chưa tạo mốc</span>'
+        else:
+            annex_display = f"{r['annex_count']} phụ lục"
 
         actions = f'<a href="/contract/edit?id={r["id"]}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>'
 
@@ -138,13 +159,16 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
           <td>{idx}</td>
           <td>
             <a href="/contract/edit?id={r["id"]}"><b>{escape(r["framework_no"] or "")}</b></a> {tag}
-            <div class="muted">{escape(r["framework_name"] or "")}</div>
+            <div style="margin-top:3px; display:flex; gap:4px; align-items:center;">
+              {type_badge} {billing_badge}
+            </div>
+            <div class="muted" style="margin-top:2px;">{escape(r["framework_name"] or "")}</div>
           </td>
           <td>{escape(buyer)}</td>
           <td>{escape(seller)}</td>
           <td>{escape(r["start_date"] or "")} → {escape(r["end_date"] or "")}</td>
           <td style="text-align:right; font-family:monospace;">{val_display}</td>
-          <td>{r["annex_count"]}</td>
+          <td>{annex_display}</td>
           <td>
             <div class="actions" style="gap:6px; flex-wrap:nowrap; display:flex; align-items:center;">
               {actions}
@@ -167,12 +191,12 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
       <thead>
         <tr>
           <th>No.</th>
-          <th>Framework Contract</th>
+          <th>Contract / Framework</th>
           <th>Purchasing (Buyer)</th>
           <th>Vendor (Seller)</th>
           <th>Contract Period</th>
           <th style="text-align:right;">Value (VND)</th>
-          <th>Annexes (Active)</th>
+          <th>Phụ lục / Mốc</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -182,6 +206,330 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
     </table>
     """
     return layout("Contract Management", body)
+
+
+def render_milestones_card(contract_id: int, annex_id: int | None, milestones: list, total_target_value: float | None, return_to: str) -> str:
+    total_val = float(total_target_value or 0.0)
+    milestones_sum = sum(float(m["amount"] or 0.0) for m in milestones)
+    paid_sum = sum(float(m["amount"] or 0.0) for m in milestones if m["status"] == "PAID" or (m["cashout_date"] and str(m["cashout_date"]).strip()))
+    remaining_sum = max(0.0, total_val - paid_sum) if total_val > 0 else max(0.0, milestones_sum - paid_sum)
+    pct_allocated = (milestones_sum / total_val * 100.0) if total_val > 0 else (100.0 if milestones_sum > 0 else 0.0)
+
+    # Status message on allocation
+    if total_val > 0:
+        if abs(milestones_sum - total_val) < 1.0:
+            alloc_badge = '<span class="tag tag-active">✓ Đã phân bổ đủ 100%</span>'
+        elif milestones_sum < total_val:
+            diff = total_val - milestones_sum
+            alloc_badge = f'<span class="tag tag-warning">Chưa phân bổ hết (Còn thiếu {int(round(diff)):,} VND)</span>'
+        else:
+            diff = milestones_sum - total_val
+            alloc_badge = f'<span class="tag tag-deactive">Vượt giá trị (Thừa {int(round(diff)):,} VND)</span>'
+    else:
+        alloc_badge = ''
+
+    m_trs = []
+    modals = []
+    for idx, m in enumerate(milestones, 1):
+        type_badge = {
+            "ADVANCE": '<span class="tag tag-info">Tạm ứng</span>',
+            "DELIVERY": '<span class="tag tag-warning">Giai đoạn</span>',
+            "ACCEPTANCE": '<span class="tag tag-active">Nghiệm thu</span>',
+            "WARRANTY": '<span class="tag tag-purple">Bảo hành</span>',
+        }.get(m["milestone_type"], '<span class="tag">Khác</span>')
+
+        is_paid = m["status"] == "PAID" or bool(m["cashout_date"] and str(m["cashout_date"]).strip())
+        status_badge = {
+            "PENDING": '<span class="tag">Chưa đến hạn</span>',
+            "ACCEPTED": '<span class="tag tag-active">Đã nghiệm thu</span>',
+            "INVOICED": '<span class="tag tag-info">Đã có HĐ</span>',
+            "PAID": '<span class="tag tag-active" style="background:#047857; color:#fff; border-color:#047857;">✓ Đã chi tiền</span>',
+        }.get("PAID" if is_paid else m["status"], '<span class="tag">Pending</span>')
+
+        pct_display = f"{m['percentage']:.1f}%" if m["percentage"] is not None else "-"
+        amt_display = f"{float(m['amount']):,.0f}" if m["amount"] is not None else "0"
+
+        inv_display = "-"
+        if m["shdon"]:
+            inv_display = f"HĐ: <b>{escape(m['shdon'])}</b>"
+        elif m["invoice_id"]:
+            inv_display = f"HĐ #{m['invoice_id']}"
+
+        cashout_html = ""
+        if is_paid and m["cashout_date"]:
+            cashout_html = f"""
+            <div style="font-size:11px; font-weight:600; color:var(--success);">
+              {escape(m['cashout_date'])}
+              <form class="inline" method="POST" action="/contract/milestone/cashout" style="display:inline; margin-left:4px;">
+                <input type="hidden" name="id" value="{m['id']}">
+                <input type="hidden" name="cashout_date" value="">
+                <input type="hidden" name="return_to" value="{escape(return_to)}">
+                <button type="submit" title="Hủy ngày chi tiền" style="background:none; border:none; color:var(--danger); font-size:11px; cursor:pointer; padding:0;">✕</button>
+              </form>
+            </div>
+            """
+        else:
+            cashout_html = f"""
+            <form class="inline" method="POST" action="/contract/milestone/cashout" style="display:flex; align-items:center; gap:4px;">
+              <input type="hidden" name="id" value="{m['id']}">
+              <input type="hidden" name="return_to" value="{escape(return_to)}">
+              <input type="date" name="cashout_date" value="{now_iso()[:10]}" style="font-size:11px; padding:2px 4px; width:110px;" required>
+              <button type="submit" class="btn-secondary" style="font-size:10px; padding:2px 6px;">Chi tiền</button>
+            </form>
+            """
+
+        edit_modal_id = f"modal_edit_milestone_{m['id']}"
+
+        actions = f"""
+        <button type="button" class="btn-secondary" style="font-size:11px; padding:3px 8px;" onclick="document.getElementById('{edit_modal_id}').style.display='block'">Sửa</button>
+        <form class="inline" method="POST" action="/contract/milestone/delete" onsubmit="return confirm('Xóa mốc thanh toán: {escape(m['milestone_name'])}?');" style="display:inline;">
+          <input type="hidden" name="id" value="{m['id']}">
+          <input type="hidden" name="return_to" value="{escape(return_to)}">
+          <button class="btn-danger" type="submit" style="font-size:11px; padding:3px 8px;">Xóa</button>
+        </form>
+        """
+
+        modal_edit_html = f"""
+        <div id="{edit_modal_id}" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); overflow:auto;">
+          <div style="background:#fff; margin:8% auto; padding:20px; border-radius:8px; width:520px; max-width:92%; box-shadow:0 4px 16px rgba(0,0,0,0.2);">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid #e2e8f0; padding-bottom:8px;">
+              <b style="font-size:15px;">Chỉnh sửa mốc thanh toán #{m['id']}</b>
+              <button type="button" style="background:none; border:none; font-size:18px; cursor:pointer;" onclick="document.getElementById('{edit_modal_id}').style.display='none'">✕</button>
+            </div>
+            <form method="POST" action="/contract/milestone/update">
+              <input type="hidden" name="id" value="{m['id']}">
+              <input type="hidden" name="return_to" value="{escape(return_to)}">
+              <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px;">
+                <div style="grid-column: span 2;">
+                  <div class="label">Tên mốc thanh toán *</div>
+                  <input type="text" name="milestone_name" value="{escape(m['milestone_name'])}" style="width:100%;" required>
+                </div>
+                <div>
+                  <div class="label">Phân loại</div>
+                  <select name="milestone_type" style="width:100%;">
+                    <option value="ADVANCE" {"selected" if m['milestone_type']=="ADVANCE" else ""}>Tạm ứng (Advance)</option>
+                    <option value="DELIVERY" {"selected" if m['milestone_type']=="DELIVERY" else ""}>Giai đoạn (Delivery)</option>
+                    <option value="ACCEPTANCE" {"selected" if m['milestone_type']=="ACCEPTANCE" else ""}>Nghiệm thu (Acceptance)</option>
+                    <option value="WARRANTY" {"selected" if m['milestone_type']=="WARRANTY" else ""}>Bảo hành (Warranty)</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="label">Trạng thái</div>
+                  <select name="status" style="width:100%;">
+                    <option value="PENDING" {"selected" if m['status']=="PENDING" else ""}>Chưa đến hạn (Pending)</option>
+                    <option value="ACCEPTED" {"selected" if m['status']=="ACCEPTED" else ""}>Đã nghiệm thu (Accepted)</option>
+                    <option value="INVOICED" {"selected" if m['status']=="INVOICED" else ""}>Đã có hóa đơn (Invoiced)</option>
+                    <option value="PAID" {"selected" if m['status']=="PAID" else ""}>Đã chi tiền (Paid)</option>
+                  </select>
+                </div>
+                <div>
+                  <div class="label">Tỷ lệ %</div>
+                  <input type="number" step="0.1" name="percentage" value="{m['percentage'] or ''}" style="width:100%;">
+                </div>
+                <div>
+                  <div class="label">Số tiền (VND) *</div>
+                  <input type="number" step="1" name="amount" value="{int(round(m['amount']))}" style="width:100%;" required>
+                </div>
+                <div>
+                  <div class="label">Ngày dự kiến</div>
+                  <input type="date" name="planned_date" value="{escape(m['planned_date'] or '')}" style="width:100%;">
+                </div>
+                <div>
+                  <div class="label">Ngày nghiệm thu thực tế</div>
+                  <input type="date" name="actual_date" value="{escape(m['actual_date'] or '')}" style="width:100%;">
+                </div>
+                <div>
+                  <div class="label">Số Biên bản nghiệm thu</div>
+                  <input type="text" name="acceptance_doc_no" value="{escape(m['acceptance_doc_no'] or '')}" style="width:100%;">
+                </div>
+                <div>
+                  <div class="label">Ngày chi tiền (Cashout)</div>
+                  <input type="date" name="cashout_date" value="{escape(m['cashout_date'] or '')}" style="width:100%;">
+                </div>
+                <div style="grid-column: span 2;">
+                  <div class="label">Ghi chú</div>
+                  <input type="text" name="note" value="{escape(m['note'] or '')}" style="width:100%;">
+                </div>
+              </div>
+              <div style="text-align:right; margin-top:14px;">
+                <button type="button" class="btn-secondary" onclick="document.getElementById('{edit_modal_id}').style.display='none'" style="margin-right:8px;">Hủy</button>
+                <button type="submit">Lưu</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        """
+        modals.append(modal_edit_html)
+
+        m_trs.append(f"""
+        <tr>
+          <td>{idx}</td>
+          <td>
+            <b>{escape(m['milestone_name'])}</b>
+            {f"<div class='muted' style='font-size:11px;'>BBNT: <code>{escape(m['acceptance_doc_no'])}</code></div>" if m['acceptance_doc_no'] else ""}
+            {f"<div class='muted' style='font-size:11px;'>{escape(m['note'])}</div>" if m['note'] else ""}
+          </td>
+          <td>{type_badge}</td>
+          <td style="text-align:right; font-family:monospace;">{pct_display}</td>
+          <td style="text-align:right; font-family:monospace; font-weight:600;">{amt_display}</td>
+          <td style="font-size:11px;">
+            <div>DK: {escape(m['planned_date'] or '-')}</div>
+            {f"<div style='color:var(--success); font-weight:500;'>TT: {escape(m['actual_date'])}</div>" if m['actual_date'] else ""}
+          </td>
+          <td style="font-size:11px;">{inv_display}</td>
+          <td>{cashout_html}</td>
+          <td>{status_badge}</td>
+          <td>
+            <div class="actions" style="gap:4px; flex-wrap:nowrap;">
+              {actions}
+            </div>
+          </td>
+        </tr>
+        """)
+
+    form_id = f"add_milestone_form_{contract_id}_{annex_id or 0}"
+    calc_func_name = f"calc_amt_{contract_id}_{annex_id or 0}"
+
+    return f"""
+    <div class="card" style="border-top: 3px solid #0b57d0;">
+      <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+        <div>
+          <b style="font-size:15px;">💰 Kế hoạch thanh toán / Mốc tiến độ (Payment Milestones)</b>
+          {alloc_badge}
+        </div>
+        <button class="btn-secondary" type="button" onclick="var f=document.getElementById('{form_id}'); f.style.display=(f.style.display==='none'?'block':'none');">+ Thêm mốc thanh toán</button>
+      </div>
+
+      <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap:12px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-bottom:14px;">
+        <div>
+          <div class="muted" style="font-size:11px;">Mục tiêu hợp đồng</div>
+          <b style="font-family:monospace; font-size:14px;">{int(round(total_val)):,} VND</b>
+        </div>
+        <div>
+          <div class="muted" style="font-size:11px;">Tổng các mốc ({pct_allocated:.1f}%)</div>
+          <b style="font-family:monospace; font-size:14px; color:#0b57d0;">{int(round(milestones_sum)):,} VND</b>
+        </div>
+        <div>
+          <div class="muted" style="font-size:11px;">Đã thanh toán (Cashout)</div>
+          <b style="font-family:monospace; font-size:14px; color:var(--success);">{int(round(paid_sum)):,} VND</b>
+        </div>
+        <div>
+          <div class="muted" style="font-size:11px;">Còn lại cần chi</div>
+          <b style="font-family:monospace; font-size:14px; color:var(--danger);">{int(round(remaining_sum)):,} VND</b>
+        </div>
+      </div>
+
+      <table style="width:100%; border-collapse:collapse; margin:0;">
+        <thead>
+          <tr>
+            <th>No.</th>
+            <th>Tên mốc thanh toán</th>
+            <th>Phân loại</th>
+            <th style="text-align:right;">%</th>
+            <th style="text-align:right;">Số tiền (VND)</th>
+            <th>Tiến độ</th>
+            <th>Hóa đơn</th>
+            <th>Ngày chi tiền</th>
+            <th>Trạng thái</th>
+            <th>Thao tác</th>
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(m_trs) if m_trs else '<tr><td colspan="10" class="muted" style="text-align:center; padding:16px;">Chưa có mốc thanh toán nào. Nhấn "+ Thêm mốc thanh toán" để tạo.</td></tr>'}
+        </tbody>
+      </table>
+
+      <!-- Form Thêm mốc mới -->
+      <div id="{form_id}" style="display:none; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:8px; padding:16px; margin-top:14px;">
+        <b style="font-size:14px; display:block; margin-bottom:10px;">+ Tạo mới mốc thanh toán / tiến độ</b>
+        <form method="POST" action="/contract/milestone/create">
+          <input type="hidden" name="contract_id" value="{contract_id}">
+          <input type="hidden" name="annex_id" value="{annex_id if annex_id is not None else ''}">
+          <input type="hidden" name="return_to" value="{escape(return_to)}">
+
+          <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:12px;">
+            <div style="grid-column: span 2;">
+              <div class="label">Tên mốc thanh toán *</div>
+              <input type="text" name="milestone_name" placeholder="Ví dụ: Tạm ứng 20%, Nghiệm thu UAT 50%, Golive..." style="width:100%;" required>
+            </div>
+            <div>
+              <div class="label">Phân loại</div>
+              <select name="milestone_type" style="width:100%;">
+                <option value="ADVANCE">Tạm ứng (Advance)</option>
+                <option value="DELIVERY" selected>Giai đoạn (Delivery)</option>
+                <option value="ACCEPTANCE">Nghiệm thu (Acceptance)</option>
+                <option value="WARRANTY">Bảo hành (Warranty)</option>
+              </select>
+            </div>
+            <div>
+              <div class="label">Trạng thái</div>
+              <select name="status" style="width:100%;">
+                <option value="PENDING" selected>Chưa đến hạn (Pending)</option>
+                <option value="ACCEPTED">Đã nghiệm thu (Accepted)</option>
+                <option value="INVOICED">Đã có hóa đơn (Invoiced)</option>
+                <option value="PAID">Đã chi tiền (Paid)</option>
+              </select>
+            </div>
+            <div>
+              <div class="label">Tỷ lệ %</div>
+              <input type="number" step="0.1" id="{form_id}_pct" name="percentage" placeholder="Ví dụ: 20" style="width:100%;" oninput="{calc_func_name}('pct')">
+            </div>
+            <div>
+              <div class="label">Số tiền (VND) *</div>
+              <input type="number" step="1" id="{form_id}_amt" name="amount" placeholder="Ví dụ: 100000000" style="width:100%;" oninput="{calc_func_name}('amt')" required>
+            </div>
+            <div>
+              <div class="label">Ngày dự kiến</div>
+              <input type="date" name="planned_date" style="width:100%;">
+            </div>
+            <div>
+              <div class="label">Ngày nghiệm thu thực tế</div>
+              <input type="date" name="actual_date" style="width:100%;">
+            </div>
+            <div>
+              <div class="label">Số Biên bản nghiệm thu</div>
+              <input type="text" name="acceptance_doc_no" placeholder="BBNT-01..." style="width:100%;">
+            </div>
+            <div>
+              <div class="label">Ngày chi tiền (Cashout)</div>
+              <input type="date" name="cashout_date" style="width:100%;">
+            </div>
+            <div style="grid-column: span 2;">
+              <div class="label">Ghi chú</div>
+              <input type="text" name="note" placeholder="Ghi chú thêm điều kiện thanh toán..." style="width:100%;">
+            </div>
+          </div>
+
+          <div style="margin-top:14px; display:flex; gap:8px;">
+            <button type="submit">Lưu mốc thanh toán</button>
+            <button class="btn-secondary" type="button" onclick="document.getElementById('{form_id}').style.display='none'">Đóng</button>
+          </div>
+        </form>
+
+        <script>
+        function {calc_func_name}(src) {{
+          var total = {total_val};
+          if (total <= 0) return;
+          var pctInput = document.getElementById('{form_id}_pct');
+          var amtInput = document.getElementById('{form_id}_amt');
+          if (src === 'pct') {{
+            var p = parseFloat(pctInput.value);
+            if (!isNaN(p)) {{
+              amtInput.value = Math.round(total * (p / 100));
+            }}
+          }} else if (src === 'amt') {{
+            var a = parseFloat(amtInput.value);
+            if (!isNaN(a)) {{
+              pctInput.value = (a / total * 100).toFixed(1);
+            }}
+          }}
+        }}
+        </script>
+      </div>
+
+      {''.join(modals)}
+    </div>
+    """
 
 
 def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | None = None):
@@ -226,6 +574,24 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
             return ""
         x = contract_row[key]
         return "" if x is None else str(x)
+
+    c_type_val = gv("contract_type") or "FRAMEWORK"
+    b_type_val = gv("billing_type") or "TM"
+
+    milestones_html = ""
+    if mode == "edit" and contract_row:
+        conn = db_connect()
+        try:
+            ms = get_milestones_for_contract(conn, contract_row["id"], annex_id=None)
+        finally:
+            conn.close()
+        milestones_html = render_milestones_card(
+            contract_id=contract_row["id"],
+            annex_id=None,
+            milestones=ms,
+            total_target_value=contract_row["contract_value"],
+            return_to=f"/contract/edit?id={contract_row['id']}"
+        )
 
     title = "Add Framework Contract" if mode == "new" else f"Edit Contract #{contract_row['id']}"
     action = "/contract/create" if mode == "new" else "/contract/update"
@@ -411,6 +777,22 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
 
         <div class="grid">
           <div>
+            <div class="label">Cấu trúc hợp đồng (Contract Structure)</div>
+            <select name="contract_type" id="contract_type" style="width:100%;">
+              <option value="FRAMEWORK" {"selected" if c_type_val=="FRAMEWORK" else ""}>Hợp đồng khung (Framework Agreement / MSA)</option>
+              <option value="STANDALONE" {"selected" if c_type_val=="STANDALONE" else ""}>Hợp đồng trực tiếp / Độc lập (Standalone / Direct Contract)</option>
+            </select>
+          </div>
+
+          <div>
+            <div class="label">Hình thức thanh toán (Billing Type)</div>
+            <select name="billing_type" id="billing_type" style="width:100%;">
+              <option value="TM" {"selected" if b_type_val=="TM" else ""}>Time & Material (T&M - Chấm công theo tháng)</option>
+              <option value="FIXED_PRICE" {"selected" if b_type_val=="FIXED_PRICE" else ""}>Fixed Price (Trọn gói - Thanh toán theo mốc/tiến độ)</option>
+            </select>
+          </div>
+
+          <div>
             <div class="label">Purchasing company (purchasing=Yes)</div>
             <select name="buyer_vendor_id" style="width:100%;">
               <option value="">-- select --</option>
@@ -427,28 +809,28 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
           </div>
 
           <div>
-            <div class="label">Framework Contract No</div>
+            <div class="label">Số Hợp đồng (Contract No)</div>
             <input type="text" name="framework_no" value="{escape(gv("framework_no"))}" style="width:100%;">
           </div>
 
           <div>
-            <div class="label">Framework Contract Name</div>
+            <div class="label">Tên Hợp đồng (Contract Name)</div>
             <input type="text" name="framework_name" value="{escape(gv("framework_name"))}" style="width:100%;">
           </div>
 
           <div>
-            <div class="label">Contract Value (VND)</div>
+            <div class="label">Tổng giá trị Hợp đồng (VND)</div>
             <input type="number" name="contract_value" value="{escape(gv("contract_value"))}" style="width:100%;" placeholder="{placeholder_val}">
             {f'<div class="muted" style="margin-top:4px; font-size:11px;">Default (Annexes sum): <b>{int(round(annex_sum)):,} VND</b></div>' if annex_sum > 0 else ''}
           </div>
 
           <div>
-            <div class="label">Start date (Framework)</div>
+            <div class="label">Ngày bắt đầu hiệu lực</div>
             <input type="date" name="start_date" value="{escape(gv("start_date"))}" style="width:100%;">
           </div>
 
           <div>
-            <div class="label">End date (Framework)</div>
+            <div class="label">Ngày kết thúc hiệu lực</div>
             <input type="date" name="end_date" value="{escape(gv("end_date"))}" style="width:100%;">
           </div>
         </div>
@@ -460,8 +842,15 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
       </form>
     </div>
 
-    {staff_block_html}
-    {annex_html}
+    {milestones_html if (c_type_val == "STANDALONE" or b_type_val == "FIXED_PRICE") else ""}
+    {annex_html if c_type_val != "STANDALONE" else f"""
+    <div class="card" style="background:#f8fafc; border-color:#e2e8f0; padding:15px;">
+      <span class="muted" style="font-size:13px; font-weight:500;">
+        ℹ️ Đây là <b>Hợp đồng trực tiếp / Độc lập (Standalone)</b>: Tiến độ thanh toán được quản lý trực tiếp bằng các <b>Mốc tiến độ (Milestones)</b> ở trên, không phân chia phụ lục.
+      </span>
+    </div>
+    """}
+    {staff_block_html if c_type_val != "STANDALONE" else ""}
     """
     return layout(title, body)
 
@@ -475,6 +864,25 @@ def page_annex_form(mode: str, annex_row, contract_id: int, error_msg: str | Non
             return ""
         x = annex_row[key]
         return "" if x is None else str(x)
+
+    a_btype = gv("billing_type") or "TM"
+
+    annex_milestones_html = ""
+    has_ms = False
+    if mode == "edit" and annex_row:
+        conn = db_connect()
+        try:
+            a_ms = get_milestones_for_contract(conn, contract_id, annex_id=annex_row["id"])
+            has_ms = len(a_ms) > 0
+        finally:
+            conn.close()
+        annex_milestones_html = render_milestones_card(
+            contract_id=contract_id,
+            annex_id=annex_row["id"],
+            milestones=a_ms,
+            total_target_value=annex_row["value"],
+            return_to=f"/annex/edit?id={annex_row['id']}"
+        )
 
     title = "Add Annex" if mode == "new" else f"Edit Annex #{annex_row['id']}"
     action = "/annex/create" if mode == "new" else "/annex/update"
@@ -495,6 +903,13 @@ def page_annex_form(mode: str, annex_row, contract_id: int, error_msg: str | Non
         {hidden_contract}
 
         <div class="grid">
+          <div>
+            <div class="label">Hình thức thanh toán (Billing Type)</div>
+            <select name="billing_type" style="width:100%;">
+              <option value="TM" {"selected" if a_btype=="TM" else ""}>Time & Material (T&M - Chấm công theo tháng)</option>
+              <option value="FIXED_PRICE" {"selected" if a_btype=="FIXED_PRICE" else ""}>Fixed Price (Trọn gói - Thanh toán theo mốc/tiến độ)</option>
+            </select>
+          </div>
           <div>
             <div class="label">Annex Name</div>
             <input type="text" name="annex_name" value="{escape(gv("annex_name"))}" style="width:100%;">
@@ -519,6 +934,8 @@ def page_annex_form(mode: str, annex_row, contract_id: int, error_msg: str | Non
         </div>
       </form>
     </div>
+
+    {annex_milestones_html if (a_btype == "FIXED_PRICE" or has_ms) else ""}
     """
     return layout(title, body)
 # -------------------- Handlers (POST) --------------------
@@ -528,6 +945,8 @@ def handle_contract_create_post(handler):
     seller_id = (form.get("seller_vendor_id", [""])[0] or "").strip()
     framework_no = (form.get("framework_no", [""])[0] or "").strip() or None
     framework_name = (form.get("framework_name", [""])[0] or "").strip() or None
+    contract_type = (form.get("contract_type", ["FRAMEWORK"])[0] or "FRAMEWORK").strip()
+    billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip()
     contract_value_raw = (form.get("contract_value", [""])[0] or "").strip()
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
@@ -558,13 +977,13 @@ def handle_contract_create_post(handler):
             INSERT INTO contracts (
               buyer_vendor_id, seller_vendor_id,
               framework_no, framework_name, contract_value,
-              start_date, end_date,
+              start_date, end_date, contract_type, billing_type,
               is_active, deleted_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, now_iso(), now_iso()))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, contract_type, billing_type, now_iso(), now_iso()))
         new_id = cur.lastrowid
-        log_action(cur, "CREATE_CONTRACT", "contracts", new_id, f"Created new framework contract '{framework_no}' - {framework_name}")
+        log_action(cur, "CREATE_CONTRACT", "contracts", new_id, f"Created new contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type})")
         conn.commit()
     finally:
         conn.close()
@@ -583,6 +1002,8 @@ def handle_contract_update_post(handler):
     seller_id = (form.get("seller_vendor_id", [""])[0] or "").strip()
     framework_no = (form.get("framework_no", [""])[0] or "").strip() or None
     framework_name = (form.get("framework_name", [""])[0] or "").strip() or None
+    contract_type = (form.get("contract_type", ["FRAMEWORK"])[0] or "FRAMEWORK").strip()
+    billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip()
     contract_value_raw = (form.get("contract_value", [""])[0] or "").strip()
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
@@ -622,10 +1043,12 @@ def handle_contract_update_post(handler):
                 contract_value=?,
                 start_date=?,
                 end_date=?,
+                contract_type=?,
+                billing_type=?,
                 updated_at=?
             WHERE id=?
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, now_iso(), int(cid)))
-        log_action(cur, "UPDATE_CONTRACT", "contracts", int(cid), f"Updated framework contract '{framework_no}' - {framework_name}")
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, contract_type, billing_type, now_iso(), int(cid)))
+        log_action(cur, "UPDATE_CONTRACT", "contracts", int(cid), f"Updated contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type})")
         conn.commit()
     finally:
         conn.close()
@@ -685,6 +1108,7 @@ def handle_annex_create_post(handler):
     form = read_post_form(handler)
     contract_id = (form.get("contract_id", [""])[0] or "").strip()
     annex_name = (form.get("annex_name", [""])[0] or "").strip() or None
+    billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip()
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
     value_raw = (form.get("value", [""])[0] or "").strip()
@@ -713,13 +1137,13 @@ def handle_annex_create_post(handler):
 
         cur.execute("""
             INSERT INTO contract_annexes (
-              contract_id, annex_name, start_date, end_date, value,
+              contract_id, annex_name, start_date, end_date, value, billing_type,
               is_active, deleted_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, 1, NULL, ?, ?)
-        """, (int(contract_id), annex_name, start_date, end_date, value, now_iso(), now_iso()))
+            VALUES (?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        """, (int(contract_id), annex_name, start_date, end_date, value, billing_type, now_iso(), now_iso()))
         new_annex_id = cur.lastrowid
-        log_action(cur, "CREATE_ANNEX", "contract_annexes", new_annex_id, f"Created new annex '{annex_name}' for framework contract '{c_name}'")
+        log_action(cur, "CREATE_ANNEX", "contract_annexes", new_annex_id, f"Created new annex '{annex_name}' ({billing_type}) for framework contract '{c_name}'")
         conn.commit()
     finally:
         conn.close()
@@ -732,6 +1156,7 @@ def handle_annex_update_post(handler):
     aid = (form.get("id", [""])[0] or "").strip()
     contract_id = (form.get("contract_id", [""])[0] or "").strip()
     annex_name = (form.get("annex_name", [""])[0] or "").strip() or None
+    billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip()
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
     value_raw = (form.get("value", [""])[0] or "").strip()
@@ -764,15 +1189,202 @@ def handle_annex_update_post(handler):
                 start_date=?,
                 end_date=?,
                 value=?,
+                billing_type=?,
                 updated_at=?
             WHERE id=?
-        """, (annex_name, start_date, end_date, value, now_iso(), int(aid)))
-        log_action(cur, "UPDATE_ANNEX", "contract_annexes", int(aid), f"Updated annex '{annex_name}' for framework contract '{c_name}'")
+        """, (annex_name, start_date, end_date, value, billing_type, now_iso(), int(aid)))
+        log_action(cur, "UPDATE_ANNEX", "contract_annexes", int(aid), f"Updated annex '{annex_name}' ({billing_type}) for framework contract '{c_name}'")
         conn.commit()
     finally:
         conn.close()
 
     redirect(handler, f"/contract/edit?id={contract_id}")
+
+
+# -------------------- Milestone Handlers (POST) --------------------
+def handle_milestone_create_post(handler):
+    form = read_post_form(handler)
+    contract_id = (form.get("contract_id", [""])[0] or "").strip()
+    annex_id_raw = (form.get("annex_id", [""])[0] or "").strip()
+    annex_id = int(annex_id_raw) if annex_id_raw.isdigit() else None
+
+    milestone_name = (form.get("milestone_name", [""])[0] or "").strip()
+    milestone_type = (form.get("milestone_type", ["DELIVERY"])[0] or "DELIVERY").strip()
+    pct_raw = (form.get("percentage", [""])[0] or "").strip()
+    amount_raw = (form.get("amount", [""])[0] or "").strip()
+    planned_date = (form.get("planned_date", [""])[0] or "").strip() or None
+    actual_date = (form.get("actual_date", [""])[0] or "").strip() or None
+    status = (form.get("status", ["PENDING"])[0] or "PENDING").strip()
+    acceptance_doc_no = (form.get("acceptance_doc_no", [""])[0] or "").strip() or None
+    cashout_date = (form.get("cashout_date", [""])[0] or "").strip() or None
+    note = (form.get("note", [""])[0] or "").strip() or None
+
+    fallback_return = f"/annex/edit?id={annex_id}" if annex_id else f"/contract/edit?id={contract_id}"
+    return_to = safe_return_to((form.get("return_to", [""])[0] or fallback_return).strip())
+
+    if not contract_id.isdigit() or not milestone_name:
+        send_html(handler, layout("Error", "<div class='card danger'>Thiếu thông tin mốc thanh toán bắt buộc.</div>"), status=400)
+        return
+
+    amount = 0.0
+    if amount_raw:
+        try:
+            amount = float(amount_raw.replace(",", ""))
+        except ValueError:
+            amount = 0.0
+
+    percentage = None
+    if pct_raw:
+        try:
+            percentage = float(pct_raw.replace(",", ""))
+        except ValueError:
+            pass
+
+    if cashout_date and status == "PENDING":
+        status = "PAID"
+
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            INSERT INTO contract_milestones (
+                contract_id, annex_id, milestone_name, milestone_type,
+                percentage, amount, planned_date, actual_date, status,
+                acceptance_doc_no, cashout_date, note, created_at, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            int(contract_id), annex_id, milestone_name, milestone_type,
+            percentage, amount, planned_date, actual_date, status,
+            acceptance_doc_no, cashout_date, note, now_iso(), now_iso()
+        ))
+        mid = cur.lastrowid
+        log_action(cur, "CREATE_MILESTONE", "contract_milestones", mid, f"Created milestone '{milestone_name}' ({amount:,.0f} VND) for contract #{contract_id}")
+        conn.commit()
+    finally:
+        conn.close()
+
+    redirect(handler, return_to)
+
+
+def handle_milestone_update_post(handler):
+    form = read_post_form(handler)
+    mid = (form.get("id", [""])[0] or "").strip()
+    milestone_name = (form.get("milestone_name", [""])[0] or "").strip()
+    milestone_type = (form.get("milestone_type", ["DELIVERY"])[0] or "DELIVERY").strip()
+    pct_raw = (form.get("percentage", [""])[0] or "").strip()
+    amount_raw = (form.get("amount", [""])[0] or "").strip()
+    planned_date = (form.get("planned_date", [""])[0] or "").strip() or None
+    actual_date = (form.get("actual_date", [""])[0] or "").strip() or None
+    status = (form.get("status", ["PENDING"])[0] or "PENDING").strip()
+    acceptance_doc_no = (form.get("acceptance_doc_no", [""])[0] or "").strip() or None
+    cashout_date = (form.get("cashout_date", [""])[0] or "").strip() or None
+    note = (form.get("note", [""])[0] or "").strip() or None
+    return_to = safe_return_to((form.get("return_to", [""])[0] or "/contracts").strip())
+
+    if not mid.isdigit() or not milestone_name:
+        send_html(handler, layout("Error", "<div class='card danger'>Thiếu ID hoặc tên mốc thanh toán.</div>"), status=400)
+        return
+
+    amount = 0.0
+    if amount_raw:
+        try:
+            amount = float(amount_raw.replace(",", ""))
+        except ValueError:
+            amount = 0.0
+
+    percentage = None
+    if pct_raw:
+        try:
+            percentage = float(pct_raw.replace(",", ""))
+        except ValueError:
+            pass
+
+    if cashout_date and status == "PENDING":
+        status = "PAID"
+
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE contract_milestones
+            SET milestone_name=?,
+                milestone_type=?,
+                percentage=?,
+                amount=?,
+                planned_date=?,
+                actual_date=?,
+                status=?,
+                acceptance_doc_no=?,
+                cashout_date=?,
+                note=?,
+                updated_at=?
+            WHERE id=?
+        """, (
+            milestone_name, milestone_type, percentage, amount,
+            planned_date, actual_date, status, acceptance_doc_no,
+            cashout_date, note, now_iso(), int(mid)
+        ))
+        log_action(cur, "UPDATE_MILESTONE", "contract_milestones", int(mid), f"Updated milestone '{milestone_name}' ({amount:,.0f} VND)")
+        conn.commit()
+    finally:
+        conn.close()
+
+    redirect(handler, return_to)
+
+
+def handle_milestone_delete_post(handler):
+    form = read_post_form(handler)
+    mid = (form.get("id", [""])[0] or "").strip()
+    return_to = safe_return_to((form.get("return_to", [""])[0] or "/contracts").strip())
+
+    if not mid.isdigit():
+        send_html(handler, layout("Error", "<div class='card danger'>Invalid Milestone ID</div>"), status=400)
+        return
+
+    conn = db_connect()
+    try:
+        m_row = conn.execute("SELECT milestone_name, contract_id FROM contract_milestones WHERE id=?", (int(mid),)).fetchone()
+        m_name = m_row["milestone_name"] if m_row else f"ID {mid}"
+
+        cur = conn.cursor()
+        cur.execute("DELETE FROM contract_milestones WHERE id=?", (int(mid),))
+        log_action(cur, "DELETE_MILESTONE", "contract_milestones", int(mid), f"Deleted milestone '{m_name}'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    redirect(handler, return_to)
+
+
+def handle_milestone_cashout_post(handler):
+    form = read_post_form(handler)
+    mid = (form.get("id", [""])[0] or "").strip()
+    cashout_date = (form.get("cashout_date", [""])[0] or "").strip() or None
+    return_to = safe_return_to((form.get("return_to", [""])[0] or "/contracts").strip())
+
+    if not mid.isdigit():
+        send_html(handler, layout("Error", "<div class='card danger'>Invalid Milestone ID</div>"), status=400)
+        return
+
+    status = "PAID" if cashout_date else "PENDING"
+
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE contract_milestones
+            SET cashout_date=?,
+                status=?,
+                updated_at=?
+            WHERE id=?
+        """, (cashout_date, status, now_iso(), int(mid)))
+        log_action(cur, "CASHOUT_MILESTONE", "contract_milestones", int(mid), f"Recorded cashout '{cashout_date}' for milestone ID {mid}")
+        conn.commit()
+    finally:
+        conn.close()
+
+    redirect(handler, return_to)
 
 
 def handle_annex_delete_post(handler):

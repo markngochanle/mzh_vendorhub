@@ -118,15 +118,74 @@ def match_party(party_name, party_tax, party_addr, vendor_set: set[tuple[str, st
 
 def check_invoice_payroll_reconciliation(conn, contract_no_str, year, month, invoice_amount):
     """
-    Reconciliation check: Compare invoice total payment amount with the sum of staff monthly payroll amount.
+    Reconciliation check: Compare invoice total payment amount with the sum of staff monthly payroll amount (for T&M),
+    or with milestone amounts (for Fixed Price contracts).
     Returns: (status, locked_sum, all_sum, message)
       status: 'ok', 'mismatch', 'no_payroll', 'no_contract'
     """
-    if not contract_no_str or year is None or month is None:
-        return 'no_payroll', 0.0, 0.0, "Missing contract number or service month."
+    if not contract_no_str:
+        return 'no_payroll', 0.0, 0.0, "Missing contract number."
+
+    contract_no_clean = contract_no_str.strip()
+
+    # 1. Check if contract or annex is Fixed Price
+    fp_contract = conn.execute("""
+        SELECT * FROM contracts
+        WHERE is_active = 1 AND billing_type = 'FIXED_PRICE' AND (
+            LOWER(TRIM(framework_no)) = ? OR framework_no LIKE ?
+        )
+    """, (contract_no_clean.lower(), f"%{contract_no_clean}%")).fetchone()
+
+    fp_annex = None
+    if not fp_contract:
+        fp_annex = conn.execute("""
+            SELECT a.*, c.framework_no FROM contract_annexes a
+            JOIN contracts c ON c.id = a.contract_id
+            WHERE a.is_active = 1 AND a.billing_type = 'FIXED_PRICE' AND (
+                LOWER(TRIM(a.annex_name)) = ? OR a.annex_name LIKE ?
+            )
+        """, (contract_no_clean.lower(), f"%{contract_no_clean}%")).fetchone()
+
+    if fp_contract or fp_annex:
+        cid = fp_contract["id"] if fp_contract else fp_annex["contract_id"]
+        aid = None if fp_contract else fp_annex["id"]
+
+        if aid is not None:
+            milestones = conn.execute("""
+                SELECT * FROM contract_milestones
+                WHERE contract_id = ? AND annex_id = ?
+                ORDER BY planned_date ASC, id ASC
+            """, (cid, aid)).fetchall()
+        else:
+            milestones = conn.execute("""
+                SELECT * FROM contract_milestones
+                WHERE contract_id = ? AND annex_id IS NULL
+                ORDER BY planned_date ASC, id ASC
+            """, (cid,)).fetchall()
+
+        target_name = fp_contract["framework_no"] if fp_contract else fp_annex["annex_name"]
+        if not milestones:
+            return 'no_payroll', 0.0, 0.0, f"Hợp đồng Fixed Price '{target_name}' chưa có mốc thanh toán nào."
+
+        inv_amt = float(invoice_amount or 0.0)
+        matched_m = None
+        for m in milestones:
+            if abs(float(m["amount"] or 0.0) - inv_amt) < 1.0:
+                matched_m = m
+                break
+
+        total_ms_amount = sum(float(m["amount"] or 0.0) for m in milestones)
+        if matched_m:
+            return 'ok', float(matched_m["amount"]), float(matched_m["amount"]), f"Khớp mốc Fixed Price: '{matched_m['milestone_name']}' ({matched_m['amount']:,.0f} VND)"
+        else:
+            m_list_str = ", ".join(f"{m['milestone_name']}: {m['amount']:,.0f}" for m in milestones[:3])
+            return 'mismatch', total_ms_amount, total_ms_amount, f"Hợp đồng Fixed Price '{target_name}': Số tiền hóa đơn ({inv_amt:,.0f} VND) chưa khớp với mốc nào ({m_list_str}...)"
+
+    # 2. Time & Material flow: requires service month and year
+    if year is None or month is None:
+        return 'no_payroll', 0.0, 0.0, "Missing service month or year."
 
     month_str = f"{year:04d}-{month:02d}"
-    contract_no_clean = contract_no_str.strip()
 
     import calendar
     num_days = calendar.monthrange(year, month)[1]

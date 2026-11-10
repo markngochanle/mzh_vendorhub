@@ -76,6 +76,10 @@ from contracts import (
     page_contract_assign_staff,
     handle_contract_assign_staff_save_post,
     handle_contract_remove_staff_link_post,
+    handle_milestone_create_post,
+    handle_milestone_update_post,
+    handle_milestone_delete_post,
+    handle_milestone_cashout_post,
 )
 
 from staff import (
@@ -631,6 +635,23 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/annex/restore":
                 handle_annex_restore_post(self)
+                return
+
+            # ---------------- Milestones ----------------
+            if path == "/contract/milestone/create":
+                handle_milestone_create_post(self)
+                return
+
+            if path == "/contract/milestone/update":
+                handle_milestone_update_post(self)
+                return
+
+            if path == "/contract/milestone/delete":
+                handle_milestone_delete_post(self)
+                return
+
+            if path == "/contract/milestone/cashout":
+                handle_milestone_cashout_post(self)
                 return
 
             # ---------------- Projects ----------------
