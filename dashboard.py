@@ -563,8 +563,8 @@ def page_dashboard(handler):
 
     # Main dashboard body HTML
     dashboard_html = f"""
-    <!-- Chart.js CDN -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <!-- Chart.js Local Library (Offline Closed Environment) -->
+    <script src="/static/js/chart.umd.min.js"></script>
 
     <div style="margin-bottom: 24px;">
       <h2 style="margin: 0 0 6px 0; color: var(--text-primary);">Dashboard</h2>

@@ -130,6 +130,49 @@ from payments import (
 )
 
 
+STATIC_DIR = (Path(__file__).resolve().parent / "static").resolve()
+MIME_TYPES = {
+    ".js": "application/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".ico": "image/x-icon",
+    ".svg": "image/svg+xml",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+}
+
+
+def serve_static(handler, req_path: str, is_head: bool = False):
+    rel_path = req_path[len("/static/"):].lstrip("/")
+    target = (STATIC_DIR / rel_path).resolve()
+    try:
+        target.relative_to(STATIC_DIR)
+    except ValueError:
+        send_html(handler, layout("Forbidden", "<div class='card danger'>403 Forbidden</div>"), status=403)
+        return
+
+    if not target.is_file():
+        send_html(handler, layout("Not Found", "<div class='card danger'>404 Not Found</div>"), status=404)
+        return
+
+    content_type = MIME_TYPES.get(target.suffix.lower(), "application/octet-stream")
+    try:
+        content = target.read_bytes()
+        handler.send_response(200)
+        handler.send_header("Content-Type", content_type)
+        handler.send_header("Content-Length", str(len(content)))
+        handler.send_header("Cache-Control", "public, max-age=86400")
+        handler.end_headers()
+        if not is_head:
+            handler.wfile.write(content)
+    except Exception as e:
+        logger.error(f"Error serving static file {target}: {e}")
+        send_html(handler, layout("Error", f"<div class='card danger'>Error: {escape(str(e))}</div>"), status=500)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         logger.info("%s - - [%s] %s" % (self.address_string(), self.log_date_time_string(), format % args))
@@ -137,6 +180,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_HEAD(self):
         parsed = urlparse(self.path)
         path = parsed.path
+        if path.startswith("/static/"):
+            serve_static(self, path, is_head=True)
+            return
         if path in ("/logo.png", "/favicon.ico"):
             logo_file = Path(__file__).resolve().parent / "logo.png"
             if logo_file.exists():
@@ -156,6 +202,10 @@ class Handler(BaseHTTPRequestHandler):
 
         try:
             # ---------------- Static Assets ----------------
+            if path.startswith("/static/"):
+                serve_static(self, path, is_head=False)
+                return
+
             if path in ("/logo.png", "/favicon.ico"):
                 logo_file = Path(__file__).resolve().parent / "logo.png"
                 if logo_file.exists():

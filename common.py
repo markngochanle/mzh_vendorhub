@@ -8,10 +8,68 @@ from datetime import datetime
 from pathlib import Path
 
 import os
-DB_PATH = os.environ.get("DB_PATH", str(Path(__file__).resolve().with_name("db.sqlite3")))
+import sqlite3
+import configparser
+import urllib.parse
+from html import escape
+from datetime import datetime
+from pathlib import Path
 
-HOST = "127.0.0.1"
-PORT = int(os.environ.get("PORT", "8800"))
+CONFIG_FILE = Path(__file__).resolve().with_name("config.ini")
+
+
+def load_config():
+    """
+    Load host, port, db_path with priority:
+    1. Environment variables (HOST, PORT, DB_PATH)
+    2. config.ini ([server] host, port; [database] path or [server] db_path)
+    3. Defaults (127.0.0.1, 8800, db.sqlite3)
+    """
+    config = configparser.ConfigParser()
+    default_host = "127.0.0.1"
+    default_port = 8800
+    default_db = str(Path(__file__).resolve().with_name("db.sqlite3"))
+
+    if CONFIG_FILE.exists():
+        try:
+            config.read(str(CONFIG_FILE), encoding="utf-8")
+        except Exception:
+            pass
+
+    cfg_host = None
+    cfg_port = None
+    cfg_db = None
+
+    if config.has_section("server"):
+        cfg_host = config.get("server", "host", fallback=None)
+        cfg_port = config.get("server", "port", fallback=None)
+        cfg_db = config.get("server", "db_path", fallback=None)
+
+    if config.has_section("database"):
+        if not cfg_db:
+            cfg_db = config.get("database", "path", fallback=None) or config.get("database", "db_path", fallback=None)
+
+    if cfg_db:
+        p = Path(cfg_db)
+        if not p.is_absolute():
+            cfg_db = str((Path(__file__).resolve().parent / p).resolve())
+
+    env_host = os.environ.get("HOST")
+    env_port = os.environ.get("PORT")
+    env_db = os.environ.get("DB_PATH")
+
+    host = env_host or cfg_host or default_host
+    try:
+        port = int(env_port or cfg_port or default_port)
+    except (ValueError, TypeError):
+        port = default_port
+
+    db_path = env_db or cfg_db or default_db
+
+    return host, port, db_path
+
+
+HOST, PORT, DB_PATH = load_config()
 LIST_LIMIT = 2000
 
 
@@ -632,9 +690,6 @@ def layout(title: str, body_html: str):
   <link rel="icon" type="image/png" href="/logo.png">
   <link rel="shortcut icon" type="image/png" href="/logo.png">
   <link rel="apple-touch-icon" href="/logo.png">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {{
       --primary: #4f46e5;
@@ -662,7 +717,7 @@ def layout(title: str, body_html: str):
     * {{ box-sizing: border-box; }}
     
     body {{
-      font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       margin: 0;
       padding: 0;
       background-color: var(--bg-main);
@@ -1113,8 +1168,8 @@ def layout(title: str, body_html: str):
     }});
   </script>
 
-  <!-- jsPDF CDN Library -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <!-- jsPDF Local Library (Offline Closed Environment) -->
+  <script src="/static/js/jspdf.umd.min.js"></script>
 
   <!-- MGS Invoice Modal -->
   <div id="mgs-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">

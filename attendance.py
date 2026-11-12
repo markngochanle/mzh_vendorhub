@@ -246,6 +246,8 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
 
     # Days in month
     num_days = calendar.monthrange(year, month)[1]
+    first_day_str = f"{month_val}-01"
+    last_day_str = f"{month_val}-{num_days:02d}"
     
     # Filter params
     vendor_filter = parse_int_or_none(filters.get("vendor_id"))
@@ -274,13 +276,19 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         else:
             contracts = conn.execute("SELECT id, framework_no, framework_name FROM contracts WHERE is_active=1").fetchall()
 
-        # Load annexes
-        annexes = conn.execute("SELECT a.id, a.contract_id, a.annex_name, c.seller_vendor_id FROM contract_annexes a JOIN contracts c ON c.id = a.contract_id WHERE a.is_active=1 AND a.deleted_at IS NULL").fetchall()
+        # Load annexes whose validity period covers the Attendance Month (avoid listing expired annexes)
+        annexes = conn.execute("""
+            SELECT a.id, a.contract_id, a.annex_name, a.start_date, a.end_date, c.seller_vendor_id 
+            FROM contract_annexes a 
+            JOIN contracts c ON c.id = a.contract_id 
+            WHERE a.is_active = 1 
+              AND a.deleted_at IS NULL
+              AND (a.start_date IS NULL OR a.start_date = '' OR a.start_date <= ?)
+              AND (a.end_date IS NULL OR a.end_date = '' OR a.end_date >= ?)
+            ORDER BY a.annex_name ASC
+        """, (last_day_str, first_day_str)).fetchall()
 
         # Build SQL where
-        first_day_str = f"{month_val}-01"
-        last_day_str = f"{month_val}-{num_days:02d}"
-
         where = []
         join_params = [last_day_str, first_day_str]
         params = []
@@ -852,6 +860,7 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         }}
 
         if (contractSel) contractSel.addEventListener('change', filterAnnex);
+        if (vendorSel) vendorSel.addEventListener('change', filterAnnex);
         filterAnnex();
       }})();
     </script>
@@ -1626,7 +1635,10 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
                     manual_w = summary_data.get("manual_work_hours")
                     manual_ot = summary_data.get("manual_ot_hours")
                     actual_days = (manual_w if manual_w is not None else sum_w) / 8.0
-                    ot_converted = (manual_ot if manual_ot is not None else sum_ot) * 1.5
+                    if manual_ot is not None:
+                        ot_converted = summary_data["ot_converted_hours"] if summary_data.get("ot_converted_hours") is not None else manual_ot * 1.5
+                    else:
+                        ot_converted = sum_ot * 1.5
 
                     if s["manday_rate"] is not None and s["manday_rate"] > 0:
                         daily_rate = s["manday_rate"]
@@ -1808,8 +1820,8 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
             </div>
           </td>
           <td style="text-align:center;">
-            <input type="number" step="0.1" min="0" name="ot_{sid}_{m_val}" value="{ot_hours:.2f}" {disabled_attr}
-                   style="width: 65px; padding: 4px; font-size:12px; text-align:center;">
+            <input type="number" step="0.01" min="0" name="ot_{sid}_{m_val}" value="{ot_hours:.2f}" {disabled_attr}
+                   style="width: 70px; padding: 4px; font-size:12px; text-align:center;">
           </td>
           <td style="text-align:center; font-size:11px; font-family:monospace; line-height:1.3; vertical-align:middle;">
             <div style="margin-bottom: 2px;">
@@ -2737,9 +2749,9 @@ def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None
         annex_sql += " AND v.id = ?"
         annex_params.append(vendor_filter)
     if q_filter:
-        annex_sql += " AND (v.company_name LIKE ? OR a.annex_name LIKE ? OR c.framework_no LIKE ?)"
-        annex_params.extend([f"%{q_filter}%", f"%{q_filter}%", f"%{q_filter}%"])
-    annex_sql += " ORDER BY v.company_name COLLATE NOCASE ASC, c.framework_no ASC, a.annex_name ASC"
+        annex_sql += " AND (v.company_name LIKE ? OR v.short_name LIKE ? OR a.annex_name LIKE ? OR c.framework_no LIKE ?)"
+        annex_params.extend([f"%{q_filter}%", f"%{q_filter}%", f"%{q_filter}%", f"%{q_filter}%"])
+    annex_sql += " ORDER BY COALESCE(NULLIF(v.short_name, ''), v.company_name) COLLATE NOCASE ASC, c.framework_no ASC, a.annex_name ASC"
     annex_rows = conn.execute(annex_sql, annex_params).fetchall()
 
     # Query all cashouts occurring strictly within this Fiscal Year (April 1 to March 31)
@@ -3039,7 +3051,7 @@ def page_attendance_payout(filters: dict) -> str:
     table_rows_html = []
     for idx, r in enumerate(data["rows"], 1):
         a = r["annex"]
-        c_name = a["company_name"] or "-"
+        v_name = (a["short_name"] or "").strip() or a["company_name"] or "-"
         fn_no = a["framework_no"] or "-"
         an_name = a["annex_name"] or "-"
 
@@ -3178,9 +3190,11 @@ def page_attendance_payout(filters: dict) -> str:
         table_rows_html.append(f"""
         <tr style="border-bottom: 1px solid #e2e8f0;">
           <td style="text-align:center; color:#64748b; font-size:12px; vertical-align:middle; white-space:nowrap;">{idx}</td>
-          <td style="vertical-align:middle; white-space:nowrap;"><b>{escape(c_name)}</b></td>
-          <td style="font-size:12px; color:#475569; vertical-align:middle; white-space:nowrap;">{escape(fn_no)}</td>
-          <td style="vertical-align:middle; white-space:nowrap;"><span style="font-weight:600; color:#0b57d0;">{escape(an_name)}</span></td>
+          <td style="vertical-align:middle; white-space:nowrap;" title="{escape(a['company_name'] or '')}"><b>{escape(v_name)}</b></td>
+          <td style="vertical-align:middle; white-space:nowrap;">
+            <div style="font-weight:600; color:#1e293b; font-size:13px;">{escape(fn_no)}</div>
+            <div style="font-size:12px; color:#0b57d0; font-weight:500; margin-top:2px;">{escape(an_name)}</div>
+          </td>
           {''.join(m_cells)}
           <td style="text-align:right; font-family:monospace; background:#f8fafc; border-left:2px solid #cbd5e1; padding:6px 10px; vertical-align:middle; white-space:nowrap; min-width:160px;">
             {row_total_content}
@@ -3191,7 +3205,7 @@ def page_attendance_payout(filters: dict) -> str:
     if not table_rows_html:
         table_rows_html.append(f"""
         <tr>
-          <td colspan="17" style="text-align:center; padding:36px; color:#64748b; font-size:14px;">
+          <td colspan="16" style="text-align:center; padding:36px; color:#64748b; font-size:14px;">
             No annexes match the current filter in <b>{data['fy_name']}</b>.
           </td>
         </tr>
@@ -3397,8 +3411,7 @@ def page_attendance_payout(filters: dict) -> str:
             <tr style="background:#f1f5f9; border-bottom: 1px solid #cbd5e1;">
               <th rowspan="2" style="text-align:center; width:36px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">#</th>
               <th rowspan="2" style="text-align:left; min-width:190px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">Company (Vendor)</th>
-              <th rowspan="2" style="text-align:left; min-width:160px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">Framework Contract</th>
-              <th rowspan="2" style="text-align:left; min-width:140px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">Annex</th>
+              <th rowspan="2" style="text-align:left; min-width:170px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">Framework / Annex</th>
               <th colspan="3" style="text-align:center; background:#e0f2fe; color:#0369a1; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; font-weight:700; padding:8px;">Quarter 1 (Q1)</th>
               <th colspan="3" style="text-align:center; background:#fef3c7; color:#b45309; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; font-weight:700; padding:8px;">Quarter 2 (Q2)</th>
               <th colspan="3" style="text-align:center; background:#ede9fe; color:#6d28d9; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; font-weight:700; padding:8px;">Quarter 3 (Q3)</th>
@@ -3429,7 +3442,7 @@ def page_attendance_payout(filters: dict) -> str:
           </tbody>
           <tfoot>
             <tr style="background:#f1f5f9; border-top:2px solid #64748b; font-weight:bold;">
-              <td colspan="4" style="text-align:right; padding:10px 12px; font-weight:bold; vertical-align:middle; white-space:nowrap;">TOTAL:</td>
+              <td colspan="3" style="text-align:right; padding:10px 12px; font-weight:bold; vertical-align:middle; white-space:nowrap;">TOTAL:</td>
               {''.join(footer_cells)}
               <td style="text-align:right; padding:8px 10px; font-family:monospace; background:#e2e8f0; border-left:2px solid #cbd5e1; vertical-align:middle; min-width:160px; white-space:nowrap;">
                 {grand_total_content}
@@ -3677,7 +3690,8 @@ def handle_attendance_payout_export_get(handler):
         writer.writerow(csv_header)
         for idx, r in enumerate(data["rows"], 1):
             a = r["annex"]
-            row = [idx, a["company_name"] or "", a["framework_no"] or "", a["annex_name"] or ""]
+            v_name = (a["short_name"] or "").strip() or a["company_name"] or ""
+            row = [idx, v_name, a["framework_no"] or "", a["annex_name"] or ""]
             for m in data["q1_months"]: row.append(int(round(r["months"][m]["cashout"])))
             row.append(int(round(r["q_cashout"]["Q1"])))
             for m in data["q2_months"]: row.append(int(round(r["months"][m]["cashout"])))
@@ -3713,7 +3727,8 @@ def handle_attendance_payout_export_get(handler):
         writer.writerow(csv_header)
         for idx, r in enumerate(data["rows"], 1):
             a = r["annex"]
-            row = [idx, a["company_name"] or "", a["framework_no"] or "", a["annex_name"] or ""]
+            v_name = (a["short_name"] or "").strip() or a["company_name"] or ""
+            row = [idx, v_name, a["framework_no"] or "", a["annex_name"] or ""]
             for m in data["q1_months"]: row.append(int(round(r["months"][m]["payroll"])))
             row.append(int(round(r["q_payroll"]["Q1"])))
             for m in data["q2_months"]: row.append(int(round(r["months"][m]["payroll"])))
@@ -3763,7 +3778,8 @@ def handle_attendance_payout_export_get(handler):
 
         for idx, r in enumerate(data["rows"], 1):
             a = r["annex"]
-            row = [idx, a["company_name"] or "", a["framework_no"] or "", a["annex_name"] or ""]
+            v_name = (a["short_name"] or "").strip() or a["company_name"] or ""
+            row = [idx, v_name, a["framework_no"] or "", a["annex_name"] or ""]
             for m in data["q1_months"]:
                 row.append(int(round(r["months"][m]["payroll"])))
                 row.append(int(round(r["months"][m]["cashout"])))
@@ -3947,9 +3963,9 @@ def handle_attendance_monthly_save_post(handler):
 
             cur.execute("""
                 UPDATE monthly_attendance_summary
-                SET standard_days=?, paid_leave_days=?, ot_converted_hours=?, daily_rate=?, total_amount=?, updated_at=datetime('now')
+                SET standard_days=?, paid_leave_days=?, ot_converted_hours=?, manual_ot_hours=?, daily_rate=?, total_amount=?, updated_at=datetime('now')
                 WHERE staff_id=? AND month=?
-            """, (std, pl, ot, daily_rate, total_amount, sid, month_val))
+            """, (std, pl, ot, ot / 1.5, daily_rate, total_amount, sid, month_val))
 
             # Recalculate and update total used paid leave hours in contract_staff table across all months
             used_all = cur.execute("""

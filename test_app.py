@@ -962,6 +962,37 @@ class TestAttendance(BaseTestCase):
         self.assertEqual(handler_daily_unlock_fail.response_status, 200) # Renders error HTML page
         self.assertIn("Cannot unlock daily attendance because monthly payroll is locked", handler_daily_unlock_fail.get_output_text())
 
+    def test_monthly_payroll_converted_ot_two_decimals(self):
+        cur = self.conn.cursor()
+        cur.execute("UPDATE contract_staff_links SET tentative_leaving_date = '2026-06-30' WHERE staff_id = ?", (self.staff_id,))
+        self.conn.commit()
+
+        # 1. Lock daily attendance so staff appears in monthly summary
+        handler_lock = MockHandler(path=f"/attendance/lock?staff_id={self.staff_id}&month=2026-06")
+        attendance.handle_attendance_lock_get(handler_lock)
+
+        # 2. Render monthly payroll and verify step="0.01" is used on ot input
+        html = attendance.page_monthly_attendance({"month": "2026-06"})
+        self.assertIn('step="0.01"', html)
+        self.assertIn(f'name="ot_{self.staff_id}_2026-06"', html)
+
+        # 3. Save calculations with 2 decimal places (10.15)
+        body = f"month=2026-06&std_{self.staff_id}=20.0&pl_{self.staff_id}=1.0&ot_{self.staff_id}=10.15".encode()
+        handler_save = MockHandler(body=body, headers={"content-length": str(len(body))})
+        attendance.handle_attendance_monthly_save_post(handler_save)
+        self.assertEqual(handler_save.response_status, 302)
+
+        # 4. Check DB value
+        self.conn.close()
+        self.conn = common.db_connect()
+        summary = self.conn.execute("SELECT * FROM monthly_attendance_summary WHERE staff_id=? AND month=?", (self.staff_id, "2026-06")).fetchone()
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["ot_converted_hours"], 10.15)
+
+        # 5. Render page again and verify 10.15 is preserved and displayed
+        html_after = attendance.page_monthly_attendance({"month": "2026-06"})
+        self.assertIn('value="10.15"', html_after)
+
     def test_handle_attendance_import_post_success(self):
         # Save original function
         orig = attendance.parse_multipart_attendance
@@ -1443,6 +1474,49 @@ class TestAnnexFilters(BaseTestCase):
         self.assertIn("ms-vendor", output)
         self.assertIn("ms-contract", output)
         self.assertIn("ms-annex", output)
+
+    def test_daily_attendance_annex_filter_validity_period(self):
+        cur = self.conn.cursor()
+        # Create 3 annexes:
+        # 1. Expired for 2026-11: 2026-01-01 to 2026-05-31 (Expired Annex)
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active)
+            VALUES (?, 'Annex Expired May', '2026-01-01', '2026-05-31', 1)
+        """, (self.contract_id,))
+        annex_expired = cur.lastrowid
+
+        # 2. Valid for 2026-11: 2026-06-01 to 2026-11-30 (Active Annex)
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active)
+            VALUES (?, 'Annex Active Nov', '2026-06-01', '2026-11-30', 1)
+        """, (self.contract_id,))
+        annex_active = cur.lastrowid
+
+        # 3. Future for 2026-11: 2026-12-01 to 2027-05-31 (Future Annex)
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active)
+            VALUES (?, 'Annex Future Dec', '2026-12-01', '2027-05-31', 1)
+        """, (self.contract_id,))
+        annex_future = cur.lastrowid
+        self.conn.commit()
+
+        # Load daily attendance for 2026-11
+        handler = StubHandler("/attendance?month=2026-11", "GET")
+        handler.do_GET()
+        output = handler.get_output_text()
+
+        # Check options inside <select id="annex_id"
+        self.assertIn("Annex Active Nov", output)
+        self.assertNotIn("Annex Expired May", output)
+        self.assertNotIn("Annex Future Dec", output)
+
+        # Load daily attendance for 2026-05
+        handler_may = StubHandler("/attendance?month=2026-05", "GET")
+        handler_may.do_GET()
+        output_may = handler_may.get_output_text()
+        self.assertIn("Annex Expired May", output_may)
+        self.assertNotIn("Annex Active Nov", output_may)
+        self.assertNotIn("Annex Future Dec", output_may)
 
 
 # ==================== 12. Test Improvements ====================
@@ -2275,7 +2349,7 @@ class TestProjects(BaseTestCase):
         # 2. Setup test data for FY26:
         # Create a vendor, contract, and annex with cashout in FY26 (2026-04 to 2027-03)
         cur = self.conn.cursor()
-        cur.execute("INSERT INTO vendors (company_name, purchasing, tax_id) VALUES ('Alpha Vendor Solutions', 0, '0109999999')")
+        cur.execute("INSERT INTO vendors (company_name, short_name, purchasing, tax_id) VALUES ('Alpha Vendor Solutions', 'Alpha Vendor', 0, '0109999999')")
         v_id = cur.lastrowid
         cur.execute("INSERT INTO contracts (buyer_vendor_id, seller_vendor_id, framework_no) VALUES (?, ?, 'CONT-PAYOUT-01')", (self.buyer_id, v_id))
         c_id = cur.lastrowid
@@ -2330,7 +2404,11 @@ class TestProjects(BaseTestCase):
         self.assertIn('Total FY Cash-out', payout_html)
 
         # Verify dual concepts: Payroll vs Cash-out in table
-        self.assertIn("Alpha Vendor Solutions", payout_html)
+        self.assertIn("Alpha Vendor", payout_html)
+        self.assertIn('title="Alpha Vendor Solutions"', payout_html)
+        self.assertIn("Framework / Annex", payout_html)
+        self.assertIn('<td colspan="3" style="text-align:right;', payout_html)
+        self.assertIn("CONT-PAYOUT-01", payout_html)
         self.assertIn("Annex Payout 1", payout_html)
         self.assertIn("50,000,000", payout_html)
         self.assertIn("2026-06-15", payout_html)
@@ -2992,6 +3070,109 @@ Content-Disposition: form-data; name="xml_content"
         self.assertEqual(stub_fav.response_status, 200)
         self.assertIn("image/png", stub_fav.response_headers.get("content-type", ""))
         self.assertGreater(len(stub_fav.wfile.getvalue()), 1000)
+
+    def test_offline_static_assets_and_no_external_cdns(self):
+        # 1. Verify layout has no external links to fonts or cdns
+        html = common.layout("Test", "<div>Body</div>")
+        self.assertNotIn("fonts.googleapis.com", html)
+        self.assertNotIn("fonts.gstatic.com", html)
+        self.assertNotIn("cdnjs.cloudflare.com", html)
+        self.assertNotIn("cdn.jsdelivr.net", html)
+        self.assertIn('/static/js/jspdf.umd.min.js', html)
+
+        # 2. Verify dashboard page has no external cdn links
+        stub_dash = StubHandler("/dashboard", method="GET")
+        stub_dash.do_GET()
+        dash_html = stub_dash.get_output_text()
+        self.assertNotIn("cdn.jsdelivr.net", dash_html)
+        self.assertNotIn("cdnjs.cloudflare.com", dash_html)
+        self.assertIn('/static/js/chart.umd.min.js', dash_html)
+
+        # 3. Test static route serving chart.umd.min.js
+        stub_chart = StubHandler("/static/js/chart.umd.min.js", method="GET")
+        stub_chart.do_GET()
+        self.assertEqual(stub_chart.response_status, 200)
+        self.assertIn("application/javascript", stub_chart.response_headers.get("content-type", ""))
+        self.assertGreater(len(stub_chart.wfile.getvalue()), 50000)
+
+        # 4. Test static route serving jspdf.umd.min.js
+        stub_jspdf = StubHandler("/static/js/jspdf.umd.min.js", method="GET")
+        stub_jspdf.do_GET()
+        self.assertEqual(stub_jspdf.response_status, 200)
+        self.assertIn("application/javascript", stub_jspdf.response_headers.get("content-type", ""))
+        self.assertGreater(len(stub_jspdf.wfile.getvalue()), 50000)
+
+        # 5. Test HEAD request on static file
+        stub_head = StubHandler("/static/js/chart.umd.min.js", method="HEAD")
+        stub_head.do_HEAD()
+        self.assertEqual(stub_head.response_status, 200)
+        self.assertIn("application/javascript", stub_head.response_headers.get("content-type", ""))
+        self.assertEqual(len(stub_head.wfile.getvalue()), 0)  # HEAD must not write body
+
+        # 6. Test directory traversal protection
+        stub_traversal = StubHandler("/static/../server.py", method="GET")
+        stub_traversal.do_GET()
+        self.assertIn(stub_traversal.response_status, (403, 404))
+
+        # 7. Test non-existent static file
+        stub_404 = StubHandler("/static/js/not_exist.js", method="GET")
+        stub_404.do_GET()
+        self.assertEqual(stub_404.response_status, 404)
+
+    def test_config_ini_loading(self):
+        import tempfile
+        import shutil
+
+        # Test default load from existing config.ini
+        host, port, db_path = common.load_config()
+        self.assertIn(host, ("127.0.0.1", "localhost", "0.0.0.0"))
+        self.assertIsInstance(port, int)
+        self.assertTrue(db_path.endswith(".sqlite3"))
+
+        # Test loading custom config.ini via temporary file
+        temp_dir = tempfile.mkdtemp()
+        try:
+            custom_ini = Path(temp_dir) / "config.ini"
+            custom_ini.write_text(
+                "[server]\nhost = 0.0.0.0\nport = 9999\n\n[database]\npath = custom.sqlite3\n",
+                encoding="utf-8"
+            )
+            old_config_file = common.CONFIG_FILE
+            old_env_port = os.environ.get("PORT")
+            old_env_host = os.environ.get("HOST")
+            old_env_db = os.environ.get("DB_PATH")
+            try:
+                # Clear env overrides temporarily
+                os.environ.pop("PORT", None)
+                os.environ.pop("HOST", None)
+                os.environ.pop("DB_PATH", None)
+                common.CONFIG_FILE = custom_ini
+
+                c_host, c_port, c_db = common.load_config()
+                self.assertEqual(c_host, "0.0.0.0")
+                self.assertEqual(c_port, 9999)
+                self.assertTrue(c_db.endswith("custom.sqlite3"))
+
+                # Test environment variable overrides config.ini
+                os.environ["PORT"] = "7777"
+                _, env_port, _ = common.load_config()
+                self.assertEqual(env_port, 7777)
+            finally:
+                common.CONFIG_FILE = old_config_file
+                if old_env_port is not None:
+                    os.environ["PORT"] = old_env_port
+                else:
+                    os.environ.pop("PORT", None)
+                if old_env_host is not None:
+                    os.environ["HOST"] = old_env_host
+                else:
+                    os.environ.pop("HOST", None)
+                if old_env_db is not None:
+                    os.environ["DB_PATH"] = old_env_db
+                else:
+                    os.environ.pop("DB_PATH", None)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 if __name__ == "__main__":
