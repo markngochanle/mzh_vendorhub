@@ -5,7 +5,7 @@ from html import escape
 from common import (
     db_connect, layout, LIST_LIMIT, now_iso,
     read_post_form, redirect, send_html, safe_return_to, log_action, to_float_or_none,
-    get_milestones_for_contract
+    get_milestones_for_contract, get_staff_previous_unused_leave, get_staff_leave_status
 )
 
 def vendor_label(row):
@@ -590,6 +590,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
         try:
             allocated_staff = conn.execute("""
                 SELECT l.id AS link_id, l.staff_id, l.annex_id, l.monthly_rate, l.manday_rate, l.joining_date, l.tentative_leaving_date,
+                       l.paid_leave_total_hours, l.carried_over_leave_hours,
                        s.full_name_vi, s.position
                 FROM contract_staff_links l
                 JOIN contract_staff s ON s.id = l.staff_id
@@ -661,9 +662,17 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
                 staff_items = []
                 for s in annex_staff:
                     m_rate = f"{s['monthly_rate']:,.2f} VND" if s['monthly_rate'] is not None else "-"
+                    pl_info = ""
+                    pl_tot = s['paid_leave_total_hours'] or 0.0
+                    co_tot = s['carried_over_leave_hours'] or 0.0
+                    if pl_tot > 0 or co_tot > 0:
+                        if co_tot > 0:
+                            pl_info = f'<span class="muted" style="font-size:10px; margin-left:6px;" title="Paid leave: {pl_tot:.1f}h + Carried over: {co_tot:.1f}h">🏖️ {pl_tot:.1f}h (+{co_tot:.1f}h)</span>'
+                        else:
+                            pl_info = f'<span class="muted" style="font-size:10px; margin-left:6px;" title="Paid leave: {pl_tot:.1f}h">🏖️ {pl_tot:.1f}h</span>'
                     staff_items.append(f"""
                     <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; background:#f1f5f9; padding:4px 8px; border-radius:4px; margin-top:4px;">
-                      <span>👤 <b>{escape(s['full_name_vi'])}</b> ({escape(s['joining_date'] or '')} → {escape(s['tentative_leaving_date'] or 'Present')})</span>
+                      <span>👤 <b>{escape(s['full_name_vi'])}</b> ({escape(s['joining_date'] or '')} → {escape(s['tentative_leaving_date'] or 'Present')}){pl_info}</span>
                       <span style="color:var(--success); font-weight:600; margin-left:10px;">{m_rate}</span>
                       <div style="display:inline-flex; gap:6px; margin-left:10px;">
                         <a href="/contract/edit-staff-link?id={s['link_id']}" style="font-size:10px; color:var(--primary); text-decoration:none;">Edit</a>
@@ -2286,6 +2295,26 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
             WHERE vendor_id = ? AND (status IS NULL OR status <> 'inactive')
             ORDER BY full_name_vi ASC
         """, (vendor_id,)).fetchall()
+
+        default_jdate = ""
+        default_tdate = ""
+        if annex:
+            default_jdate = annex["start_date"] or contract["start_date"] or ""
+            default_tdate = annex["end_date"] or contract["end_date"] or ""
+        else:
+            default_jdate = contract["start_date"] or ""
+            default_tdate = contract["end_date"] or ""
+
+        prev_leave_data = {}
+        for s in staff_rows:
+            unused_h, p_link = get_staff_previous_unused_leave(cur, s["id"], default_jdate, exclude_link_id=link_id)
+            if unused_h > 0:
+                p_annex = (p_link["annex_name"] if p_link and "annex_name" in p_link.keys() and p_link["annex_name"] else "Phụ lục trước")
+                prev_leave_data[str(s["id"])] = {
+                    "hours": round(unused_h, 1),
+                    "days": round(unused_h / 8.0, 2),
+                    "annex_name": p_annex
+                }
         
     finally:
         conn.close()
@@ -2300,15 +2329,6 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
         staff_opts.append(f'<option value="{s["id"]}">{escape(s["full_name_vi"])} ({escape(s["position"] or "")} - {rem_lbl})</option>')
     staff_options_html = "".join(staff_opts)
 
-    default_jdate = ""
-    default_tdate = ""
-    if annex:
-        default_jdate = annex["start_date"] or contract["start_date"] or ""
-        default_tdate = annex["end_date"] or contract["end_date"] or ""
-    else:
-        default_jdate = contract["start_date"] or ""
-        default_tdate = contract["end_date"] or ""
-
     initial_rows = []
     if submitted_rows is not None and len(submitted_rows) > 0:
         initial_rows = submitted_rows
@@ -2320,7 +2340,8 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
             "tentative_leaving_date": link["tentative_leaving_date"] or default_tdate,
             "monthly_rate": link["monthly_rate"],
             "manday_rate": link["manday_rate"],
-            "paid_leave_total_hours": link["paid_leave_total_hours"] if link["paid_leave_total_hours"] is not None else 0.0
+            "paid_leave_total_hours": link["paid_leave_total_hours"] if link["paid_leave_total_hours"] is not None else 0.0,
+            "carried_over_leave_hours": link["carried_over_leave_hours"] if "carried_over_leave_hours" in link.keys() and link["carried_over_leave_hours"] is not None else 0.0
         })
     else:
         initial_rows.append({
@@ -2330,7 +2351,8 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
             "tentative_leaving_date": default_tdate,
             "monthly_rate": "",
             "manday_rate": "",
-            "paid_leave_total_hours": 0.0
+            "paid_leave_total_hours": 0.0,
+            "carried_over_leave_hours": 0.0
         })
 
     import json
@@ -2367,7 +2389,8 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
                 <th style="min-width: 140px; padding: 8px;">Leaving Date</th>
                 <th style="min-width: 140px; padding: 8px;">Monthly Rate (VND)</th>
                 <th style="min-width: 130px; padding: 8px;">Man-day Rate (VND)</th>
-                <th style="min-width: 110px; padding: 8px;">Paid Leave (h)</th>
+                <th style="min-width: 100px; padding: 8px;">Paid Leave (h)</th>
+                <th style="min-width: 140px; padding: 8px;">Carried Over (h)</th>
                 <th style="width: 130px; text-align: center; padding: 8px;">Actions</th>
               </tr>
             </thead>
@@ -2396,6 +2419,7 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
     const DEFAULT_JDATE = __DEFAULT_JDATE__;
     const DEFAULT_TDATE = __DEFAULT_TDATE__;
     const INITIAL_ROWS = __INITIAL_ROWS__;
+    const PREV_UNUSED_LEAVE = __PREV_UNUSED_LEAVE__;
 
     function renderRow(data, index) {
       data = data || {};
@@ -2409,6 +2433,7 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
       const mRate = data.monthly_rate !== null && data.monthly_rate !== undefined ? data.monthly_rate : "";
       const dRate = data.manday_rate !== null && data.manday_rate !== undefined ? data.manday_rate : "";
       const plHours = data.paid_leave_total_hours !== null && data.paid_leave_total_hours !== undefined ? data.paid_leave_total_hours : "0";
+      const coHours = data.carried_over_leave_hours !== null && data.carried_over_leave_hours !== undefined ? data.carried_over_leave_hours : "0";
       const linkId = data.link_id || "";
 
       tr.innerHTML = `
@@ -2432,7 +2457,11 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
           <input type="number" step="0.01" name="manday_rate" value="${dRate}" placeholder="e.g. 2000000" style="width: 100%; font-size: 13px; padding: 5px;">
         </td>
         <td style="padding: 6px;">
-          <input type="number" step="0.5" name="paid_leave_total_hours" value="${plHours}" style="width: 100%; font-size: 13px; padding: 5px;">
+          <input type="number" step="0.5" min="0" name="paid_leave_total_hours" value="${plHours}" style="width: 100%; font-size: 13px; padding: 5px;" placeholder="0">
+        </td>
+        <td style="padding: 6px;">
+          <input type="number" step="0.5" min="0" name="carried_over_leave_hours" value="${coHours}" style="width: 100%; font-size: 13px; padding: 5px;" placeholder="0">
+          <div class="carry-hint-box" style="margin-top: 3px;"></div>
         </td>
         <td style="text-align: center; white-space: nowrap; padding: 6px;">
           <button type="button" class="btn-secondary duplicate-btn" title="Duplicate this row" style="font-size: 11px; padding: 4px 8px; margin-right: 4px; cursor: pointer;">📋 Copy</button>
@@ -2445,6 +2474,30 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
         if (sel) sel.value = staffId;
       }
 
+      function updateCarryHint(row) {
+        const sel = row.querySelector(".staff-select");
+        const sid = sel ? sel.value : "";
+        const box = row.querySelector(".carry-hint-box");
+        if (!box) return;
+        if (sid && PREV_UNUSED_LEAVE && PREV_UNUSED_LEAVE[sid] && PREV_UNUSED_LEAVE[sid].hours > 0) {
+          const p = PREV_UNUSED_LEAVE[sid];
+          box.innerHTML = `<div style="font-size:10px; color:#0b57d0; background:#e8f0fe; padding:2px 4px; border-radius:3px; line-height:1.2;">
+            💡 ${p.annex_name} còn dư <b>${p.hours}h</b> (${p.days}d)
+            <a href="javascript:void(0)" onclick="setCarriedOver(this, ${p.hours})" style="font-weight:bold; color:#1a73e8; text-decoration:underline; margin-left:3px;">[Chuyển tiếp]</a>
+          </div>`;
+        } else {
+          box.innerHTML = "";
+        }
+      }
+
+      const selEl = tr.querySelector(".staff-select");
+      if (selEl) {
+        selEl.addEventListener("change", function() {
+          updateCarryHint(tr);
+        });
+      }
+      updateCarryHint(tr);
+
       tr.querySelector(".duplicate-btn").addEventListener("click", function() {
         duplicateRow(tr);
       });
@@ -2454,6 +2507,15 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
       });
 
       return tr;
+    }
+
+    function setCarriedOver(btn, hours) {
+      const tr = btn.closest("tr");
+      if (!tr) return;
+      const input = tr.querySelector('[name="carried_over_leave_hours"]');
+      if (input) {
+        input.value = hours;
+      }
     }
 
     function addAllocRow(data) {
@@ -2472,6 +2534,7 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
       const mRate = sourceTr.querySelector('[name="monthly_rate"]').value;
       const dRate = sourceTr.querySelector('[name="manday_rate"]').value;
       const plHours = sourceTr.querySelector('[name="paid_leave_total_hours"]').value;
+      const coHours = sourceTr.querySelector('[name="carried_over_leave_hours"]').value;
 
       const newData = {
         staff_id: "", // reset staff_id so user selects next staff member
@@ -2480,6 +2543,7 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
         monthly_rate: mRate,
         manday_rate: dRate,
         paid_leave_total_hours: plHours,
+        carried_over_leave_hours: coHours,
         link_id: ""
       };
 
@@ -2518,7 +2582,8 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
     """.replace("__STAFF_OPTIONS__", json.dumps(staff_options_html))\
        .replace("__DEFAULT_JDATE__", json.dumps(default_jdate))\
        .replace("__DEFAULT_TDATE__", json.dumps(default_tdate))\
-       .replace("__INITIAL_ROWS__", initial_rows_json)
+       .replace("__INITIAL_ROWS__", initial_rows_json)\
+       .replace("__PREV_UNUSED_LEAVE__", json.dumps(prev_leave_data))
 
     return layout(title, body + script_js)
 
@@ -2541,6 +2606,7 @@ def handle_contract_assign_staff_save_post(handler):
     monthly_rates = form.get("monthly_rate", [])
     manday_rates = form.get("manday_rate", [])
     paid_leave_total_hours_list = form.get("paid_leave_total_hours", [])
+    carried_over_leave_hours_list = form.get("carried_over_leave_hours", [])
     link_ids = form.get("link_id", [])
     
     submitted_rows = []
@@ -2552,6 +2618,7 @@ def handle_contract_assign_staff_save_post(handler):
         m_rate = (monthly_rates[i] if i < len(monthly_rates) else "").strip()
         d_rate = (manday_rates[i] if i < len(manday_rates) else "").strip()
         pl_hours = (paid_leave_total_hours_list[i] if i < len(paid_leave_total_hours_list) else "").strip()
+        co_hours = (carried_over_leave_hours_list[i] if i < len(carried_over_leave_hours_list) else "").strip()
         lid = (link_ids[i] if i < len(link_ids) else "").strip()
         
         submitted_rows.append({
@@ -2561,7 +2628,8 @@ def handle_contract_assign_staff_save_post(handler):
             "tentative_leaving_date": tdate,
             "monthly_rate": to_float_or_none(m_rate),
             "manday_rate": to_float_or_none(d_rate),
-            "paid_leave_total_hours": to_float_or_none(pl_hours) if to_float_or_none(pl_hours) is not None else 0.0
+            "paid_leave_total_hours": to_float_or_none(pl_hours) if to_float_or_none(pl_hours) is not None else 0.0,
+            "carried_over_leave_hours": to_float_or_none(co_hours) if to_float_or_none(co_hours) is not None else 0.0
         })
 
     rows_to_save = [r for r in submitted_rows if r["staff_id"] and r["joining_date"]]
@@ -2614,15 +2682,16 @@ def handle_contract_assign_staff_save_post(handler):
                         monthly_rate = ?,
                         manday_rate = ?,
                         paid_leave_total_hours = ?,
+                        carried_over_leave_hours = ?,
                         updated_at = ?
                     WHERE id = ?
-                """, (r["joining_date"], r["tentative_leaving_date"], r["monthly_rate"], r["manday_rate"], r["paid_leave_total_hours"], now_iso(), r["link_id"]))
+                """, (r["joining_date"], r["tentative_leaving_date"], r["monthly_rate"], r["manday_rate"], r["paid_leave_total_hours"], r["carried_over_leave_hours"], now_iso(), r["link_id"]))
                 log_action(cur, "UPDATE_CONTRACT_STAFF_LINK", "contract_staff_links", r["link_id"], f"Updated staff allocation ID {r['staff_id']} in contract ID {contract_id}")
             else:
                 cur.execute("""
-                    INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, paid_leave_total_hours, created_at, updated_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (r["staff_id"], int(contract_id), annex_id_int, r["monthly_rate"], r["manday_rate"], r["joining_date"], r["tentative_leaving_date"], r["paid_leave_total_hours"], now_iso(), now_iso()))
+                    INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, manday_rate, joining_date, tentative_leaving_date, paid_leave_total_hours, carried_over_leave_hours, created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (r["staff_id"], int(contract_id), annex_id_int, r["monthly_rate"], r["manday_rate"], r["joining_date"], r["tentative_leaving_date"], r["paid_leave_total_hours"], r["carried_over_leave_hours"], now_iso(), now_iso()))
                 new_id = cur.lastrowid
                 log_action(cur, "CREATE_CONTRACT_STAFF_LINK", "contract_staff_links", new_id, f"Allocated staff ID {r['staff_id']} to contract ID {contract_id}")
 
@@ -2655,7 +2724,18 @@ def handle_contract_remove_staff_link_post(handler):
     conn = db_connect()
     try:
         cur = conn.cursor()
+        link_row = cur.execute("SELECT staff_id FROM contract_staff_links WHERE id = ?", (int(link_id),)).fetchone()
         cur.execute("DELETE FROM contract_staff_links WHERE id = ?", (int(link_id),))
+        if link_row:
+            sid = link_row["staff_id"]
+            cur.execute("""
+                UPDATE contract_staff
+                SET paid_leave_total_hours = COALESCE((
+                    SELECT SUM(paid_leave_total_hours) FROM contract_staff_links WHERE staff_id = ?
+                ), 0.0),
+                updated_at = ?
+                WHERE id = ?
+            """, (sid, now_iso(), sid))
         log_action(cur, "DELETE_CONTRACT_STAFF_LINK", "contract_staff_links", int(link_id), f"Removed staff allocation from contract/annex")
         conn.commit()
     finally:

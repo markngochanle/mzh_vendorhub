@@ -4,7 +4,8 @@ from datetime import datetime
 
 from common import (
     db_connect, layout, LIST_LIMIT, now_iso,
-    read_post_form, redirect, send_html, log_action, to_float_or_none
+    read_post_form, redirect, send_html, log_action, to_float_or_none,
+    get_staff_leave_status
 )
 
 
@@ -206,6 +207,8 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
             ORDER BY s.id DESC
             LIMIT ?
         """, params + [LIST_LIMIT]).fetchall()
+
+        staff_leave_status_map = {r["id"]: get_staff_leave_status(conn, r["id"], current_month) for r in rows}
     finally:
         conn.close()
 
@@ -354,7 +357,7 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
           <th>Monthly Rate</th>
           <th>Man-day Rate</th>
           <th>Locked Payroll</th>
-          <th>Paid leave (total/used)</th>
+          <th>Paid leave (Avail / Used / Total HĐ)</th>
           <th>OT</th>
           <th>Status</th>
           <th>Action</th>
@@ -398,9 +401,15 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
           <td>{escape("" if r["monthly_rate"] is None else f"{float(r['monthly_rate']):,.2f}")}</td>
           <td>{escape("" if r["manday_rate"] is None else f"{float(r['manday_rate']):,.2f}")}</td>
           <td>{escape(f"{float(r['locked_payroll_total']):,.2f}" if float(r['locked_payroll_total']) > 0 else "-")}</td>
-          <td>{escape("" if r["paid_leave_total_hours"] is None else str(r["paid_leave_total_hours"]))}
-              /
-              {escape("" if r["paid_leave_used_hours"] is None else str(r["paid_leave_used_hours"]))}
+          <td>
+            {
+              f'''<div style="font-weight:600; color:{'#137333' if (staff_leave_status_map.get(r['id']) or {}).get('active_remaining_hours', 0.0) > 0 else '#666'};" title="Remaining: {(staff_leave_status_map.get(r['id']) or {}).get('active_remaining_hours', 0.0):.1f}h ({((staff_leave_status_map.get(r['id']) or {}).get('active_remaining_hours', 0.0)/8.0):.2f}d)">
+                {(staff_leave_status_map.get(r['id']) or {}).get('active_remaining_hours', 0.0):.1f}h rem ({((staff_leave_status_map.get(r['id']) or {}).get('active_remaining_hours', 0.0)/8.0):.1f}d)
+              </div>
+              <div class="muted" style="font-size:10px;" title="Active quota: {(staff_leave_status_map.get(r['id']) or {}).get('active_budget_hours', 0.0):.1f}h, Active used: {(staff_leave_status_map.get(r['id']) or {}).get('active_used_hours', 0.0):.1f}h, Total used (HĐ): {(staff_leave_status_map.get(r['id']) or {}).get('total_used_hours', 0.0):.1f}h, Total contract: {(staff_leave_status_map.get(r['id']) or {}).get('contract_total_hours', 0.0):.1f}h">
+                Active: {(staff_leave_status_map.get(r['id']) or {}).get('active_budget_hours', 0.0):.1f}h | Đã dùng: {(staff_leave_status_map.get(r['id']) or {}).get('total_used_hours', 0.0):.1f}h (HĐ: {(staff_leave_status_map.get(r['id']) or {}).get('contract_total_hours', 0.0):.1f}h)
+              </div>''' if staff_leave_status_map.get(r['id']) else f"{escape('' if r['paid_leave_total_hours'] is None else str(r['paid_leave_total_hours']))} / {escape('' if r['paid_leave_used_hours'] is None else str(r['paid_leave_used_hours']))}"
+            }
           </td>
           <td>{escape(ot)}</td>
           <td>{escape(st)}</td>
@@ -657,6 +666,23 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
     used_pl_val = to_float_or_none(gv("paid_leave_used_hours")) or 0.0
     rem_pl_val = max(0.0, tot_pl_val - used_pl_val)
     rem_days_val = rem_pl_val / 8.0
+    active_avail_val = tot_pl_val
+    active_used_val = used_pl_val
+    total_used_val = used_pl_val
+
+    if mode == "edit" and staff_row:
+        conn = db_connect()
+        try:
+            cur_leave = get_staff_leave_status(conn, staff_row["id"])
+            if cur_leave:
+                tot_pl_val = cur_leave["contract_total_hours"]
+                active_avail_val = cur_leave["active_budget_hours"]
+                active_used_val = cur_leave["active_used_hours"]
+                rem_pl_val = cur_leave["active_remaining_hours"]
+                rem_days_val = rem_pl_val / 8.0
+                total_used_val = cur_leave["total_used_hours"]
+        finally:
+            conn.close()
 
     joining_date_val = gv("joining_date")
     tentative_leaving_date_val = gv("tentative_leaving_date")
@@ -686,18 +712,28 @@ def page_staff_form(mode: str, staff_row, error_msg: str | None = None, return_t
     """
     body_fields_html = f"""
           <div>
-            <div class="label">Paid leave (hour) - Total</div>
-            <input type="text" name="paid_leave_total_hours" value="{escape(gv("paid_leave_total_hours"))}" style="width:100%; background:#f1f5f9;" readonly>
+            <div class="label">Paid leave (hour) - Total contract</div>
+            <input type="text" name="paid_leave_total_hours" value="{tot_pl_val:.1f}" style="width:100%; background:#f1f5f9;" readonly title="Total across all contract annexes">
           </div>
 
           <div>
-            <div class="label">Paid leave (hour) - Actual used</div>
-            <input type="text" name="paid_leave_used_hours" value="{escape(gv("paid_leave_used_hours"))}" style="width:100%; background:#f1f5f9;" readonly>
+            <div class="label">Paid leave (hour) - Total used</div>
+            <input type="text" name="paid_leave_used_hours" value="{total_used_val:.1f}" style="width:100%; background:#f1f5f9;" readonly title="Total leave hours used across all historical months ({total_used_val/8.0:.1f} days)">
           </div>
 
           <div>
-            <div class="label">Paid leave (hour) - Remaining</div>
-            <input type="text" value="{rem_pl_val:.1f} hrs ({rem_days_val:.2f} days)" style="width:100%; background:#e6f4ea; color:#137333; font-weight:bold;" readonly>
+            <div class="label">Paid leave (hour) - Active available</div>
+            <input type="text" value="{active_avail_val:.1f}" style="width:100%; background:#f1f5f9;" readonly title="Available quota in currently active annex (including carried over hours)">
+          </div>
+
+          <div>
+            <div class="label">Paid leave (hour) - Active used</div>
+            <input type="text" value="{active_used_val:.1f}" style="width:100%; background:#f1f5f9;" readonly title="Used within currently active annex">
+          </div>
+
+          <div>
+            <div class="label">Paid leave (hour) - Remaining usable</div>
+            <input type="text" value="{rem_pl_val:.1f} hrs ({rem_days_val:.2f} days)" style="width:100%; background:#e6f4ea; color:#137333; font-weight:bold;" readonly title="Usable remaining balance in current annex">
           </div>
     """
 

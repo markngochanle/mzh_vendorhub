@@ -7,9 +7,9 @@ from pathlib import Path
 from html import escape
 from urllib.parse import parse_qs
 
-from common import layout, send_html, read_post_form
+from common import layout, send_html, read_post_form, APP_DIR
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = APP_DIR
 LOG_FILE_PATH = BASE_DIR / "playwright" / "unittest_progress.log"
 
 current_process = None
@@ -22,108 +22,106 @@ TEST_SUITES = [
         "name": "Test Core & DB Migrations",
         "desc": "Verify core database helper functions, schema migrations, and column definitions.",
         "cases": [
-            ("test_parse_int_or_none", "Parse integer or None values safely"),
-            ("test_safe_return_to", "Clean redirection URLs to prevent open redirects"),
             ("test_fmt_money", "Format floats/ints to standard currency strings"),
             ("test_now_iso", "Get current local timestamp in ISO format"),
-            ("test_redirect", "Issue standard HTTP 302 redirect responses")
+            ("test_parse_int_or_none", "Parse integer or None values safely"),
+            ("test_redirect", "Issue standard HTTP 302 redirect responses"),
+            ("test_safe_return_to", "Clean redirection URLs to prevent open redirects")
         ],
-        "steps": "1. Initialize SQLite database.<br>2. Run ensure_column helper checks.<br>3. Verify migration script execution on legacy schemas.",
-        "expect": "Database structure initializes with correct columns and constraints without errors."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestVendors",
         "name": "Test Vendor Management",
         "desc": "Verify creating buyer and seller vendors, deactivating active vendors, and restoring deactivated records.",
         "cases": [
-            ("test_page_vendors_list", "Render vendor grid with basic styling"),
-            ("test_page_vendor_form", "Render create/edit vendor forms"),
             ("test_handle_vendor_create_post", "Create vendor records with validation"),
-            ("test_handle_vendor_update_post", "Update vendor metadata successfully"),
             ("test_handle_vendor_deactivate_post", "Deactivate vendors safely"),
-            ("test_handle_vendor_restore_post", "Restore deactivated vendors")
+            ("test_handle_vendor_restore_post", "Restore deactivated vendors"),
+            ("test_handle_vendor_update_post", "Update vendor metadata successfully"),
+            ("test_page_vendor_form", "Render create/edit vendor forms"),
+            ("test_page_vendors_list", "Render vendor grid with basic styling")
         ],
-        "steps": "1. Insert seller and buyer vendors.<br>2. Submit deactivation status request.<br>3. Submit restoration status request.<br>4. Verify list filtering by status.",
-        "expect": "Vendors switch active status states, and listings correctly filter records based on status."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestContracts",
         "name": "Test Contract & Annex Validations",
         "desc": "Verify framework contract creation, contract reference numbers (Work Orders), and annex value constraints.",
         "cases": [
-            ("test_page_contracts_list", "Render contract listings with search filters"),
-            ("test_page_contract_form", "Render contract forms with selector options"),
-            ("test_handle_contract_create_post", "Save new contracts in DB"),
-            ("test_handle_contract_update_post", "Edit contract details"),
-            ("test_toggle_reference_lock_ajax", "Toggle locking state for reference numbers"),
-            ("test_handle_contract_delete_post", "Deactivate contract and mark as deleted"),
-            ("test_handle_contract_assign_staff_save_post_error_handling", "Validate multi-row staff allocation saving and error state preservation"),
+            ("test_carried_over_leave_hint_in_assign_staff_form", "Show carried over leave hint badge and button in staff assignment form"),
             ("test_contract_and_annex_values", "Verify value constraint validation rules"),
-            ("test_contract_assign_staff_with_leave_and_rates", "Verify staff allocation with paid leave and rate fields"),
-            ("test_multi_row_contract_staff_allocation", "Verify multi-row horizontal table staff allocation saving")
+            ("test_handle_contract_assign_staff_save_post_error_handling", "Validate multi-row staff allocation saving and error state preservation"),
+            ("test_handle_contract_create_post", "Save new contracts in DB"),
+            ("test_handle_contract_delete_post", "Deactivate contract and mark as deleted"),
+            ("test_handle_contract_update_post", "Edit contract details"),
+            ("test_page_contract_form", "Render contract forms with selector options"),
+            ("test_page_contracts_list", "Render contract listings with search filters"),
+            ("test_toggle_reference_lock_ajax", "Toggle locking state for reference numbers")
         ],
-        "steps": "1. Create framework contract with start/end dates.<br>2. Add contract annexes with values.<br>3. Try inserting non-numeric characters in value field.",
-        "expect": "Contracts and annexes persist correctly, and invalid currency/number formats are rejected."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestStaff",
-        "name": "Test Staff & Employment Period",
-        "desc": "Verify staff registration, shift configs, and direct saving of start/end dates to contract_staff table.",
+        "name": "Test Staff, Employment Period & Leave Days",
+        "desc": "Verify staff registration, shift configs, leave calculation, and multi-annex carryover.",
         "cases": [
             ("test_check_no_overlap", "Validate staff dates overlap rules"),
-            ("test_page_staff_shifts", "Render staff shifts and custom layouts"),
-            ("test_page_staff_list_locked_payroll", "Display locked payroll total for staff"),
+            ("test_future_annex_leave_cannot_be_used_in_current_month", "Ensure leave in future annex cannot be used in current month until annex is active"),
+            ("test_get_staff_previous_unused_leave_multiple_prior_annexes", "Find most recent prior annex and calculate remaining unused leave"),
             ("test_handle_staff_create_post", "Create staff profiles and save employment dates"),
-            ("test_page_staff_form_with_none_values", "Handle edge cases with null constraints"),
-            ("test_page_staff_form_payroll", "Render staff edit form with payroll metrics"),
             ("test_handle_staff_update_post", "Update staff profiles and save employment dates directly"),
-            ("test_staff_submenu_assign_to_project", "Verify staff submenu project assign link")
+            ("test_inactive_staff_leave_status_handling", "Safely compute leave status for inactive staff without exceptions"),
+            ("test_page_staff_form_payroll", "Render staff edit form with payroll metrics"),
+            ("test_page_staff_form_with_none_values", "Handle edge cases with null constraints"),
+            ("test_page_staff_list_locked_payroll", "Display locked payroll total for staff"),
+            ("test_page_staff_shifts", "Render staff shifts and custom layouts"),
+            ("test_staff_leave_calculation_and_carry_over", "Verify leave calculation, carryover from previous annex, and attendance save validation")
         ],
-        "steps": "1. Create staff member and check mandatory inputs.<br>2. Verify start/end date columns in contract_staff table.<br>3. Verify update form doesn't override contract links dates.",
-        "expect": "Staff record saves successfully with overall employment period dates directly on the main table."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestInvoices",
         "name": "Test Invoices Parsing & Matching",
         "desc": "Verify parsing of XML invoice files, matching buyer/seller parameters, and auto-matching with locked hours.",
         "cases": [
-            ("test_normalization", "Standardize names, tax IDs, and metadata"),
-            ("test_match_party", "Verify vendor/mst comparison engine"),
-            ("test_parse_xml_bytes", "Parse XML invoice file uploads"),
+            ("test_force_match", "Support manual overriding for mismatching parameters"),
             ("test_handle_new_invoice_post_paste_method", "Process invoice copy-paste input body"),
             ("test_invoice_payroll_reconciliation", "Calculate matching rate and verify variance"),
+            ("test_match_party", "Verify vendor/mst comparison engine"),
             ("test_mgs_details_and_button", "Verify matching invoice rows and MGS button"),
-            ("test_force_match", "Support manual overriding for mismatching parameters")
+            ("test_normalization", "Standardize names, tax IDs, and metadata"),
+            ("test_parse_xml_bytes", "Parse XML invoice file uploads")
         ],
-        "steps": "1. Load mock XML invoice template.<br>2. Run invoice parser and matching engine.<br>3. Verify auto-match badge logic based on locked attendance.",
-        "expect": "Invoices parse correctly, auto-match returns exact matching framework contracts, and matching rates calculate correctly."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestAttendance",
         "name": "Test Attendance & Log Locks",
-        "desc": "Verify daily attendance inputs, monthly log auto-sync, lock/unlock validations, and paid leave conversions.",
+        "desc": "Verify daily attendance inputs, monthly log auto-sync, lock/unlock validations, and fractional leave days.",
         "cases": [
+            ("test_attendance_calculations_and_save", "Compute attendance aggregations"),
+            ("test_attendance_clear", "Clear daily logs"),
+            ("test_attendance_lock_unlock", "Toggle grid input editing states"),
+            ("test_attendance_manual_totals", "Add manual totals for missing days"),
+            ("test_handle_attendance_import_post_success", "Import daily attendance logs from CSV file"),
+            ("test_leave_fractional_days_and_decimal_precision", "Support fractional leave days (0.5d/1.5d) and accurate balance deduction"),
+            ("test_monthly_attendance_calculations_and_save", "Process monthly adjustments"),
+            ("test_monthly_auto_sync_from_daily_logs", "Automatically calculate monthly summary"),
+            ("test_monthly_payroll_converted_ot_two_decimals", "Verify converted OT hours formatted with 2 decimal precision"),
+            ("test_page_attendance_totals", "Calculate standard, actual and OT days"),
             ("test_parse_attendance_csv", "Load legacy CSV layout"),
             ("test_parse_attendance_csv_new_format", "Load updated CSV layout"),
-            ("test_remove_accents", "Standardize Vietnamese diacritics"),
             ("test_parse_dt", "Parse various date format standards"),
-            ("test_page_attendance_totals", "Calculate standard, actual and OT days"),
-            ("test_monthly_auto_sync_from_daily_logs", "Automatically calculate monthly summary"),
-            ("test_attendance_calculations_and_save", "Compute attendance aggregations"),
-            ("test_attendance_lock_unlock", "Toggle grid input editing states"),
-            ("test_monthly_attendance_calculations_and_save", "Process monthly adjustments"),
-            ("test_handle_attendance_import_post_success", "Import daily attendance logs from CSV file"),
-            ("test_attendance_clear", "Clear daily logs"),
-            ("test_attendance_manual_totals", "Add manual totals for missing days"),
-            ("test_page_attendance_acceptance", "Render BBNT acceptance report page"),
-            ("test_attendance_acceptance_both_locks_required", "Require both daily and monthly locks for acceptance"),
-            ("test_attendance_acceptance_all_contract_staff_must_be_locked", "Require all contract staff locked for acceptance"),
-            ("test_attendance_pdf_lock_date_leave_and_amount_consistency", "Verify PDF lock date, leave, and amount consistency"),
-            ("test_attendance_acceptance_joining_date_filtering", "Filter acceptance report by staff joining date"),
-            ("test_service_fee_calculation_columns_and_rates", "Verify service fee calculation columns and rates")
+            ("test_remove_accents", "Standardize Vietnamese diacritics")
         ],
-        "steps": "1. Log daily attendance hours via grid.<br>2. Sync summary and verify auto-save.<br>3. Submit log lock and verify inputs become read-only.<br>4. Submit unlock request.",
-        "expect": "Locks disable attendance input fields, monthly aggregates compute correctly, and unlocking restores editing."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestServerRoutes",
@@ -133,20 +131,20 @@ TEST_SUITES = [
             ("test_do_GET_routes", "Verify all HTTP GET endpoints render correctly"),
             ("test_do_POST_routes", "Verify POST requests respond with correct redirects/status codes")
         ],
-        "steps": "1. Request index, staff, vendors, and contracts pages.<br>2. Verify status code 200.<br>3. Request invalid route and check 404 response.",
-        "expect": "All primary routes load successfully, and non-existing pages return standard 404 error."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestNewImprovements",
         "name": "Test New Improvements",
         "desc": "Verify new database enhancements, project assignments regressions, and custom bug fixes coverage.",
         "cases": [
-            ("test_attendance_save_cell_ajax_success", "Save daily attendance hours dynamically"),
             ("test_attendance_save_cell_ajax_locked_error", "Block editing locked daily cells"),
+            ("test_attendance_save_cell_ajax_success", "Save daily attendance hours dynamically"),
             ("test_monthly_payroll_export_csv", "Export monthly attendance summary to CSV")
         ],
-        "steps": "1. Verify project assignment constraints.<br>2. Check boundary conditions for null pointers.<br>3. Verify audit logging trigger for changes.",
-        "expect": "New database patches run safely, and system records logs for critical modifications."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestReferences",
@@ -154,35 +152,37 @@ TEST_SUITES = [
         "desc": "Verify managing contract reference numbers and work orders.",
         "cases": [
             ("test_get_months_between", "Generate list of months between two dates"),
-            ("test_page_contract_references", "Render reference numbers management table"),
-            ("test_page_contract_references_filters", "Filter contract references by company, contract, annex, and month"),
             ("test_handle_save_reference_ajax_success", "Save custom contract reference code"),
-            ("test_handle_toggle_mgs_sent_ajax_success", "Toggle sent to MGS checkbox for invoices")
+            ("test_handle_toggle_mgs_sent_ajax_success", "Toggle sent to MGS checkbox for invoices"),
+            ("test_page_contract_references", "Render reference numbers management table"),
+            ("test_page_contract_references_filters", "Filter contract references by company, contract, annex, and month")
         ],
-        "steps": "1. Save contract reference number.<br>2. Check for reference duplicates.<br>3. Verify reference locked states.",
-        "expect": "Reference numbers save correctly, and locked states prevent further edits."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestDashboard",
         "name": "Test Dashboard Metrics",
         "desc": "Verify dashboard metrics aggregation, vendor count, and active staff counts.",
         "cases": [
-            ("test_page_dashboard_rendering", "Render dashboard charts, metrics, and currency counts"),
-            ("test_page_dashboard_filtering_and_payroll_trend", "Verify dashboard filtering and payroll trend metrics")
+            ("test_page_dashboard_filtering_and_payroll_trend", "Verify dashboard filtering and payroll trend metrics"),
+            ("test_page_dashboard_rendering", "Render dashboard charts, metrics, and currency counts")
         ],
-        "steps": "1. Compute dashboard statistics.<br>2. Verify active staff count matching.<br>3. Check monthly cost aggregations.",
-        "expect": "Dashboard calculations match database rows, and totals aggregate correctly."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestAnnexFilters",
         "name": "Test Annex Filtering",
-        "desc": "Verify filtering and displaying annexes by contract status.",
+        "desc": "Verify filtering and displaying annexes by contract status and validity period.",
         "cases": [
             ("test_annex_filter_handling", "Filter staff list and attendance grid by annex selection"),
+            ("test_daily_attendance_annex_filter_validity_period", "Filter daily attendance rows by annex validity period"),
+            ("test_monthly_attendance_no_duplicate_when_staff_has_multiple_annexes", "Ensure staff with multiple historical annexes are not duplicated in multi-month payroll grid"),
             ("test_monthly_multiselect_filters", "Verify multi-select month filtering")
         ],
-        "steps": "1. Filter annexes by contract.<br>2. Toggle contract status.<br>3. Verify annex list visibility.",
-        "expect": "Annex list is updated dynamically based on selected contract status."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestDashboardAndReferencesImprovements",
@@ -190,30 +190,81 @@ TEST_SUITES = [
         "desc": "Verify custom dashboard updates, reference locks, and invoice auto-calculations.",
         "cases": [
             ("test_dashboard_active_staff_filtering", "Verify unique staff filtering on dashboard metrics"),
-            ("test_reference_numbers_highlight_sent_mgs", "Highlight months with invoices sent to MGS"),
-            ("test_dashboard_annex_alert", "Generate warnings for annexes expiring within 30 days")
+            ("test_dashboard_annex_alert", "Generate warnings for annexes expiring within 30 days"),
+            ("test_reference_numbers_highlight_sent_mgs", "Highlight months with invoices sent to MGS")
         ],
-        "steps": "1. Verify dashboard layout metrics.<br>2. Toggle reference lock status.<br>3. Run invoice calculation checks.",
-        "expect": "Metrics align with DB updates, and calculations match expected results."
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
     },
     {
         "id": "TestProjects",
-        "name": "Test Project Assignments",
-        "desc": "Verify project creation, closing, and monthly assignments matrix validations.",
+        "name": "Test Project Assignments & Attendance Acceptance",
+        "desc": "Verify project creation, assignments matrix validations, BBNT acceptance, and cash-out payout.",
         "cases": [
-            ("test_page_projects_list", "Render project listings with outsourcing budget"),
+            ("test_attendance_acceptance_all_contract_staff_must_be_locked", "Require all contract staff locked for acceptance"),
+            ("test_attendance_acceptance_both_locks_required", "Require both daily and monthly locks for acceptance"),
+            ("test_attendance_acceptance_cashout_popup_and_save", "Render cashout popup and save cashout date for annexes"),
+            ("test_attendance_acceptance_joining_date_filtering", "Filter acceptance report by staff joining date"),
+            ("test_attendance_payout_annex_effective_dates_isolation", "Isolate annex cashout calculations by validity period"),
+            ("test_attendance_payout_tab_and_csv_export", "Verify cash-out payout tab rendering and CSV export"),
+            ("test_attendance_pdf_lock_date_leave_and_amount_consistency", "Verify PDF lock date, leave, and amount consistency"),
+            ("test_attendance_tab_name_and_import_invoice_link", "Verify attendance tab name and invoice linking"),
+            ("test_contract_assign_staff_with_leave_and_rates", "Verify staff allocation with paid leave and rate fields"),
             ("test_handle_project_create_post", "Create projects with validation"),
             ("test_handle_project_delete_post", "Deactivate project record"),
+            ("test_inactive_staff_in_projects_and_attendance", "Include inactive staff in project matrix and attendance reports"),
+            ("test_locked_payroll_payment_matrix", "Verify locked payroll payment matrix in project details"),
+            ("test_multi_row_contract_staff_allocation", "Verify multi-row horizontal table staff allocation saving"),
+            ("test_page_attendance_acceptance", "Render BBNT acceptance report page"),
+            ("test_page_project_edit_payroll", "Render project edit page with payroll metrics"),
+            ("test_page_projects_list", "Render project listings with outsourcing budget"),
+            ("test_projects_assign_export_csv", "Export project staff assignments to CSV"),
+            ("test_service_fee_calculation_columns_and_rates", "Verify service fee calculation columns and rates"),
             ("test_staff_assignments_logic", "Prevent overlapping project assignments"),
             ("test_staff_assignments_multi_month", "Verify assignment across multiple months"),
-            ("test_page_project_edit_payroll", "Render project edit page with payroll metrics"),
-            ("test_locked_payroll_payment_matrix", "Verify locked payroll payment matrix in project details"),
-            ("test_projects_assign_export_csv", "Export project staff assignments to CSV"),
-            ("test_inactive_staff_in_projects_and_attendance", "Include inactive staff in project matrix and attendance reports")
+            ("test_staff_submenu_assign_to_project", "Verify staff submenu project assign link")
         ],
-        "steps": "1. Create project with budget and dates.<br>2. Assign staff to project.<br>3. Toggle project assignment check box.<br>4. Close project and check assignment read-only state.",
-        "expect": "Project assignments persist correctly, and closed projects reject new staff assignments."
-    }
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
+    },
+    {
+        "id": "TestFixedPriceMilestones",
+        "name": "Test Fixed Price Contracts & Milestones",
+        "desc": "Verify fixed price contracts, annex milestones lifecycle, and status transitions.",
+        "cases": [
+            ("test_framework_contract_with_fixed_price_annex", "Support fixed-price annex within framework contracts with milestones"),
+            ("test_standalone_fixed_price_contract_and_milestones", "Support standalone fixed price contract and milestone lifecycle")
+        ],
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
+    },
+    {
+        "id": "TestRecurringAndPaymentsDashboards",
+        "name": "Test Recurring Services & Payments Dashboards",
+        "desc": "Verify recurring services contracts, invoice reconciliation, and centralized payment views.",
+        "cases": [
+            ("test_fixed_price_dashboard_view", "Render centralized dashboard for fixed price contracts"),
+            ("test_payments_server_routes", "Verify payments navigation and summary route endpoints"),
+            ("test_recurring_contract_and_invoice_reconciliation", "Verify recurring contract services and invoice reconciliation")
+        ],
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
+    },
+    {
+        "id": "TestMultiModelInvoiceImport",
+        "name": "Test Multi-Model Invoices & Offline Assets",
+        "desc": "Verify multi-model invoice imports, milestone linking, config.ini loading, and offline assets.",
+        "cases": [
+            ("test_config_ini_loading", "Verify configuration loading from config.ini with environment overrides"),
+            ("test_import_invoice_for_fixed_price_milestone", "Import and link invoice to specific fixed price milestone"),
+            ("test_import_invoice_for_recurring_service", "Import and link invoice to recurring service month"),
+            ("test_logo_and_favicon_static_routes_and_layout", "Verify custom logo and favicon asset delivery"),
+            ("test_offline_static_assets_and_no_external_cdns", "Verify all static JS/CSS assets are hosted locally without CDN dependencies"),
+            ("test_page_new_invoice_renders_three_tabs_and_preselected_model", "Render three contract model tabs on invoice creation")
+        ],
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
+    },
 ]
 
 def page_unittest_runner(handler):
@@ -255,11 +306,14 @@ def page_unittest_runner(handler):
         </tr>
         """)
 
+    total_test_cases = sum(len(tc["cases"]) for tc in TEST_SUITES)
+    total_suites = len(TEST_SUITES)
+
     body_html = f"""
     <div style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
       <div>
         <h2 style="margin: 0 0 6px 0; color: var(--text-primary);">Unit Test Runner Dashboard</h2>
-        <p style="margin: 0; color: var(--text-muted); font-size: 14px;">Verify server database operations, validations, and logic handlers using Python unittest (80 test cases total).</p>
+        <p style="margin: 0; color: var(--text-muted); font-size: 14px;">Verify server database operations, validations, and logic handlers using Python unittest ({total_test_cases} test cases across {total_suites} suites).</p>
       </div>
       <div style="display: flex; gap: 10px;">
         <button type="button" id="btn-run-all" class="btn" style="background: var(--success); color:#fff; border-color: var(--success); font-weight: 600;" onclick="runTestCase('all')">
@@ -278,7 +332,7 @@ def page_unittest_runner(handler):
           <tr style="background: #f8fafc; border-bottom: 1px solid var(--border);">
             <th style="width: 140px; text-align: left; padding-left: 12px;">Class Name</th>
             <th style="text-align: left; width: 180px;">Test Suite</th>
-            <th style="text-align: left; width: 280px;">Chi tiết 61 Test Cases (Test Methods)</th>
+            <th style="text-align: left; width: 280px;">Chi tiết {total_test_cases} Test Cases (Test Methods)</th>
             <th style="text-align: left; width: 260px;">Trình tự thực hiện (Execution Steps)</th>
             <th style="text-align: left; width: 180px;">Expected Result</th>
             <th style="width: 100px; text-align: center;">Status</th>
@@ -501,9 +555,11 @@ def handle_run_unittests_post(handler):
 
     try:
         current_log_file = open(LOG_FILE_PATH, "a", buffering=1)
+        test_env = dict(os.environ)
+        test_env["DB_PATH"] = str((BASE_DIR / "unittest_db.sqlite3").resolve())
         current_process = subprocess.Popen(
             args,
-            env=dict(os.environ),
+            env=test_env,
             stdout=current_log_file,
             stderr=subprocess.STDOUT,
             close_fds=True

@@ -1,12 +1,7 @@
 # common.py
 # Shared helpers for server (no extra libraries)
 
-import sqlite3
-import urllib.parse
-from html import escape
-from datetime import datetime
-from pathlib import Path
-
+import sys
 import os
 import sqlite3
 import configparser
@@ -15,7 +10,15 @@ from html import escape
 from datetime import datetime
 from pathlib import Path
 
-CONFIG_FILE = Path(__file__).resolve().with_name("config.ini")
+# Support PyInstaller frozen bundle vs local development
+if getattr(sys, "frozen", False):
+    APP_DIR = Path(sys.executable).resolve().parent
+    BUNDLE_DIR = Path(getattr(sys, "_MEIPASS", APP_DIR))
+else:
+    APP_DIR = Path(__file__).resolve().parent
+    BUNDLE_DIR = APP_DIR
+
+CONFIG_FILE = APP_DIR / "config.ini"
 
 
 def load_config():
@@ -28,7 +31,7 @@ def load_config():
     config = configparser.ConfigParser()
     default_host = "127.0.0.1"
     default_port = 8800
-    default_db = str(Path(__file__).resolve().with_name("db.sqlite3"))
+    default_db = str(APP_DIR / "db.sqlite3")
 
     if CONFIG_FILE.exists():
         try:
@@ -52,7 +55,7 @@ def load_config():
     if cfg_db:
         p = Path(cfg_db)
         if not p.is_absolute():
-            cfg_db = str((Path(__file__).resolve().parent / p).resolve())
+            cfg_db = str((APP_DIR / p).resolve())
 
     env_host = os.environ.get("HOST")
     env_port = os.environ.get("PORT")
@@ -466,6 +469,8 @@ def init_db():
                 manday_rate REAL NULL,
                 joining_date TEXT NULL,
                 tentative_leaving_date TEXT NULL,
+                paid_leave_total_hours REAL NULL DEFAULT 0.0,
+                carried_over_leave_hours REAL NULL DEFAULT 0.0,
                 created_at TEXT NOT NULL DEFAULT (datetime('now')),
                 updated_at TEXT NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY(staff_id) REFERENCES contract_staff(id),
@@ -548,6 +553,7 @@ def init_db():
         ensure_column(conn, "contract_staff_links", "joining_date", "TEXT")
         ensure_column(conn, "contract_staff_links", "tentative_leaving_date", "TEXT")
         ensure_column(conn, "contract_staff_links", "paid_leave_total_hours", "REAL NULL DEFAULT 0.0")
+        ensure_column(conn, "contract_staff_links", "carried_over_leave_hours", "REAL NULL DEFAULT 0.0")
 
         ensure_column(conn, "monthly_attendance_summary", "locked", "INTEGER NOT NULL DEFAULT 0")
         ensure_column(conn, "monthly_attendance_summary", "manual_work_hours", "REAL")
@@ -1539,4 +1545,156 @@ def get_milestones_for_contract(conn: sqlite3.Connection, contract_id: int, anne
             WHERE m.contract_id = ? AND m.annex_id IS NULL
             ORDER BY m.planned_date ASC, m.id ASC
         """, (contract_id,)).fetchall()
+
+
+def get_staff_previous_unused_leave(conn: sqlite3.Connection, staff_id: int, joining_date: str | None = None, exclude_link_id: int | None = None):
+    """
+    Finds the most recent link of staff_id prior to `joining_date`
+    and computes the unused leave from that link.
+    Returns: (unused_hours: float, prev_link: sqlite3.Row or None)
+    """
+    if not joining_date:
+        joining_date = datetime.now().strftime("%Y-%m-%d")
+
+    query = """
+        SELECT l.*, a.annex_name
+        FROM contract_staff_links l
+        LEFT JOIN contract_annexes a ON a.id = l.annex_id
+        WHERE l.staff_id = ?
+    """
+    params = [staff_id]
+    if exclude_link_id:
+        query += " AND l.id <> ?"
+        params.append(exclude_link_id)
+    if joining_date:
+        query += " AND (l.tentative_leaving_date <= ? OR (l.joining_date < ? AND (l.tentative_leaving_date IS NULL OR l.tentative_leaving_date = '')))"
+        params.extend([joining_date, joining_date])
+    query += " ORDER BY COALESCE(l.joining_date, '') DESC, l.id DESC LIMIT 1"
+
+    prev_link = conn.execute(query, params).fetchone()
+    if not prev_link:
+        return 0.0, None
+
+    carried = 0.0
+    if "carried_over_leave_hours" in prev_link.keys():
+        carried = prev_link["carried_over_leave_hours"] or 0.0
+    budget = (prev_link["paid_leave_total_hours"] or 0.0) + carried
+
+    link_start_m = (prev_link["joining_date"] or "1970-01-01")[:7]
+    link_end_m = (prev_link["tentative_leaving_date"] or "9999-12")[:7]
+    used_row = conn.execute("""
+        SELECT SUM(paid_leave_days) * 8.0 AS used_hours
+        FROM monthly_attendance_summary
+        WHERE staff_id = ? AND month >= ? AND month <= ?
+    """, (staff_id, link_start_m, link_end_m)).fetchone()
+    used = (used_row["used_hours"] or 0.0) if used_row else 0.0
+    unused = max(0.0, budget - used)
+    return unused, prev_link
+
+
+def get_staff_leave_status(conn: sqlite3.Connection, staff_id: int, as_of_month: str | None = None) -> dict:
+    """
+    Calculates leave status for a staff member as of a given month (YYYY-MM).
+    Distinguishes between total contract leave and active available leave.
+    """
+    if not as_of_month:
+        as_of_month = datetime.now().strftime("%Y-%m")
+    m_start = f"{as_of_month}-01"
+    m_end = f"{as_of_month}-31"
+
+    s = conn.execute("SELECT * FROM contract_staff WHERE id = ?", (staff_id,)).fetchone()
+    if not s:
+        return {
+            "staff_id": staff_id,
+            "as_of_month": as_of_month,
+            "contract_total_hours": 0.0,
+            "active_budget_hours": 0.0,
+            "active_used_hours": 0.0,
+            "active_used_other_hours": 0.0,
+            "active_remaining_hours": 0.0,
+            "total_used_hours": 0.0,
+            "current_link_id": None
+        }
+
+    links = conn.execute("""
+        SELECT * FROM contract_staff_links 
+        WHERE staff_id = ? 
+        ORDER BY COALESCE(joining_date, '') ASC, id ASC
+    """, (staff_id,)).fetchall()
+
+    # Total contract leave across all links
+    total_contract_hours = sum((l["paid_leave_total_hours"] or 0.0) for l in links)
+    if not links or total_contract_hours == 0.0:
+        total_contract_hours = s["paid_leave_total_hours"] or 0.0
+
+    # Total used across all history
+    tot_used_row = conn.execute("""
+        SELECT SUM(paid_leave_days) * 8.0 AS used_hours
+        FROM monthly_attendance_summary
+        WHERE staff_id = ?
+    """, (staff_id,)).fetchone()
+    total_used_hours = tot_used_row["used_hours"] if (tot_used_row and tot_used_row["used_hours"] is not None) else (s["paid_leave_used_hours"] or 0.0)
+
+    # Active link in as_of_month
+    active_links = [
+        l for l in links
+        if (l["joining_date"] or "") <= m_end and (not l["tentative_leaving_date"] or l["tentative_leaving_date"] >= m_start)
+    ]
+
+    current_link = active_links[-1] if active_links else None
+    if not current_link:
+        # Fallback to the most recent link that started on or before m_end
+        past_links = [l for l in links if (l["joining_date"] or "") <= m_end]
+        if past_links:
+            current_link = past_links[-1]
+
+    if current_link:
+        carried = 0.0
+        if "carried_over_leave_hours" in current_link.keys():
+            carried = current_link["carried_over_leave_hours"] or 0.0
+        active_budget = (current_link["paid_leave_total_hours"] or 0.0) + carried
+
+        # If link has 0.0 budget and only 1 link exists, fallback to staff.paid_leave_total_hours if available
+        if active_budget == 0.0 and len(links) == 1 and (s["paid_leave_total_hours"] or 0.0) > 0:
+            active_budget = s["paid_leave_total_hours"] or 0.0
+
+        link_start_m = (current_link["joining_date"] or "1970-01-01")[:7]
+        link_end_m = (current_link["tentative_leaving_date"] or "9999-12")[:7]
+
+        # Leave used in this link period up to as_of_month
+        row = conn.execute("""
+            SELECT SUM(paid_leave_days) * 8.0 AS used_hours
+            FROM monthly_attendance_summary
+            WHERE staff_id = ? AND month >= ? AND month <= ?
+        """, (staff_id, link_start_m, min(link_end_m, as_of_month))).fetchone()
+        active_used = (row["used_hours"] or 0.0) if row else 0.0
+
+        # Leave used in other months of this link (excluding as_of_month)
+        row_other = conn.execute("""
+            SELECT SUM(paid_leave_days) * 8.0 AS used_hours
+            FROM monthly_attendance_summary
+            WHERE staff_id = ? AND month >= ? AND month <= ? AND month <> ?
+        """, (staff_id, link_start_m, min(link_end_m, as_of_month), as_of_month)).fetchone()
+        active_used_other = (row_other["used_hours"] or 0.0) if row_other else 0.0
+
+        active_rem = max(0.0, active_budget - active_used)
+    else:
+        # If no link at all or legacy test data
+        active_budget = s["paid_leave_total_hours"] or 0.0
+        active_used = total_used_hours
+        active_rem = max(0.0, active_budget - active_used)
+        active_used_other = total_used_hours
+
+    return {
+        "staff_id": staff_id,
+        "as_of_month": as_of_month,
+        "contract_total_hours": total_contract_hours,
+        "active_budget_hours": active_budget,
+        "active_used_hours": active_used,
+        "active_used_other_hours": active_used_other if current_link else total_used_hours,
+        "active_remaining_hours": active_rem,
+        "total_used_hours": total_used_hours,
+        "current_link_id": current_link["id"] if current_link else None
+    }
+
 

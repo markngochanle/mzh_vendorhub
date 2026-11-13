@@ -16,20 +16,19 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import urlparse, parse_qs
 from html import escape
 
+from common import (
+    init_db, layout, send_html, send_bytes, HOST, PORT, DB_PATH, db_connect, APP_DIR, BUNDLE_DIR
+)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(str(Path(__file__).resolve().with_name("app.log")), encoding="utf-8")
+        logging.FileHandler(str(APP_DIR / "app.log"), encoding="utf-8")
     ]
 )
 logger = logging.getLogger("server")
-
-
-from common import (
-    init_db, layout, send_html, send_bytes, HOST, PORT, DB_PATH, db_connect
-)
 
 from invoices import (
     page_invoices_list,
@@ -130,7 +129,7 @@ from payments import (
 )
 
 
-STATIC_DIR = (Path(__file__).resolve().parent / "static").resolve()
+STATIC_DIR = (APP_DIR / "static" if (APP_DIR / "static").exists() else BUNDLE_DIR / "static").resolve()
 MIME_TYPES = {
     ".js": "application/javascript; charset=utf-8",
     ".css": "text/css; charset=utf-8",
@@ -184,7 +183,7 @@ class Handler(BaseHTTPRequestHandler):
             serve_static(self, path, is_head=True)
             return
         if path in ("/logo.png", "/favicon.ico"):
-            logo_file = Path(__file__).resolve().parent / "logo.png"
+            logo_file = APP_DIR / "logo.png" if (APP_DIR / "logo.png").exists() else BUNDLE_DIR / "logo.png"
             if logo_file.exists():
                 self.send_response(200)
                 self.send_header("Content-Type", "image/png")
@@ -207,7 +206,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path in ("/logo.png", "/favicon.ico"):
-                logo_file = Path(__file__).resolve().parent / "logo.png"
+                logo_file = APP_DIR / "logo.png" if (APP_DIR / "logo.png").exists() else BUNDLE_DIR / "logo.png"
                 if logo_file.exists():
                     send_bytes(self, logo_file.read_bytes(), content_type="image/png")
                     return

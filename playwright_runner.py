@@ -7,9 +7,9 @@ from pathlib import Path
 from html import escape
 from urllib.parse import parse_qs
 
-from common import layout, send_html, read_post_form
+from common import layout, send_html, read_post_form, APP_DIR
 
-BASE_DIR = Path(__file__).resolve().parent
+BASE_DIR = APP_DIR
 PLAYWRIGHT_DIR = BASE_DIR / "playwright"
 LOG_FILE_PATH = PLAYWRIGHT_DIR / "run_progress.log"
 
@@ -239,9 +239,13 @@ def page_playwright_runner(handler):
         <h2 style="margin: 0 0 6px 0; color: var(--text-primary);">Playwright UAT Test Runner</h2>
         <p style="margin: 0; color: var(--text-muted); font-size: 14px;">Verify system workflow automation and UI integrity using Playwright integration.</p>
       </div>
-      <div style="display: flex; gap: 10px;">
+      <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; cursor: pointer; color: var(--text-secondary); background: #f8fafc; padding: 7px 12px; border-radius: 6px; border: 1px solid var(--border); user-select: none;">
+          <input type="checkbox" id="headed-checkbox" style="cursor: pointer; width: 15px; height: 15px;">
+          <span>👁 Mở cửa sổ Browser (Headed visual)</span>
+        </label>
         <button type="button" id="btn-run-all" class="btn" style="background: var(--success); color:#fff; border-color: var(--success); font-weight: 600;" onclick="runTestCase('all')">
-          ▶ Run All Scenarios (Headed)
+          ⚡ Run All Scenarios
         </button>
         <button type="button" id="btn-clear-terminal" class="btn btn-secondary" onclick="clearConsole()">
           Clear Console
@@ -366,18 +370,21 @@ def page_playwright_runner(handler):
         }}
 
         // Call API to run test
+        const isHeaded = document.getElementById('headed-checkbox') && document.getElementById('headed-checkbox').checked;
+        const postData = 'tc=' + encodeURIComponent(tcId) + '&headed=' + (isHeaded ? '1' : '0');
+        
         fetch('/api/tests/run', {{
           method: 'POST',
           headers: {{
             'Content-Type': 'application/x-www-form-urlencoded',
           }},
-          body: 'tc=' + encodeURIComponent(tcId)
+          body: postData
         }})
         .then(res => res.json())
         .then(data => {{
           if (data.status === 'ok') {{
             lastLogIndex = 0;
-            document.getElementById('runner-process-status').innerText = 'Testing (Headed Chromium active)';
+            document.getElementById('runner-process-status').innerText = isHeaded ? 'Testing (Headed visual active)' : 'Testing (Headless fast mode)';
             activeInterval = setInterval(() => pollLog(tcId), 500);
           }} else {{
             alert(data.message || 'Could not start test scenario.');
@@ -493,18 +500,22 @@ def handle_run_tests_post(handler):
 
     form = read_post_form(handler)
     tc = (form.get("tc", ["all"])[0] or "").strip()
+    headed = (form.get("headed", ["0"])[0] or "0").strip() in ("1", "true", "yes")
     
     # Empty progress log file
     PLAYWRIGHT_DIR.mkdir(exist_ok=True)
     with open(LOG_FILE_PATH, "w") as f:
         f.write("=== Playwright Test Runner Init ===\n")
         f.write(f"Scenario: {tc}\n")
+        f.write(f"Mode: {'Headed Visual' if headed else 'Headless Fast'}\n")
         f.write(f"Time: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
         f.write("====================================\n\n")
 
     # Construct execution command
     python_exe = get_python_executable()
-    args = [python_exe, str(PLAYWRIGHT_DIR / "run_tests.py"), "--headed", "--log-to-file"]
+    args = [python_exe, str(PLAYWRIGHT_DIR / "run_tests.py"), "--log-to-file"]
+    if headed:
+        args.append("--headed")
     if tc != "all":
         args += ["--tc", tc]
 

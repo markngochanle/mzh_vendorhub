@@ -103,14 +103,24 @@ def start_server():
     # Wait for server to bind and respond
     start_time = time.time()
     server_ready = False
-    while time.time() - start_time < 5.0:
-        if is_port_open("localhost", 8899):
+    while time.time() - start_time < 10.0:
+        if is_port_open("127.0.0.1", 8899) or is_port_open("localhost", 8899):
             server_ready = True
             break
-        time.sleep(0.2)
+        if proc.poll() is not None:
+            break
+        time.sleep(0.3)
         
     if not server_ready:
-        print("Error: UAT server did not start on port 8899 within 5 seconds.")
+        print("Error: UAT server did not start on port 8899 within 10 seconds.")
+        log_file.flush()
+        try:
+            with open(PLAYWRIGHT_DIR / "server.log", "r") as f:
+                log_content = f.read().strip()
+                if log_content:
+                    print(f"--- Server Log ---\n{log_content}\n------------------")
+        except Exception:
+            pass
         proc.terminate()
         proc.wait()
         sys.exit(1)
@@ -149,16 +159,17 @@ def run_playwright_tests():
     
     # Support --headed flag if the user wants to see browser
     headed = "--headed" in sys.argv
+    slow_mo_ms = 50 if headed else 0
     
     with sync_playwright() as p:
-        browser = p.chromium.launch(headless=not headed, slow_mo=500 if headed else 0)
+        browser = p.chromium.launch(headless=not headed, slow_mo=slow_mo_ms)
         context = browser.new_context(viewport={"width": 1280, "height": 900})
         page = context.new_page()
         
         # Auto-accept all browser dialogs (confirm, alert)
         page.on("dialog", lambda dialog: dialog.accept())
         
-        base_url = "http://localhost:8899"
+        base_url = "http://127.0.0.1:8899"
         
         try:
             # -----------------------------------------------------------------
@@ -181,7 +192,7 @@ def run_playwright_tests():
                 
                 # Navigate to Contracts
                 page.click("text=Contracts")
-                page.wait_for_selector("text=+ Add Framework Contract")
+                page.wait_for_selector("text=+ Add Contract")
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_contracts.png"))
                 
@@ -192,7 +203,7 @@ def run_playwright_tests():
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_staff.png"))
                 
                 # Navigate to Attendance
-                page.click("text=Attendance")
+                page.click("a[href='/attendance']")
                 page.wait_for_selector("text=Import attendance data")
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_attendance.png"))
@@ -319,12 +330,12 @@ def run_playwright_tests():
                 
                 # Uncheck to test AJAX
                 page.uncheck(checkbox_selector)
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(300)
                 
                 # Check again (the selector is re-loaded after page reload, so re-wait for selector)
                 page.wait_for_selector(checkbox_selector)
                 page.check(checkbox_selector)
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(300)
                 
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat4_project_matrix_assigned.png"))
@@ -346,13 +357,13 @@ def run_playwright_tests():
                 
                 # Move focus off to trigger change and AJAX save
                 page.press(att_input_selector, "Tab")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat5_attendance_input_saved.png"))
                 
                 # Lock the attendance log of this staff
                 page.click("text=Lock")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 
                 # Verify it is locked (input should be disabled)
                 is_disabled = page.eval_on_selector(att_input_selector, "el => el.disabled")
@@ -382,7 +393,7 @@ def run_playwright_tests():
                 
                 # Shift focus to trigger auto-save
                 page.press(ref_input_selector, "Tab")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat6_reference_numbers.png"))
@@ -404,7 +415,7 @@ def run_playwright_tests():
                 
                 # Click Import Invoice
                 page.click("button:has-text('Import Invoice')")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(400)
                 
                 # Wait for Import Results page
                 page.wait_for_selector("text=Import Results")
@@ -413,7 +424,7 @@ def run_playwright_tests():
                 
                 # Go back to Invoices List
                 page.click("text=Invoices List")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(400)
                 
                 # Verify the invoice matched with MHB/FPT/UAT/001 framework contract
                 page.wait_for_selector("text=Match")
@@ -472,14 +483,14 @@ def run_playwright_tests():
                     print("\n[UAT 10] Deactivating and Restoring a Vendor...")
                 page.goto(f"{base_url}/vendors")
                 page.wait_for_selector("text=Mizuho Bank 2")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 page.click("tr:has-text('Mizuho Bank 2') button:has-text('Deactive')")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(400)
                 
                 page.goto(f"{base_url}/vendors?status=deactive")
                 page.wait_for_selector("text=Mizuho Bank 2")
                 page.click("tr:has-text('Mizuho Bank 2') button:has-text('Restore')")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(400)
                 
                 page.goto(f"{base_url}/vendors")
                 page.wait_for_selector("text=Mizuho Bank 2")
@@ -525,7 +536,7 @@ def run_playwright_tests():
                 page.click("button[type='submit']")
                 
                 page.goto(f"{base_url}/staff?status=active")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 assert page.locator("text=Staff to Deactivate").count() == 0
                 
                 page.goto(f"{base_url}/staff?status=inactive")
@@ -592,15 +603,15 @@ def run_playwright_tests():
                     print("\n[UAT 15] Deactivating and Restoring Contract...")
                 page.goto(f"{base_url}/contracts")
                 page.wait_for_selector("text=MHB/FPT/UAT/001")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 page.click("tr:has-text('MHB/FPT/UAT/001') button:has-text('Delete')")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(400)
                 
                 page.goto(f"{base_url}/contracts?status=deleted")
                 page.wait_for_selector("text=MHB/FPT/UAT/001")
                 
                 page.click("tr:has-text('MHB/FPT/UAT/001') button:has-text('Restore')")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(400)
                 page.goto(f"{base_url}/contracts")
                 page.wait_for_selector("text=MHB/FPT/UAT/001")
                 if show:
@@ -636,11 +647,11 @@ def run_playwright_tests():
                     print("\n[UAT 17] Deactivating and Restoring Annex...")
                 page.goto(f"{base_url}/contract/edit?id=1")
                 page.wait_for_selector("text=Annex UAT 2026-B")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 page.click("tr:has-text('Annex UAT 2026-B') button:has-text('Delete')")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(400)
                 page.click("tr:has-text('Annex UAT 2026-B') button:has-text('Restore')")
-                page.wait_for_timeout(2000)
+                page.wait_for_timeout(400)
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat17_annex_deactivate_restore_success.png"))
                     print("=> UAT 17 Annex Deactivation & Restoration: PASSED")
@@ -747,9 +758,9 @@ def run_playwright_tests():
                     print("\n[UAT 22] Closing and Reopening a Project...")
                 page.goto(f"{base_url}/projects")
                 page.click("tr:has-text('UAT_PROJ') button:has-text('Close')")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 page.click("tr:has-text('UAT_PROJ') button:has-text('Reopen')")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat22_project_close_reopen_success.png"))
                     print("=> UAT 22 Project Close & Reopen: PASSED")
@@ -783,7 +794,7 @@ def run_playwright_tests():
                 checkbox_selector = "input[data-project-id='1'][data-month='2026-01']"
                 page.wait_for_selector(checkbox_selector)
                 page.uncheck(checkbox_selector)
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(300)
                 # After unassigning, Project 1 disappears from matrix because there are no more assignments to it.
                 assert page.locator(checkbox_selector).count() == 0
                 if show:
@@ -801,7 +812,7 @@ def run_playwright_tests():
                 att_input_selector = "input[name='w_1_2026-02-01']"
                 page.wait_for_selector(att_input_selector)
                 page.eval_on_selector(att_input_selector, "el => { el.value = 'invalid_hours'; el.dispatchEvent(new Event('change')); }")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 curr_val = page.eval_on_selector(att_input_selector, "el => el.value")
                 assert curr_val != "invalid_hours"
                 if show:
@@ -817,7 +828,7 @@ def run_playwright_tests():
                     print("\n[UAT 26] Unlocking Attendance Log...")
                 page.goto(f"{base_url}/attendance?month=2026-01")
                 page.click("text=Unlock")
-                page.wait_for_timeout(1000)
+                page.wait_for_timeout(300)
                 att_input_selector = "input[name='w_1_2026-01-01']"
                 is_disabled = page.eval_on_selector(att_input_selector, "el => el.disabled")
                 assert not is_disabled

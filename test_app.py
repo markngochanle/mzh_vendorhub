@@ -9,7 +9,8 @@ from datetime import datetime, date
 
 # Override database path to use a test database file
 import common
-TEST_DB_PATH = str(Path(__file__).resolve().with_name("test_db.sqlite3"))
+TEST_DB_PATH = str(Path(__file__).resolve().with_name("unittest_db.sqlite3"))
+os.environ["DB_PATH"] = TEST_DB_PATH
 common.DB_PATH = TEST_DB_PATH
 
 # Import modules to test
@@ -99,11 +100,6 @@ class BaseTestCase(unittest.TestCase):
 
     def tearDown(self):
         self.conn.close()
-        if os.path.exists(TEST_DB_PATH):
-            try:
-                os.remove(TEST_DB_PATH)
-            except OSError:
-                pass
 
     def setup_mock_data(self):
         cur = self.conn.cursor()
@@ -365,6 +361,23 @@ class TestContracts(BaseTestCase):
         self.assertIn("1,500,000,000", html2)
         self.assertIn("sum of annexes", html2)
 
+    def test_carried_over_leave_hint_in_assign_staff_form(self):
+        cur = self.conn.cursor()
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date) VALUES (?, 'Phụ lục Cũ', '2026-01-01', '2026-06-30')", (self.contract_id,))
+        a1_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date) VALUES (?, 'Phụ lục Mới', '2026-07-01', '2026-12-31')", (self.contract_id,))
+        a2_id = cur.lastrowid
+
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, joining_date, tentative_leaving_date, paid_leave_total_hours) VALUES (?, ?, ?, '2026-01-01', '2026-06-30', 16.0)", (self.staff_id, self.contract_id, a1_id))
+        self.conn.commit()
+
+        html = contracts.page_contract_assign_staff(self.contract_id, annex_id=a2_id)
+        self.assertIn("Carried Over (h)", html)
+        self.assertIn("Paid Leave (h)", html)
+        self.assertIn(f'"{self.staff_id}":', html)
+        self.assertIn('"hours": 16.0', html)
+        self.assertIn("setCarriedOver", html)
+
 
 # ==================== 4. Test Staff / Shifts ====================
 class TestStaff(BaseTestCase):
@@ -484,6 +497,237 @@ class TestStaff(BaseTestCase):
         self.assertEqual(inserted["full_name_vi"], "Nguyễn Văn An Update")
         self.assertEqual(inserted["joining_date"], "2026-07-01")
         self.assertEqual(inserted["tentative_leaving_date"], "2026-11-30")
+
+    def test_staff_leave_calculation_and_carry_over(self):
+        import urllib.parse
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contract_staff (vendor_id, full_name_vi, position, status, paid_leave_total_hours, paid_leave_used_hours)
+            VALUES (?, 'Phạm Văn Leave', 'Developer', 'active', 16.0, 0.0)
+        """, (self.seller_id,))
+        s_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active)
+            VALUES (?, 'Phụ lục 1', '2026-01-01', '2026-06-30', 1)
+        """, (self.contract_id,))
+        a1_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active)
+            VALUES (?, 'Phụ lục 2', '2026-07-01', '2026-12-31', 1)
+        """, (self.contract_id,))
+        a2_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, joining_date, tentative_leaving_date, paid_leave_total_hours, carried_over_leave_hours)
+            VALUES (?, ?, ?, 50000000, '2026-01-01', '2026-06-30', 16.0, 0.0)
+        """, (s_id, self.contract_id, a1_id))
+
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-03', 22, 21, 1.0, 0, 2272727, 50000000, 1)
+        """, (s_id,))
+        self.conn.commit()
+
+        unused_h, prev_link = common.get_staff_previous_unused_leave(self.conn, s_id, joining_date="2026-07-01")
+        self.assertEqual(unused_h, 8.0)
+        self.assertEqual(prev_link["annex_name"], "Phụ lục 1")
+
+        post_data = urllib.parse.urlencode([
+            ("contract_id", str(self.contract_id)),
+            ("annex_id", str(a2_id)),
+            ("link_id", ""),
+            ("staff_id", str(s_id)),
+            ("joining_date", "2026-07-01"),
+            ("tentative_leaving_date", "2026-12-31"),
+            ("monthly_rate", "55000000"),
+            ("manday_rate", ""),
+            ("paid_leave_total_hours", "16.0"),
+            ("carried_over_leave_hours", "8.0")
+        ]).encode("utf-8")
+        handler = StubHandler("/contract/assign-staff/save", "POST", body=post_data, headers={"Content-Length": str(len(post_data)), "Content-Type": "application/x-www-form-urlencoded"})
+        contracts.handle_contract_assign_staff_save_post(handler)
+
+        status_aug = common.get_staff_leave_status(self.conn, s_id, as_of_month="2026-08")
+        self.assertEqual(status_aug["active_budget_hours"], 24.0)
+        self.assertEqual(status_aug["active_used_hours"], 0.0)
+        self.assertEqual(status_aug["active_remaining_hours"], 24.0)
+        self.assertEqual(status_aug["contract_total_hours"], 32.0)
+
+        post_att = urllib.parse.urlencode([
+            ("month", "2026-08"),
+            ("staff_ids", str(s_id)),
+            (f"pl_{s_id}_2026-08", "3.5"),
+            (f"std_{s_id}_2026-08", "22"),
+            (f"act_{s_id}_2026-08", "18.5"),
+            (f"ot_{s_id}_2026-08", "0"),
+            (f"rate_{s_id}_2026-08", "2500000"),
+            (f"tot_{s_id}_2026-08", "55000000")
+        ]).encode("utf-8")
+        handler_att = StubHandler("/attendance/monthly/save", "POST", body=post_att, headers={"Content-Length": str(len(post_att)), "Content-Type": "application/x-www-form-urlencoded"})
+        attendance.handle_attendance_monthly_save_post(handler_att)
+        self.assertIn("exceeds remaining balance", handler_att.wfile.getvalue().decode("utf-8", errors="ignore"))
+
+        post_att_ok = urllib.parse.urlencode([
+            ("month", "2026-08"),
+            ("staff_ids", str(s_id)),
+            (f"pl_{s_id}_2026-08", "2.5"),
+            (f"std_{s_id}_2026-08", "22"),
+            (f"act_{s_id}_2026-08", "19.5"),
+            (f"ot_{s_id}_2026-08", "0"),
+            (f"rate_{s_id}_2026-08", "2500000"),
+            (f"tot_{s_id}_2026-08", "55000000")
+        ]).encode("utf-8")
+        handler_att_ok = StubHandler("/attendance/monthly/save", "POST", body=post_att_ok, headers={"Content-Length": str(len(post_att_ok)), "Content-Type": "application/x-www-form-urlencoded"})
+        attendance.handle_attendance_monthly_save_post(handler_att_ok)
+        self.assertEqual(handler_att_ok.response_status, 302)
+
+        html_list = staff.page_staff_list("Phạm Văn Leave", "", "", "", "all", return_to="/staff")
+        self.assertIn("Phạm Văn Leave", html_list)
+        self.assertIn("rem", html_list)
+
+        staff_row = self.conn.execute("SELECT * FROM contract_staff WHERE id = ?", (s_id,)).fetchone()
+        html_form = staff.page_staff_form("edit", staff_row)
+        self.assertIn("Remaining usable", html_form)
+        self.assertIn("Active available", html_form)
+
+    def test_future_annex_leave_cannot_be_used_in_current_month(self):
+        import urllib.parse
+        cur = self.conn.cursor()
+        
+        # 1. Create a staff member
+        cur.execute("""
+            INSERT INTO contract_staff (vendor_id, full_name_vi, position, status, paid_leave_total_hours, paid_leave_used_hours)
+            VALUES (?, 'Lê Tương Lai', 'Developer', 'active', 16.0, 16.0)
+        """, (self.seller_id,))
+        s_id = cur.lastrowid
+
+        # 2. Annex 1: Current period (2026-06-01 to 2026-11-30) with 2 days (16 hours) leave, fully used
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active)
+            VALUES (?, 'Phụ lục Hiện Tại', '2026-06-01', '2026-11-30', 1)
+        """, (self.contract_id,))
+        a1_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, joining_date, tentative_leaving_date, paid_leave_total_hours, carried_over_leave_hours)
+            VALUES (?, ?, ?, 50000000, '2026-06-01', '2026-11-30', 16.0, 0.0)
+        """, (s_id, self.contract_id, a1_id))
+
+        # Record 2 days (16 hours) used in month 2026-07
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-07', 22, 20, 2.0, 0, 2272727, 50000000, 1)
+        """, (s_id,))
+
+        # 3. Annex 2: Future period starting 2026-12-01 with 5 days (40 hours) leave
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active)
+            VALUES (?, 'Phụ lục Tương Lai', '2026-12-01', '2027-05-31', 1)
+        """, (self.contract_id,))
+        a2_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, monthly_rate, joining_date, tentative_leaving_date, paid_leave_total_hours, carried_over_leave_hours)
+            VALUES (?, ?, ?, 55000000, '2026-12-01', '2027-05-31', 40.0, 0.0)
+        """, (s_id, self.contract_id, a2_id))
+        self.conn.commit()
+
+        # 4. Check leave status in current month 2026-11:
+        # Active budget must ONLY be Annex 1's budget (16h), and remaining must be 0h (0 days)
+        st_nov = common.get_staff_leave_status(self.conn, s_id, as_of_month="2026-11")
+        self.assertEqual(st_nov["active_budget_hours"], 16.0)
+        self.assertEqual(st_nov["active_used_hours"], 16.0)
+        self.assertEqual(st_nov["active_remaining_hours"], 0.0)
+        # Total contract leave across all signed annexes includes future annex (16 + 40 = 56h)
+        self.assertEqual(st_nov["contract_total_hours"], 56.0)
+
+        # 5. Attempting to use even 1 day (8 hours) in 2026-11 must be blocked
+        post_att = urllib.parse.urlencode([
+            ("month", "2026-11"),
+            ("staff_ids", str(s_id)),
+            (f"pl_{s_id}_2026-11", "1.0"),
+            (f"std_{s_id}_2026-11", "22"),
+            (f"act_{s_id}_2026-11", "21.0"),
+            (f"ot_{s_id}_2026-11", "0"),
+            (f"rate_{s_id}_2026-11", "2272727"),
+            (f"tot_{s_id}_2026-11", "50000000")
+        ]).encode("utf-8")
+        handler_nov = StubHandler("/attendance/monthly/save", "POST", body=post_att, headers={"Content-Length": str(len(post_att)), "Content-Type": "application/x-www-form-urlencoded"})
+        attendance.handle_attendance_monthly_save_post(handler_nov)
+        self.assertIn("exceeds remaining balance", handler_nov.wfile.getvalue().decode("utf-8", errors="ignore"))
+
+        # 6. Check leave status in future month 2026-12 (when Annex 2 becomes active):
+        # Active budget must now be Annex 2's budget (40h = 5 days)
+        st_dec = common.get_staff_leave_status(self.conn, s_id, as_of_month="2026-12")
+        self.assertEqual(st_dec["active_budget_hours"], 40.0)
+        self.assertEqual(st_dec["active_used_hours"], 0.0)
+        self.assertEqual(st_dec["active_remaining_hours"], 40.0)
+
+        # 7. Taking 3.0 days (24 hours) in 2026-12 succeeds
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-12', 22, 22, 0.0, 0, 2500000, 55000000, 0)
+        """, (s_id,))
+        self.conn.commit()
+
+        post_dec = urllib.parse.urlencode([
+            ("month", "2026-12"),
+            ("staff_ids", str(s_id)),
+            (f"pl_{s_id}_2026-12", "3.0"),
+            (f"std_{s_id}_2026-12", "22"),
+            (f"act_{s_id}_2026-12", "19.0"),
+            (f"ot_{s_id}_2026-12", "0"),
+            (f"rate_{s_id}_2026-12", "2500000"),
+            (f"tot_{s_id}_2026-12", "55000000")
+        ]).encode("utf-8")
+        handler_dec = StubHandler("/attendance/monthly/save", "POST", body=post_dec, headers={"Content-Length": str(len(post_dec)), "Content-Type": "application/x-www-form-urlencoded"})
+        attendance.handle_attendance_monthly_save_post(handler_dec)
+        self.assertEqual(handler_dec.response_status, 302)
+
+        # After saving, remaining in Annex 2 is 40 - 24 = 16h (2 days)
+        st_dec_after = common.get_staff_leave_status(self.conn, s_id, as_of_month="2026-12")
+        self.assertEqual(st_dec_after["active_used_hours"], 24.0)
+        self.assertEqual(st_dec_after["active_remaining_hours"], 16.0)
+
+    def test_get_staff_previous_unused_leave_multiple_prior_annexes(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contract_staff (vendor_id, full_name_vi, position, status, paid_leave_total_hours, paid_leave_used_hours)
+            VALUES (?, 'Trần Lịch Sử', 'Tester', 'active', 32.0, 0.0)
+        """, (self.seller_id,))
+        s_id = cur.lastrowid
+
+        # Annex 1: 2025-01-01 to 2025-06-30 with 16h leave, 0 used -> 16h unused
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date) VALUES (?, 'PL 2025-H1', '2025-01-01', '2025-06-30')", (self.contract_id,))
+        a1_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, joining_date, tentative_leaving_date, paid_leave_total_hours) VALUES (?, ?, ?, '2025-01-01', '2025-06-30', 16.0)", (s_id, self.contract_id, a1_id))
+
+        # Annex 2: 2025-07-01 to 2025-12-31 with 16h leave + 8h carried -> 24h budget. Used 12h in month 2025-09 -> 12h unused
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date) VALUES (?, 'PL 2025-H2', '2025-07-01', '2025-12-31')", (self.contract_id,))
+        a2_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, joining_date, tentative_leaving_date, paid_leave_total_hours, carried_over_leave_hours) VALUES (?, ?, ?, '2025-07-01', '2025-12-31', 16.0, 8.0)", (s_id, self.contract_id, a2_id))
+        cur.execute("INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, daily_rate, total_amount, locked) VALUES (?, '2025-09', 22, 20.5, 1.5, 2000000, 44000000, 1)", (s_id,))
+        self.conn.commit()
+
+        # When creating Annex 3 starting 2026-01-01, get_staff_previous_unused_leave must find Annex 2 (the immediately preceding one)
+        unused_h, prev_link = common.get_staff_previous_unused_leave(self.conn, s_id, joining_date="2026-01-01")
+        self.assertEqual(prev_link["annex_name"], "PL 2025-H2")
+        self.assertEqual(unused_h, 12.0)
+
+    def test_inactive_staff_leave_status_handling(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contract_staff (vendor_id, full_name_vi, position, status, paid_leave_total_hours, paid_leave_used_hours)
+            VALUES (?, 'Nguyễn Đã Nghỉ', 'BA', 'inactive', 24.0, 16.0)
+        """, (self.seller_id,))
+        s_id = cur.lastrowid
+        self.conn.commit()
+
+        st = common.get_staff_leave_status(self.conn, s_id)
+        self.assertEqual(st["contract_total_hours"], 24.0)
+        self.assertEqual(st["active_remaining_hours"], 8.0)
 
 
 # ==================== 5. Test Invoices ====================
@@ -1103,6 +1347,45 @@ class TestAttendance(BaseTestCase):
         finally:
             conn.close()
 
+    def test_leave_fractional_days_and_decimal_precision(self):
+        import urllib.parse
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contract_staff (vendor_id, full_name_vi, position, status, paid_leave_total_hours, paid_leave_used_hours)
+            VALUES (?, 'Hoàng Phân Số', 'Developer', 'active', 24.0, 0.0)
+        """, (self.seller_id,))
+        s_id = cur.lastrowid
+
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date) VALUES (?, 'PL 2026-Test', '2026-01-01', '2026-12-31')", (self.contract_id,))
+        a_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, joining_date, tentative_leaving_date, paid_leave_total_hours) VALUES (?, ?, ?, '2026-01-01', '2026-12-31', 24.0)", (s_id, self.contract_id, a_id))
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-04', 22, 22, 0.0, 0, 2000000, 44000000, 0)
+        """, (s_id,))
+        self.conn.commit()
+
+        post_data = urllib.parse.urlencode([
+            ("month", "2026-04"),
+            ("staff_ids", str(s_id)),
+            (f"pl_{s_id}_2026-04", "1.5"),
+            (f"std_{s_id}_2026-04", "22"),
+            (f"act_{s_id}_2026-04", "20.5"),
+            (f"ot_{s_id}_2026-04", "0"),
+            (f"rate_{s_id}_2026-04", "2000000"),
+            (f"tot_{s_id}_2026-04", "44000000")
+        ]).encode("utf-8")
+        h = StubHandler("/attendance/monthly/save", "POST", body=post_data, headers={"Content-Length": str(len(post_data)), "Content-Type": "application/x-www-form-urlencoded"})
+        attendance.handle_attendance_monthly_save_post(h)
+        self.assertEqual(h.response_status, 302)
+
+        row = self.conn.execute("SELECT paid_leave_days FROM monthly_attendance_summary WHERE staff_id = ? AND month = '2026-04'", (s_id,)).fetchone()
+        self.assertEqual(row["paid_leave_days"], 1.5)
+
+        st = common.get_staff_leave_status(self.conn, s_id, as_of_month="2026-04")
+        self.assertEqual(st["active_used_hours"], 12.0)
+        self.assertEqual(st["active_remaining_hours"], 12.0)
+
 
 # ==================== 7. Test Web Routes routing ====================
 class TestServerRoutes(BaseTestCase):
@@ -1517,6 +1800,30 @@ class TestAnnexFilters(BaseTestCase):
         self.assertIn("Annex Expired May", output_may)
         self.assertNotIn("Annex Active Nov", output_may)
         self.assertNotIn("Annex Future Dec", output_may)
+
+    def test_monthly_attendance_no_duplicate_when_staff_has_multiple_annexes(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contract_staff (vendor_id, full_name_vi, position, status, paid_leave_total_hours, paid_leave_used_hours)
+            VALUES (?, 'Nguyễn Trùng Lặp', 'Tester', 'active', 56.0, 8.0)
+        """, (self.seller_id,))
+        s_id = cur.lastrowid
+
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date) VALUES (?, 'Phụ lục Giai đoạn 1', '2026-05-01', '2026-09-30')", (self.contract_id,))
+        a1_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, joining_date, tentative_leaving_date, paid_leave_total_hours) VALUES (?, ?, ?, '2026-05-01', '2026-09-30', 40.0)", (s_id, self.contract_id, a1_id))
+
+        cur.execute("INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date) VALUES (?, 'Phụ lục Giai đoạn 2', '2026-10-01', '2026-11-30')", (self.contract_id,))
+        a2_id = cur.lastrowid
+        cur.execute("INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, joining_date, tentative_leaving_date, paid_leave_total_hours, carried_over_leave_hours) VALUES (?, ?, ?, '2026-10-01', '2026-11-30', 16.0, 32.0)", (s_id, self.contract_id, a2_id))
+
+        cur.execute("INSERT OR REPLACE INTO attendance_locks (staff_id, month, locked) VALUES (?, '2026-07', 1)", (s_id,))
+        cur.execute("INSERT OR REPLACE INTO attendance_locks (staff_id, month, locked) VALUES (?, '2026-08', 1)", (s_id,))
+        self.conn.commit()
+
+        html = attendance.page_monthly_attendance({"month": ["2026-07", "2026-08"], "q": "Nguyễn Trùng Lặp"})
+        row_occurrences = html.count('<div style="font-weight:600;">Nguyễn Trùng Lặp</div>')
+        self.assertEqual(row_occurrences, 2, f"Expected 2 table rows but got {row_occurrences} (duplicated rows)")
 
 
 # ==================== 12. Test Improvements ====================

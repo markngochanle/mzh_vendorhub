@@ -12,7 +12,7 @@ from pathlib import Path
 
 from common import (
     db_connect, layout, parse_int_or_none, fmt_money,
-    send_html, redirect, safe_return_to
+    send_html, redirect, safe_return_to, get_staff_leave_status
 )
 
 # -------------------- Normalization --------------------
@@ -1588,15 +1588,27 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
                    l.month AS lock_month
             FROM contract_staff s
             JOIN vendors v ON v.id=s.vendor_id
-            JOIN contract_staff_links lnk ON lnk.staff_id = s.id
-                AND lnk.joining_date <= ?
-                AND (lnk.tentative_leaving_date IS NULL OR lnk.tentative_leaving_date = '' OR lnk.tentative_leaving_date >= ?)
-            JOIN contracts c ON c.id=lnk.contract_id
             JOIN attendance_locks l ON l.staff_id=s.id
+            LEFT JOIN contract_staff_links lnk ON lnk.id = COALESCE(
+                (
+                    SELECT id FROM contract_staff_links
+                    WHERE staff_id = s.id
+                      AND (joining_date IS NULL OR joining_date = '' OR joining_date <= (l.month || '-31'))
+                      AND (tentative_leaving_date IS NULL OR tentative_leaving_date = '' OR tentative_leaving_date >= (l.month || '-01'))
+                    ORDER BY COALESCE(joining_date, '') DESC, id DESC LIMIT 1
+                ),
+                (
+                    SELECT id FROM contract_staff_links
+                    WHERE staff_id = s.id
+                      AND (joining_date IS NULL OR joining_date = '' OR joining_date <= (l.month || '-31'))
+                    ORDER BY COALESCE(joining_date, '') DESC, id DESC LIMIT 1
+                )
+            )
+            LEFT JOIN contracts c ON c.id=lnk.contract_id
             LEFT JOIN contract_annexes an ON an.id=lnk.annex_id
             {where_sql}
             ORDER BY l.month DESC, vendor_name ASC, s.full_name_vi ASC
-        """, [max_end, min_start] + params).fetchall()
+        """, params).fetchall()
 
         # Load raw work & OT hours from daily logs
         raw_hours_rows = conn.execute("""
@@ -1702,6 +1714,12 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
                     "manual_ot_hours": None
                 }
 
+        leave_status_map = {}
+        for s in locked_staff:
+            pair = (s["id"], s["lock_month"])
+            if pair not in leave_status_map:
+                leave_status_map[pair] = get_staff_leave_status(conn, s["id"], as_of_month=s["lock_month"])
+
         conn.commit()
     finally:
         conn.close()
@@ -1756,9 +1774,16 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
         else:
             rate_label = '<span class="muted">Not configured</span>'
 
-        tot_pl = s["paid_leave_total_hours"] or 0.0
-        used_pl = s["paid_leave_used_hours"] or 0.0
-        rem_pl_hours = tot_pl - used_pl
+        leave_st = leave_status_map.get((sid, m_val)) or {
+            "contract_total_hours": 0.0,
+            "active_budget_hours": 0.0,
+            "active_used_hours": 0.0,
+            "active_remaining_hours": 0.0
+        }
+        tot_pl = leave_st["contract_total_hours"]
+        active_budget = leave_st["active_budget_hours"]
+        active_used = leave_st["active_used_hours"]
+        rem_pl_hours = leave_st["active_remaining_hours"]
         rem_pl_days = rem_pl_hours / 8.0
 
         pl = sum_data["paid_leave_days"]
@@ -1782,7 +1807,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
         total_pay = sum_data["total_amount"]
         total_billing_all += total_pay
 
-        contract_info = escape(s["contract_no"])
+        contract_info = escape(s["contract_no"] or "")
         if s["annex_name"]:
             contract_info += f" / {escape(s['annex_name'])}"
 
@@ -1814,8 +1839,8 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
           <td style="text-align:center;">
             <input type="number" step="0.5" min="0" name="pl_{sid}_{m_val}" value="{pl:.1f}" {disabled_attr}
                    style="width: 55px; padding: 4px; font-size:12px; text-align:center;"
-                   title="Remaining balance: {rem_pl_days:.2f} days ({rem_pl_hours:.1f}h)">
-            <div style="font-size:9px; color:#666; margin-top:2px;" title="Total: {tot_pl:.1f}h, Used: {used_pl:.1f}h">
+                   title="Remaining active balance: {rem_pl_days:.2f} days ({rem_pl_hours:.1f}h) | Total HĐ: {tot_pl:.1f}h">
+            <div style="font-size:9px; color:#666; margin-top:2px;" title="Active: {active_budget:.1f}h, Used: {active_used:.1f}h, Total HĐ: {tot_pl:.1f}h">
               Rem: {rem_pl_days:.1f}d
             </div>
           </td>
@@ -3902,17 +3927,11 @@ def handle_attendance_monthly_save_post(handler):
             s = staff_data[sid]
             pl_days = vals.get("pl", 0.0)
             
-            # Annual Leave remaining validation (sum other months' paid leave days and exclude current month)
-            tot_pl = s["paid_leave_total_hours"] or 0.0
-            used_other = conn.execute("""
-                SELECT SUM(paid_leave_days) AS total_days 
-                FROM monthly_attendance_summary
-                WHERE staff_id = ? AND month <> ?
-            """, (sid, month_val)).fetchone()
-            used_pl_other_days = (used_other["total_days"] or 0.0) if used_other else 0.0
-            used_pl_other_hours = used_pl_other_days * 8.0
-            
-            rem_pl_hours = tot_pl - used_pl_other_hours
+            # Annual Leave remaining validation against active available leave in month_val
+            leave_st = get_staff_leave_status(conn, sid, as_of_month=month_val)
+            active_budget = leave_st["active_budget_hours"]
+            active_used_other = leave_st["active_used_other_hours"]
+            rem_pl_hours = max(0.0, active_budget - active_used_other)
             
             pl_hours_input = pl_days * 8.0
             if pl_hours_input > rem_pl_hours:
