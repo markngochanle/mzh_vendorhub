@@ -10,22 +10,30 @@ echo.
 REM Chuyen den thu muc chua file bat
 cd /d "%~dp0"
 
-REM 1. Kiem tra Python
+REM 1. Kiem tra Python (Uu tien virtual environment .venv hoac venv co san)
 echo [1/5] Kiem tra moi truong Python...
-where python >nul 2>&1
-if %errorlevel% equ 0 (
-    set "PY_CMD=python"
+if exist ".venv\Scripts\python.exe" (
+    set "PY_CMD=.venv\Scripts\python.exe"
+    echo      Phat hien moi truong ao: .venv
+) else if exist "venv\Scripts\python.exe" (
+    set "PY_CMD=venv\Scripts\python.exe"
+    echo      Phat hien moi truong ao: venv
 ) else (
-    where py >nul 2>&1
+    where python >nul 2>&1
     if %errorlevel% equ 0 (
-        set "PY_CMD=py -3"
+        set "PY_CMD=python"
     ) else (
-        echo [ERROR] Khong tim thay Python! Vui long cai dat Python 3 va tick chon "Add Python to PATH".
-        echo Link tai: https://www.python.org/downloads/
-        goto :failed
+        where py >nul 2>&1
+        if %errorlevel% equ 0 (
+            set "PY_CMD=py -3"
+        ) else (
+            echo [ERROR] Khong tim thay Python hoac moi truong ao .venv!
+            echo Vui long cai dat Python 3 hoac tao moi truong ao .venv.
+            goto :failed
+        )
     )
 )
-echo      Da tim thay: %PY_CMD%
+echo      Su dung Python: %PY_CMD%
 
 REM 2. Kiem tra va cai dat PyInstaller
 echo.

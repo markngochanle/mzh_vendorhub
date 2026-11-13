@@ -38,12 +38,36 @@ Nếu máy tính Windows hiện tại có kết nối mạng Internet:
 
 ---
 
-## 3. Trường hợp 2: Đóng gói trong môi trường KHÔNG CÓ INTERNET (Offline / Air-Gapped)
+## 3. Trường hợp 2: Đóng gói trong môi trường KHÔNG CÓ INTERNET / Bị hạn chế quyền
 
-Trong môi trường doanh nghiệp bảo mật nghiêm ngặt (như ngân hàng), máy tính thường bị chặn hoàn toàn truy cập ra ngoài Internet. Dưới đây là 2 phương án xử lý:
+Trong môi trường doanh nghiệp bảo mật nghiêm ngặt (như ngân hàng), máy tính thường bị chặn kết nối Internet hoặc chặn quyền cài đặt thư viện vào Python chung của hệ thống. Dưới đây là các phương án xử lý:
 
-### Phương án A (Khuyên dùng - Nhanh & Đơn giản nhất)
-> **Đóng gói trước trên máy có Internet rồi copy thư mục `dist` sang máy nội bộ.**
+### Phương án A (Tối ưu nhất): Sử dụng môi trường ảo `.venv` có sẵn
+> **Áp dụng khi trên máy bạn đã có sẵn thư mục môi trường ảo `.venv` (hoặc `venv`) chứa PyInstaller.**
+
+File `package.bat` đã được nâng cấp cơ chế **ưu tiên tự động nhận diện `.venv`**:
+
+1. Khi bạn double-click vào `package.bat`:
+   * Script sẽ tự động kiểm tra xem thư mục `.venv\Scripts\python.exe` có tồn tại hay không.
+   * Nếu có, script sẽ **tự động sử dụng chính Python và PyInstaller nằm bên trong `.venv`** để đóng gói.
+   * Script sẽ **không bao giờ gọi lệnh tải từ Internet** hay can thiệp vào Python toàn cục của máy.
+2. Quá trình đóng gói diễn ra hoàn toàn offline và tự động xuất ra thư mục `dist`.
+
+#### Nếu bạn muốn chạy bằng tay từ dòng lệnh (Command Prompt):
+```cmd
+REM Cách 1: Kích hoạt môi trường ảo rồi đóng gói
+call .venv\Scripts\activate
+pyinstaller --noconfirm --onefile --clean --name="MizuhoVendorHub" --icon="logo.ico" --add-data "static;static" --add-data "logo.png;." server.py
+
+REM Cách 2: Gọi trực tiếp python trong .venv mà không cần activate
+.venv\Scripts\python.exe -m PyInstaller --noconfirm --onefile --clean --name="MizuhoVendorHub" --icon="logo.ico" --add-data "static;static" --add-data "logo.png;." server.py
+```
+Sau khi build xong, copy file `db.sqlite3` và `config.ini` vào thư mục `dist`.
+
+---
+
+### Phương án B: Đóng gói trước rồi chuyển giao (Đơn giản - Không cần cài Python)
+> **Đóng gói trên máy ngoài có Internet $\rightarrow$ copy nguyên thư mục `dist` sang máy đích.**
 
 1. Trên máy có Internet (hoặc máy cá nhân): Chạy `package.bat` theo mục 2 để tạo thư mục `dist`.
 2. Copy toàn bộ thư mục `dist` (gồm 3 file: `MizuhoVendorHub.exe`, `db.sqlite3`, `config.ini`) qua USB hoặc kênh truyền file nội bộ sang máy đích.
@@ -51,9 +75,8 @@ Trong môi trường doanh nghiệp bảo mật nghiêm ngặt (như ngân hàng
 
 ---
 
-### Phương án B: Đóng gói TRỰC TIẾP trên máy nội bộ không có Internet
-
-Nếu bắt buộc phải build mã nguồn trực tiếp trên máy nội bộ:
+### Phương án C: Tải gói bánh xe Offline (.whl) qua thư mục `offline_packages`
+> **Áp dụng khi máy nội bộ chưa có `.venv` và cần cài PyInstaller lần đầu mà không có mạng.**
 
 #### Bước 1: Chuẩn bị gói cài đặt Offline (Thực hiện trên máy có Internet)
 Mở Command Prompt (CMD) trên máy tính có mạng và tải sẵn các thư viện cần thiết vào một thư mục tên là `offline_packages`:
@@ -62,7 +85,6 @@ Mở Command Prompt (CMD) trên máy tính có mạng và tải sẵn các thư 
 mkdir offline_packages
 pip download pyinstaller pillow -d ./offline_packages
 ```
-*(Lệnh trên sẽ tải tất cả các file bánh xe `.whl` của PyInstaller và các gói phụ thuộc tương thích với Python của bạn vào thư mục `offline_packages`)*.
 
 #### Bước 2: Chuyển thư mục `offline_packages` sang máy Offline
 Copy thư mục `offline_packages` này và đặt nó nằm **ngay cạnh file `package.bat`** trong thư mục dự án trên máy offline:
@@ -82,12 +104,11 @@ vendor_management/
 #### Bước 3: Chạy đóng gói tự động
 Double-click vào **`package.bat`**.
 
-Script đã được cấu hình thông minh:
-* Khi phát hiện máy không có Internet nhưng có thư mục `offline_packages`, nó sẽ tự động chạy lệnh:
-  ```cmd
-  python -m pip install --no-index --find-links=offline_packages pyinstaller
-  ```
-* Sau khi PyInstaller được cài đặt hoàn toàn offline, script sẽ tiếp tục đóng gói ứng dụng ra thư mục `dist` như bình thường.
+Script sẽ tự động phát hiện thư mục `offline_packages` và chạy lệnh cài đặt offline:
+```cmd
+python -m pip install --no-index --find-links=offline_packages pyinstaller
+```
+Sau đó tự động build ra file `.exe` bình thường.
 
 ---
 
