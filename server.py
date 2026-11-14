@@ -552,8 +552,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path in ("/payments", "/payments/dashboard", "/attendance/cashout", "/attendance/payout"):
+                default_type = "tm" if path in ("/attendance/cashout", "/attendance/payout") else "dashboard"
                 filters = {
-                    "type": qs.get("type", ["tm"])[0],
+                    "type": qs.get("type", [default_type])[0],
                     "fy": qs.get("fy", []),
                     "status": qs.get("status", []),
                     "vendor_id": qs.get("vendor_id", []),

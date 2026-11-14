@@ -3461,6 +3461,37 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         self.assertIn("Cash-out", csv_rec)
         self.assertIn("REC-MATRIX-01", csv_rec)
 
+        # 7. Test Payments Overview Dashboard (Tab 1 with visual Chart.js charts & KPIs)
+        stub_dash = StubHandler("/payments?fy=2026", method="GET")
+        stub_dash.do_GET()
+        html_dash = stub_dash.get_output_text()
+        self.assertIn("Fiscal Year Cash-out Overview - FY26 (Dashboard)", html_dash)
+        self.assertIn("Dashboard", html_dash)
+        self.assertIn("Time & Material (T&M)", html_dash)
+        self.assertIn("Fixed Price (Milestones)", html_dash)
+        self.assertIn("Recurring Services (Internet / SaaS)", html_dash)
+        self.assertIn("chartMonthly", html_dash)
+        self.assertIn("chartModelShare", html_dash)
+        self.assertIn("chartInvoiceRecon", html_dash)
+        self.assertIn("chartTopVendors", html_dash)
+        self.assertIn("Total Commitment (FY26)", html_dash)
+        self.assertIn("Total Cash-out YTD", html_dash)
+        self.assertIn("Invoices Reconciliation", html_dash)
+        self.assertIn("Recent Invoices & Reconciliation", html_dash)
+        self.assertIn("Upcoming & Overdue Milestones", html_dash)
+        self.assertIn("Active Recurring Services", html_dash)
+
+        # 8. Test Dashboard CSV Export
+        h_dash_exp = StubHandler("/payments/export?type=dashboard&fy=2026", method="GET")
+        h_dash_exp.do_GET()
+        csv_dash = h_dash_exp.get_output_text()
+        self.assertIn("Fiscal Year Overview Report FY26", csv_dash)
+        self.assertIn("Time & Material (T&M)", csv_dash)
+        self.assertIn("Fixed Price (Milestones)", csv_dash)
+        self.assertIn("Recurring Services (Internet / SaaS)", csv_dash)
+        self.assertIn("Monthly Cash-out Breakdown (VND)", csv_dash)
+        self.assertIn("TOTAL CASH-OUT", csv_dash)
+
     def test_payments_dashboard_filtering_and_popovers(self):
         import attendance
         cur = self.conn.cursor()

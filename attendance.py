@@ -3535,6 +3535,765 @@ def get_recurring_payout_data(conn, fy: int, status_filter: str, vendor_filter: 
     }
 
 
+def _render_payments_overview_dashboard(
+    conn,
+    fy: int,
+    vendor_filter: int | None,
+    q_filter: str,
+    sub_nav: str,
+    tabs_bar_html: str,
+    vendor_options_html: list,
+    default_fy: int
+) -> str:
+    from invoices import check_invoice_payroll_reconciliation
+    from contracts import get_contract_renewal_status
+
+    # 1. Fetch payout data for all 3 models
+    data_tm = get_payout_data(conn, fy, "all", vendor_filter, q_filter)
+    data_fp = get_fixed_price_payout_data(conn, fy, "all", vendor_filter, q_filter)
+    data_rec = get_recurring_payout_data(conn, fy, "all", vendor_filter, q_filter)
+
+    fy_months = data_tm["fy_months"]
+    month_labels = ["Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec", "Jan", "Feb", "Mar"]
+
+    # 2. Monthly cashouts and planned series
+    tm_co = [float(data_tm["col_cashout_totals"][m] or 0.0) for m in fy_months]
+    fp_co = [float(data_fp["col_cashout_totals"][m] or 0.0) for m in fy_months]
+    rec_co = [float(data_rec["col_cashout_totals"][m] or 0.0) for m in fy_months]
+    total_co_monthly = [tm_co[i] + fp_co[i] + rec_co[i] for i in range(12)]
+
+    tm_plan = [float(data_tm["col_payroll_totals"][m] or 0.0) for m in fy_months]
+    fp_plan = [float(data_fp["col_payroll_totals"][m] or 0.0) for m in fy_months]
+    rec_plan = [float(data_rec["col_payroll_totals"][m] or 0.0) for m in fy_months]
+    total_plan_monthly = [tm_plan[i] + fp_plan[i] + rec_plan[i] for i in range(12)]
+
+    # 3. Overall FY Totals
+    tm_co_sum = sum(tm_co)
+    fp_co_sum = sum(fp_co)
+    rec_co_sum = sum(rec_co)
+    grand_co_sum = tm_co_sum + fp_co_sum + rec_co_sum
+
+    tm_plan_sum = sum(tm_plan)
+    fp_plan_sum = sum(fp_plan)
+    rec_plan_sum = sum(rec_plan)
+    grand_plan_sum = tm_plan_sum + fp_plan_sum + rec_plan_sum
+
+    remaining_sum = max(0.0, grand_plan_sum - grand_co_sum)
+    payout_rate = (grand_co_sum / grand_plan_sum * 100.0) if grand_plan_sum > 0 else 0.0
+
+    # 4. Invoices and Reconciliation
+    inv_where = ["1=1"]
+    inv_params = []
+    if vendor_filter:
+        inv_where.append("""(
+            seller_name IN (SELECT company_name FROM vendors WHERE id=?)
+            OR seller_name IN (SELECT short_name FROM vendors WHERE id=?)
+            OR seller_mst IN (SELECT tax_id FROM vendors WHERE id=?)
+        )""")
+        inv_params.extend([vendor_filter, vendor_filter, vendor_filter])
+
+    inv_rows = conn.execute(f"SELECT * FROM invoices WHERE {' AND '.join(inv_where)} ORDER BY id DESC", inv_params).fetchall()
+
+    inv_matched_count = 0
+    inv_matched_amt = 0.0
+    inv_mismatch_count = 0
+    inv_mismatch_amt = 0.0
+    inv_other_count = 0
+    inv_other_amt = 0.0
+    fy_inv_rows = []
+
+    for r in inv_rows:
+        in_fy = False
+        if r["service_year"] and r["service_month"]:
+            m_code = f"{r['service_year']:04d}-{r['service_month']:02d}"
+            if m_code in fy_months:
+                in_fy = True
+        elif r["nlap"] and str(r["nlap"])[:7] in fy_months:
+            in_fy = True
+        elif r["imported_at"] and str(r["imported_at"])[:7] in fy_months:
+            in_fy = True
+
+        if in_fy or not (r["service_year"] and r["service_month"]):
+            if in_fy:
+                fy_inv_rows.append(r)
+            amt = float(r["tg_tttbso"] or 0.0)
+            st, _, _, _ = check_invoice_payroll_reconciliation(
+                conn, r["contract_no"], r["service_year"], r["service_month"], r["tg_tttbso"]
+            )
+            if st == "ok":
+                inv_matched_count += 1
+                inv_matched_amt += amt
+            elif st == "mismatch":
+                inv_mismatch_count += 1
+                inv_mismatch_amt += amt
+            else:
+                inv_other_count += 1
+                inv_other_amt += amt
+
+    total_inv_count = inv_matched_count + inv_mismatch_count + inv_other_count
+    total_inv_amt = inv_matched_amt + inv_mismatch_amt + inv_other_amt
+    recon_rate = (inv_matched_count / total_inv_count * 100.0) if total_inv_count > 0 else 100.0
+
+    # 5. Vendor Totals
+    vendor_totals = {}
+    for r in data_tm["rows"]:
+        v = (r["annex"]["short_name"] or r["annex"]["company_name"] or "Unknown").strip()
+        vendor_totals[v] = vendor_totals.get(v, 0.0) + r["row_cashout_total"]
+    for r in data_fp["rows"]:
+        v = (r["annex"]["short_name"] or r["annex"]["company_name"] or "Unknown").strip()
+        vendor_totals[v] = vendor_totals.get(v, 0.0) + r["row_cashout_total"]
+    for r in data_rec["rows"]:
+        v = (r["annex"]["short_name"] or r["annex"]["company_name"] or "Unknown").strip()
+        vendor_totals[v] = vendor_totals.get(v, 0.0) + r["row_cashout_total"]
+
+    top_vendors = sorted(vendor_totals.items(), key=lambda x: x[1], reverse=True)[:6]
+    vend_labels = [x[0] for x in top_vendors] if top_vendors else ["No Cash-out"]
+    vend_data = [x[1] for x in top_vendors] if top_vendors else [0.0]
+
+    # 6. Upcoming / Overdue Milestones (Fixed Price)
+    ms_where = ["m.status != 'PAID'"]
+    ms_params = []
+    if vendor_filter:
+        ms_where.append("c.seller_vendor_id = ?")
+        ms_params.append(vendor_filter)
+    upcoming_ms = conn.execute(f"""
+        SELECT m.id, m.milestone_name, m.milestone_type, m.amount, m.planned_date, m.status, c.framework_no, c.framework_name, v.short_name, v.company_name
+        FROM contract_milestones m
+        JOIN contracts c ON c.id = m.contract_id
+        LEFT JOIN vendors v ON v.id = c.seller_vendor_id
+        WHERE {' AND '.join(ms_where)}
+        ORDER BY m.planned_date ASC
+        LIMIT 5
+    """, ms_params).fetchall()
+
+    today_str = date.today().isoformat()
+    upcoming_ms_html = []
+    for m in upcoming_ms:
+        m_amt = float(m["amount"] or 0.0)
+        p_date = (m["planned_date"] or "").strip()
+        is_overdue = (p_date and p_date < today_str and m["status"] == "PENDING")
+        status_badge = '<span class="tag tag-danger" style="font-size:11px;">⚠️ Overdue</span>' if is_overdue else f'<span class="tag tag-warning" style="font-size:11px;">{escape(m["status"])}</span>'
+        v_label = m["short_name"] or m["company_name"] or "-"
+        upcoming_ms_html.append(f"""
+        <tr style="border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 9px 12px; font-size: 12.5px;">
+            <div style="font-weight: 600; color: var(--text-primary);">{escape(m['milestone_name'])}</div>
+            <div style="font-size: 11px; color: var(--text-muted);">{escape(m['framework_no'])} &bull; {escape(v_label)}</div>
+          </td>
+          <td style="padding: 9px 12px; font-size: 12px; font-family: monospace; white-space: nowrap;">{p_date or '-'}</td>
+          <td style="padding: 9px 12px; font-size: 12.5px; font-weight: 600; text-align: right; font-family: monospace; white-space: nowrap;">{fmt_money(m_amt)} VND</td>
+          <td style="padding: 9px 12px; text-align: center; white-space: nowrap;">{status_badge}</td>
+        </tr>
+        """)
+
+    # 7. Active Recurring Services & Renewal Health
+    rec_where = ["c.billing_type = 'RECURRING'", "c.is_active = 1"]
+    rec_params = []
+    if vendor_filter:
+        rec_where.append("c.seller_vendor_id = ?")
+        rec_params.append(vendor_filter)
+    active_rec = conn.execute(f"""
+        SELECT c.id, c.framework_no, c.framework_name, c.recurring_fee, c.recurring_period, c.start_date, c.end_date, c.contract_type, c.billing_type, c.renewal_type, c.renewal_notice_days, v.short_name, v.company_name
+        FROM contracts c
+        JOIN vendors v ON v.id = c.seller_vendor_id
+        WHERE {' AND '.join(rec_where)}
+        ORDER BY c.recurring_fee DESC
+        LIMIT 5
+    """, rec_params).fetchall()
+
+    active_rec_html = []
+    for c in active_rec:
+        fee = float(c["recurring_fee"] or 0.0)
+        v_label = c["short_name"] or c["company_name"] or "-"
+        c_dict = dict(c)
+        r_status = get_contract_renewal_status(c_dict, date.today())
+        active_rec_html.append(f"""
+        <tr style="border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 9px 12px; font-size: 12.5px;">
+            <div style="font-weight: 600; color: var(--text-primary);">{escape(c['framework_no'])}</div>
+            <div style="font-size: 11px; color: var(--text-muted);">{escape(c['framework_name'] or '-')} &bull; {escape(v_label)}</div>
+          </td>
+          <td style="padding: 9px 12px; font-size: 12.5px; font-weight: 600; text-align: right; font-family: monospace; white-space: nowrap;">{fmt_money(fee)} VND</td>
+          <td style="padding: 9px 12px; font-size: 12px; font-family: monospace; white-space: nowrap;">{c['end_date'] or 'No Expiry'}</td>
+          <td style="padding: 9px 12px; text-align: center; white-space: nowrap;">{r_status['badge']}</td>
+        </tr>
+        """)
+
+    # 8. Recent Invoices for Fiscal Year
+    recent_inv_html = []
+    display_invs = fy_inv_rows[:5] if fy_inv_rows else inv_rows[:5]
+    for r in display_invs:
+        amt = float(r["tg_tttbso"] or 0.0)
+        st, _, _, _ = check_invoice_payroll_reconciliation(
+            conn, r["contract_no"], r["service_year"], r["service_month"], r["tg_tttbso"]
+        )
+        if st == "ok":
+            st_badge = '<span class="tag tag-success" style="font-size:11px;">✅ Matched</span>'
+        elif st == "mismatch":
+            st_badge = '<span class="tag tag-danger" style="font-size:11px;">⚠️ Mismatch</span>'
+        else:
+            st_badge = '<span class="tag tag-warning" style="font-size:11px;">⏳ Pending</span>'
+
+        v_label = r["seller_name"] or "-"
+        shdon = r["shdon"] or f"ID #{r['id']}"
+        date_str = r["nlap"] or (f"{r['service_month']:02d}/{r['service_year']}" if r["service_year"] and r["service_month"] else "-")
+        c_no = r["contract_no"] or "-"
+        recent_inv_html.append(f"""
+        <tr style="border-bottom: 1px solid #f1f5f9;">
+          <td style="padding: 9px 12px; font-size: 12.5px;">
+            <div style="font-weight: 600; color: var(--text-primary);"><a href="/invoices/{r['id']}" style="color:var(--text-primary); text-decoration:none;">{escape(shdon)}</a></div>
+            <div style="font-size: 11px; color: var(--text-muted);">{escape(c_no)} &bull; {escape(v_label[:22])}</div>
+          </td>
+          <td style="padding: 9px 12px; font-size: 12px; font-family: monospace; white-space: nowrap;">{escape(date_str)}</td>
+          <td style="padding: 9px 12px; font-size: 12.5px; font-weight: 600; text-align: right; font-family: monospace; white-space: nowrap;">{fmt_money(amt)} VND</td>
+          <td style="padding: 9px 12px; text-align: center; white-space: nowrap;">{st_badge}</td>
+        </tr>
+        """)
+
+    # 9. Export URL
+    export_url = f"/payments/export?type=dashboard&fy={fy}&vendor_id={vendor_filter or ''}&q={urllib.parse.quote(q_filter)}"
+
+    # 10. JSON Data for Chart.js
+    js_month_labels = json.dumps(month_labels)
+    js_tm_co = json.dumps(tm_co)
+    js_fp_co = json.dumps(fp_co)
+    js_rec_co = json.dumps(rec_co)
+    js_model_labels = json.dumps(["Time & Material (T&M)", "Fixed Price (Milestones)", "Recurring Services"])
+    js_model_co = json.dumps([tm_co_sum, fp_co_sum, rec_co_sum])
+    js_recon_labels = json.dumps(["Matched", "Mismatch", "Pending / Unlinked"])
+    js_recon_data = json.dumps([inv_matched_count, inv_mismatch_count, inv_other_count])
+    js_vend_labels = json.dumps(vend_labels)
+    js_vend_data = json.dumps(vend_data)
+
+    body = f"""
+    {sub_nav}
+
+    <!-- 4 Payment Type Sub-tabs -->
+    {tabs_bar_html}
+
+    <!-- Filters and Actions Card -->
+    <div class="card" style="margin-bottom: 20px;">
+      <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px;">
+        <form method="GET" action="/payments" id="filterForm" class="filters" style="margin:0; display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end;">
+          <input type="hidden" name="type" value="dashboard">
+          <!-- Fiscal Year Calendar & Year Picker -->
+          <div style="position:relative;">
+            <div class="label" style="font-weight:600; font-size:12px; margin-bottom:4px;">Fiscal Year (FY)</div>
+            <div style="display:inline-flex; align-items:center; background:#fff; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 1px 2px rgba(0,0,0,0.04); overflow:hidden;">
+              <button type="button" onclick="stepFY(-1)" title="Previous Fiscal Year (FY{str(fy-1)[-2:]})" style="background:#f8fafc; border:none; border-right:1px solid #cbd5e1; cursor:pointer; padding:7px 10px; color:#475569; font-size:12px; font-weight:bold; transition:background 0.15s;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f8fafc'">◀</button>
+              <button type="button" id="fyPickerBtn" onclick="toggleFyCalendar(event)" style="background:#fff; border:none; cursor:pointer; font-weight:700; font-size:13px; color:#0f172a; display:inline-flex; align-items:center; gap:6px; padding:6px 12px; transition:background 0.15s;" onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background='#fff'" title="Click to open calendar and select year">
+                <span>📅 <b>FY{str(fy)[-2:]}</b> ({fy})</span>
+                <span style="font-size:11px; font-weight:normal; color:#64748b;">(01/04/{fy} &ndash; 31/03/{fy+1})</span>
+                <span style="font-size:10px; color:#64748b;">▾</span>
+              </button>
+              <button type="button" onclick="stepFY(1)" title="Next Fiscal Year (FY{str(fy+1)[-2:]})" style="background:#f8fafc; border:none; border-left:1px solid #cbd5e1; cursor:pointer; padding:7px 10px; color:#475569; font-size:12px; font-weight:bold; transition:background 0.15s;" onmouseover="this.style.background='#e2e8f0'" onmouseout="this.style.background='#f8fafc'">▶</button>
+            </div>
+            <input type="hidden" name="fy" id="fyHiddenInput" value="{fy}">
+
+            <!-- Interactive Calendar Year Picker Popup -->
+            <div id="fyCalendarPopup" style="display:none; position:absolute; top:calc(100% + 6px); left:0; z-index:100; background:#fff; border:1px solid #cbd5e1; border-radius:10px; box-shadow:0 12px 28px rgba(0,0,0,0.15); width:290px; padding:14px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #e2e8f0; padding-bottom:8px;">
+                <button type="button" onclick="navDecade(-1, event)" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold; color:#334155; padding:3px 9px;">‹</button>
+                <span id="decadeTitle" style="font-weight:700; font-size:13px; color:#0f172a;"></span>
+                <button type="button" onclick="navDecade(1, event)" style="background:#f1f5f9; border:1px solid #cbd5e1; border-radius:4px; cursor:pointer; font-size:13px; font-weight:bold; color:#334155; padding:3px 9px;">›</button>
+              </div>
+              <div id="yearGrid" style="display:grid; grid-template-columns:repeat(4, 1fr); gap:6px; margin-bottom:12px;">
+                <!-- Generated by JS -->
+              </div>
+              <div style="border-top:1px solid #e2e8f0; padding-top:10px;">
+                <div style="font-size:11px; color:#64748b; margin-bottom:4px; font-weight:600;">Or select from calendar month:</div>
+                <input type="month" id="fyMonthPicker" onchange="pickMonthFY(this.value)" style="width:100%; box-sizing:border-box; padding:6px 10px; font-size:12px; border:1px solid #cbd5e1; border-radius:6px; background:#f8fafc;">
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <div class="label" style="font-weight:600; font-size:12px; margin-bottom:4px;">Vendor</div>
+            <select name="vendor_id" onchange="this.form.submit()" style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; background:#fff;">
+              {''.join(vendor_options_html)}
+            </select>
+          </div>
+
+          <div>
+            <div class="label" style="font-weight:600; font-size:12px; margin-bottom:4px;">Search</div>
+            <input type="text" name="q" value="{escape(q_filter)}" placeholder="Search contract, vendor..." style="padding:6px 12px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; width:180px;">
+          </div>
+
+          <div>
+            <button type="submit" class="btn btn-primary" style="padding:6px 14px; font-size:13px;">Filter</button>
+            <a href="/payments?type=dashboard&fy={fy}" class="btn" style="padding:6px 14px; font-size:13px; text-decoration:none; margin-left:4px;">Reset</a>
+          </div>
+        </form>
+
+        <div>
+          <a href="{export_url}" class="btn" style="background:#f1f5f9; border:1px solid #cbd5e1; color:#334155; font-weight:600; font-size:12.5px; padding:6px 14px; display:inline-flex; align-items:center; gap:6px; border-radius:6px; text-decoration:none;">
+            📥 Export Dashboard CSV
+          </a>
+        </div>
+      </div>
+    </div>
+
+    <!-- KPI Summary Cards Grid -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap:18px; margin-bottom:24px;">
+      
+      <div class="card" style="margin:0; padding:18px; border-left:4px solid #4f46e5; box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <div style="font-size:12px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Total Commitment (FY{str(fy)[-2:]})</div>
+          <span style="font-size:18px;">💰</span>
+        </div>
+        <div style="font-size:21px; font-weight:800; color:#0f172a; font-family:monospace; margin-bottom:6px;">{fmt_money(grand_plan_sum)} VND</div>
+        <div style="font-size:11.5px; color:#64748b; line-height:1.4;">
+          T&M: {fmt_money(tm_plan_sum)} &bull; FP: {fmt_money(fp_plan_sum)} &bull; Rec: {fmt_money(rec_plan_sum)}
+        </div>
+      </div>
+
+      <div class="card" style="margin:0; padding:18px; border-left:4px solid #10b981; box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <div style="font-size:12px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Total Cash-out YTD</div>
+          <span style="font-size:18px;">💸</span>
+        </div>
+        <div style="font-size:21px; font-weight:800; color:#15803d; font-family:monospace; margin-bottom:6px;">{fmt_money(grand_co_sum)} VND</div>
+        <div style="font-size:11.5px; color:#64748b; display:flex; align-items:center; gap:6px;">
+          <span style="background:#dcfce7; color:#166534; padding:2px 6px; border-radius:4px; font-weight:700; font-size:11px;">Disbursed: {payout_rate:.1f}%</span>
+          <span>of committed plan</span>
+        </div>
+      </div>
+
+      <div class="card" style="margin:0; padding:18px; border-left:4px solid #f59e0b; box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <div style="font-size:12px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Remaining Planned</div>
+          <span style="font-size:18px;">⏳</span>
+        </div>
+        <div style="font-size:21px; font-weight:800; color:#b45309; font-family:monospace; margin-bottom:6px;">{fmt_money(remaining_sum)} VND</div>
+        <div style="font-size:11.5px; color:#64748b;">
+          Remaining commitment across {len(fy_months)} periods
+        </div>
+      </div>
+
+      <div class="card" style="margin:0; padding:18px; border-left:4px solid #0284c7; box-shadow:0 1px 3px rgba(0,0,0,0.06);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+          <div style="font-size:12px; color:var(--text-muted); font-weight:700; text-transform:uppercase;">Invoices Reconciliation</div>
+          <span style="font-size:18px;">🧾</span>
+        </div>
+        <div style="font-size:20px; font-weight:800; color:#0369a1; font-family:monospace; margin-bottom:6px;">
+          {inv_matched_count} / {total_inv_count} Matched
+        </div>
+        <div style="font-size:11.5px; color:#64748b; display:flex; align-items:center; gap:6px;">
+          <span style="background:#e0f2fe; color:#0369a1; padding:2px 6px; border-radius:4px; font-weight:700; font-size:11px;">{recon_rate:.1f}% Matched</span>
+          <span>Mismatch: {inv_mismatch_count}</span>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Charts Row 1: Monthly Cash-out Stacked Bar (65%) + Model Share Donut (35%) -->
+    <div style="display:grid; grid-template-columns: 2fr 1fr; gap:20px; margin-bottom:24px;">
+      
+      <div class="card" style="margin:0; padding:18px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid #f1f5f9; padding-bottom:8px;">
+          <h3 style="margin:0; font-size:15px; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+            <span>📈</span> <b>Monthly Cash-out Trend by Model (FY{str(fy)[-2:]})</b>
+          </h3>
+          <span style="font-size:11px; color:#64748b;">Stacked by T&M, Fixed Price & Recurring</span>
+        </div>
+        <div style="flex:1; height:320px; position:relative;">
+          <canvas id="chartMonthly"></canvas>
+        </div>
+      </div>
+
+      <div class="card" style="margin:0; padding:18px; display:flex; flex-direction:column;">
+        <div style="margin-bottom:14px; border-bottom:1px solid #f1f5f9; padding-bottom:8px;">
+          <h3 style="margin:0; font-size:15px; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+            <span>🥧</span> <b>Cash-out Share by Model</b>
+          </h3>
+        </div>
+        <div style="flex:1; height:320px; position:relative; display:flex; align-items:center; justify-content:center;">
+          <canvas id="chartModelShare"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Charts Row 2: Invoices Reconciliation (50%) + Top Vendors Spend (50%) -->
+    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:20px; margin-bottom:24px;">
+      
+      <div class="card" style="margin:0; padding:18px; display:flex; flex-direction:column;">
+        <div style="margin-bottom:14px; border-bottom:1px solid #f1f5f9; padding-bottom:8px;">
+          <h3 style="margin:0; font-size:15px; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+            <span>🧾</span> <b>Invoices Reconciliation Health</b>
+          </h3>
+        </div>
+        <div style="flex:1; height:280px; position:relative; display:flex; align-items:center; justify-content:center;">
+          <canvas id="chartInvoiceRecon"></canvas>
+        </div>
+      </div>
+
+      <div class="card" style="margin:0; padding:18px; display:flex; flex-direction:column;">
+        <div style="margin-bottom:14px; border-bottom:1px solid #f1f5f9; padding-bottom:8px;">
+          <h3 style="margin:0; font-size:15px; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+            <span>🏢</span> <b>Cash-out by Top Vendors</b>
+          </h3>
+        </div>
+        <div style="flex:1; height:280px; position:relative;">
+          <canvas id="chartTopVendors"></canvas>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Detailed Summary Tables Row 3: 3 Columns covering Invoices, Fixed Price Milestones, and Recurring Services -->
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(330px, 1fr)); gap:20px; margin-bottom:24px;">
+      
+      <!-- Invoices & Reconciliation -->
+      <div class="card" style="margin:0; padding:18px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #f1f5f9; padding-bottom:8px;">
+          <h3 style="margin:0; font-size:14.5px; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+            <span>🧾</span> <b>Recent Invoices & Reconciliation</b>
+          </h3>
+          <a href="/" style="font-size:12px; font-weight:600; color:var(--primary); text-decoration:none;">View All Invoices →</a>
+        </div>
+        <div style="flex:1; overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; margin:0;">
+            <thead>
+              <tr style="background:#f8fafc; border-bottom:1px solid var(--border); font-size:11.5px; color:var(--text-muted);">
+                <th style="padding:6px 10px; text-align:left;">Invoice & Vendor</th>
+                <th style="padding:6px 10px; text-align:left;">Date</th>
+                <th style="padding:6px 10px; text-align:right;">Amount</th>
+                <th style="padding:6px 10px; text-align:center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {''.join(recent_inv_html) if recent_inv_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:24px 10px; font-size:13px;">No invoices found.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Upcoming Milestones (Fixed Price) -->
+      <div class="card" style="margin:0; padding:18px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #f1f5f9; padding-bottom:8px;">
+          <h3 style="margin:0; font-size:14.5px; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+            <span>🎯</span> <b>Upcoming & Overdue Milestones</b>
+          </h3>
+          <a href="/payments/fixed-price" style="font-size:12px; font-weight:600; color:var(--primary); text-decoration:none;">View All FP →</a>
+        </div>
+        <div style="flex:1; overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; margin:0;">
+            <thead>
+              <tr style="background:#f8fafc; border-bottom:1px solid var(--border); font-size:11.5px; color:var(--text-muted);">
+                <th style="padding:6px 10px; text-align:left;">Milestone & Contract</th>
+                <th style="padding:6px 10px; text-align:left;">Planned Date</th>
+                <th style="padding:6px 10px; text-align:right;">Amount</th>
+                <th style="padding:6px 10px; text-align:center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {''.join(upcoming_ms_html) if upcoming_ms_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:24px 10px; font-size:13px;">No pending milestones found.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Active Recurring Services -->
+      <div class="card" style="margin:0; padding:18px; display:flex; flex-direction:column;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #f1f5f9; padding-bottom:8px;">
+          <h3 style="margin:0; font-size:14.5px; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+            <span>🌐</span> <b>Active Recurring Services</b>
+          </h3>
+          <a href="/payments/recurring" style="font-size:12px; font-weight:600; color:var(--primary); text-decoration:none;">View All Recurring →</a>
+        </div>
+        <div style="flex:1; overflow-x:auto;">
+          <table style="width:100%; border-collapse:collapse; margin:0;">
+            <thead>
+              <tr style="background:#f8fafc; border-bottom:1px solid var(--border); font-size:11.5px; color:var(--text-muted);">
+                <th style="padding:6px 10px; text-align:left;">Service & Vendor</th>
+                <th style="padding:6px 10px; text-align:right;">Monthly Fee</th>
+                <th style="padding:6px 10px; text-align:left;">Valid Until</th>
+                <th style="padding:6px 10px; text-align:center;">Renewal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {''.join(active_rec_html) if active_rec_html else '<tr><td colspan="4" style="text-align:center; color:var(--text-muted); padding:24px 10px; font-size:13px;">No active recurring services found.</td></tr>'}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Chart.js Offline Local Script and Chart Configs -->
+    <script src="/static/js/chart.umd.min.js"></script>
+    <script>
+    window.addEventListener('DOMContentLoaded', function() {{
+      // 1. Stacked Monthly Cash-out Chart
+      const ctxMonthly = document.getElementById('chartMonthly');
+      if (ctxMonthly) {{
+        new Chart(ctxMonthly, {{
+          type: 'bar',
+          data: {{
+            labels: {js_month_labels},
+            datasets: [
+              {{
+                label: 'Time & Material (T&M)',
+                data: {js_tm_co},
+                backgroundColor: '#3b82f6',
+                borderRadius: 4
+              }},
+              {{
+                label: 'Fixed Price (Milestones)',
+                data: {js_fp_co},
+                backgroundColor: '#10b981',
+                borderRadius: 4
+              }},
+              {{
+                label: 'Recurring Services',
+                data: {js_rec_co},
+                backgroundColor: '#8b5cf6',
+                borderRadius: 4
+              }}
+            ]
+          }},
+          options: {{
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {{
+              legend: {{
+                position: 'top',
+                labels: {{ boxWidth: 12, font: {{ size: 11, weight: '600' }} }}
+              }},
+              tooltip: {{
+                callbacks: {{
+                  label: function(context) {{
+                    var val = context.parsed.y !== undefined ? context.parsed.y : context.parsed;
+                    return context.dataset.label + ': ' + Number(val).toLocaleString('en-US') + ' VND';
+                  }}
+                }}
+              }}
+            }},
+            scales: {{
+              x: {{ stacked: true, grid: {{ display: false }} }},
+              y: {{
+                stacked: true,
+                beginAtZero: true,
+                ticks: {{
+                  callback: function(value) {{
+                    if (value >= 1e9) return (value / 1e9).toFixed(1) + 'B';
+                    if (value >= 1e6) return (value / 1e6).toFixed(0) + 'M';
+                    return value.toLocaleString();
+                  }}
+                }}
+              }}
+            }}
+          }}
+        }});
+      }}
+
+      // 2. Model Share Donut Chart
+      const ctxModel = document.getElementById('chartModelShare');
+      if (ctxModel) {{
+        new Chart(ctxModel, {{
+          type: 'doughnut',
+          data: {{
+            labels: {js_model_labels},
+            datasets: [{{
+              data: {js_model_co},
+              backgroundColor: ['#3b82f6', '#10b981', '#8b5cf6'],
+              borderWidth: 2,
+              borderColor: '#ffffff'
+            }}]
+          }},
+          options: {{
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {{
+              legend: {{
+                position: 'bottom',
+                labels: {{ boxWidth: 12, font: {{ size: 11 }} }}
+              }},
+              tooltip: {{
+                callbacks: {{
+                  label: function(context) {{
+                    var val = context.parsed;
+                    var total = context.dataset.data.reduce((a, b) => a + b, 0);
+                    var pct = total > 0 ? (val / total * 100).toFixed(1) + '%' : '0%';
+                    return context.label + ': ' + Number(val).toLocaleString('en-US') + ' VND (' + pct + ')';
+                  }}
+                }}
+              }}
+            }},
+            cutout: '65%'
+          }}
+        }});
+      }}
+
+      // 3. Invoice Recon Donut Chart
+      const ctxRecon = document.getElementById('chartInvoiceRecon');
+      if (ctxRecon) {{
+        new Chart(ctxRecon, {{
+          type: 'doughnut',
+          data: {{
+            labels: {js_recon_labels},
+            datasets: [{{
+              data: {js_recon_data},
+              backgroundColor: ['#10b981', '#ef4444', '#f59e0b'],
+              borderWidth: 2,
+              borderColor: '#ffffff'
+            }}]
+          }},
+          options: {{
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {{
+              legend: {{
+                position: 'bottom',
+                labels: {{ boxWidth: 12, font: {{ size: 11 }} }}
+              }},
+              tooltip: {{
+                callbacks: {{
+                  label: function(context) {{
+                    var val = context.parsed;
+                    var total = context.dataset.data.reduce((a, b) => a + b, 0);
+                    var pct = total > 0 ? (val / total * 100).toFixed(1) + '%' : '0%';
+                    return context.label + ': ' + val + ' invoice(s) (' + pct + ')';
+                  }}
+                }}
+              }}
+            }},
+            cutout: '65%'
+          }}
+        }});
+      }}
+
+      // 4. Top Vendors Horizontal Bar Chart
+      const ctxVend = document.getElementById('chartTopVendors');
+      if (ctxVend) {{
+        new Chart(ctxVend, {{
+          type: 'bar',
+          data: {{
+            labels: {js_vend_labels},
+            datasets: [{{
+              label: 'Total Cash-out (VND)',
+              data: {js_vend_data},
+              backgroundColor: '#0284c7',
+              borderRadius: 4
+            }}]
+          }},
+          options: {{
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {{
+              legend: {{ display: false }},
+              tooltip: {{
+                callbacks: {{
+                  label: function(context) {{
+                    return 'Cash-out: ' + Number(context.parsed.x).toLocaleString('en-US') + ' VND';
+                  }}
+                }}
+              }}
+            }},
+            scales: {{
+              x: {{
+                beginAtZero: true,
+                ticks: {{
+                  callback: function(value) {{
+                    if (value >= 1e9) return (value / 1e9).toFixed(1) + 'B';
+                    if (value >= 1e6) return (value / 1e6).toFixed(0) + 'M';
+                    return value.toLocaleString();
+                  }}
+                }}
+              }},
+              y: {{
+                grid: {{ display: false }}
+              }}
+            }}
+          }}
+        }});
+      }}
+    }});
+
+    // Fiscal Year Calendar functions for Dashboard
+    let currentDecadeStart = Math.floor({fy} / 12) * 12;
+    const selectedFY = {fy};
+
+    function renderYearGrid() {{
+      const grid = document.getElementById('yearGrid');
+      const title = document.getElementById('decadeTitle');
+      if (!grid || !title) return;
+      title.innerText = currentDecadeStart + ' - ' + (currentDecadeStart + 11);
+      grid.innerHTML = '';
+      for (let y = currentDecadeStart; y < currentDecadeStart + 12; y++) {{
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.innerText = 'FY' + String(y).slice(-2);
+        btn.title = y + '-04 to ' + (y+1) + '-03';
+        btn.style.cssText = 'padding:6px 2px; font-size:11px; font-weight:600; border-radius:6px; cursor:pointer; text-align:center; border:1px solid ' +
+          (y === selectedFY ? '#0b57d0' : '#cbd5e1') + '; background:' +
+          (y === selectedFY ? '#0b57d0' : '#f8fafc') + '; color:' +
+          (y === selectedFY ? '#fff' : '#0f172a') + '; transition:all 0.15s;';
+        btn.onclick = function() {{ selectFY(y); }};
+        grid.appendChild(btn);
+      }}
+    }}
+
+    function navDecade(direction, e) {{
+      if (e) e.stopPropagation();
+      currentDecadeStart += direction * 12;
+      renderYearGrid();
+    }}
+
+    function selectFY(year) {{
+      const input = document.getElementById('fyHiddenInput');
+      if (input) {{
+        input.value = year;
+        const popup = document.getElementById('fyCalendarPopup');
+        if (popup) popup.style.display = 'none';
+        input.form.submit();
+      }}
+    }}
+
+    function stepFY(delta) {{
+      const current = parseInt(document.getElementById('fyHiddenInput').value, 10) || selectedFY;
+      selectFY(current + delta);
+    }}
+
+    function pickMonthFY(monthVal) {{
+      if (!monthVal) return;
+      const parts = monthVal.split('-');
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10);
+      const derivedFy = (m >= 4) ? y : y - 1;
+      selectFY(derivedFy);
+    }}
+
+    function toggleFyCalendar(e) {{
+      if (e) e.stopPropagation();
+      const popup = document.getElementById('fyCalendarPopup');
+      if (!popup) return;
+      if (popup.style.display === 'none' || !popup.style.display) {{
+        currentDecadeStart = Math.floor(selectedFY / 12) * 12;
+        renderYearGrid();
+        popup.style.display = 'block';
+      }} else {{
+        popup.style.display = 'none';
+      }}
+    }}
+
+    document.addEventListener('click', function(e) {{
+      const popup = document.getElementById('fyCalendarPopup');
+      const btn = document.getElementById('fyPickerBtn');
+      if (popup && popup.style.display === 'block') {{
+        if (!popup.contains(e.target) && (!btn || !btn.contains(e.target))) {{
+          popup.style.display = 'none';
+        }}
+      }}
+    }});
+    </script>
+    """
+
+    return layout(f"Fiscal Year Cash-out Overview - FY{str(fy)[-2:]} (Dashboard)", body)
+
+
 def page_attendance_payout(filters: dict) -> str:
     today = date.today()
     default_fy = today.year if today.month >= 4 else today.year - 1
@@ -3551,8 +4310,10 @@ def page_attendance_payout(filters: dict) -> str:
     if isinstance(billing_type_raw, list):
         billing_type_raw = billing_type_raw[0] if billing_type_raw else "tm"
     billing_type = (billing_type_raw or "tm").strip().lower()
-    if billing_type not in ("tm", "fixed_price", "recurring"):
+    if billing_type not in ("dashboard", "overview", "tm", "fixed_price", "recurring"):
         billing_type = "tm"
+    if billing_type == "overview":
+        billing_type = "dashboard"
 
     status_raw = filters.get("status")
     if isinstance(status_raw, list):
@@ -3578,18 +4339,6 @@ def page_attendance_payout(filters: dict) -> str:
     if isinstance(q_raw, list):
         q_raw = q_raw[0] if q_raw else ""
     q_filter = (q_raw or "").strip()
-
-    conn = db_connect()
-    try:
-        vendors = conn.execute("SELECT id, company_name, short_name FROM vendors WHERE deleted_at IS NULL AND purchasing = 0 ORDER BY company_name").fetchall()
-        if billing_type == "fixed_price":
-            data = get_fixed_price_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
-        elif billing_type == "recurring":
-            data = get_recurring_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
-        else:
-            data = get_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
-    finally:
-        conn.close()
 
     # Dynamic labels and tabs configuration based on active payment type
     if billing_type == "fixed_price":
@@ -3628,6 +4377,24 @@ def page_attendance_payout(filters: dict) -> str:
             ("all", "All Recurring Services"),
         ]
         empty_entity_desc = "recurring services"
+    elif billing_type == "dashboard":
+        type_title = "Overview Dashboard"
+        type_short_label = "Dashboard"
+        col3_title = "Entity"
+        l1_label = "Plan"
+        l1_abbr = "P"
+        l1_desc = "Overview plan"
+        l1_card_label = "Plan"
+        operational_url = "/"
+        operational_label = "🧾 View All Invoices →"
+        operational_title = "Open Invoices list and reconciliation view"
+        status_options = [
+            ("all_active", "All Active"),
+            ("cashout_only", "Cash-out Only"),
+            ("payroll_only", "Planned Only"),
+            ("all", "All Models"),
+        ]
+        empty_entity_desc = "records"
     else: # tm
         type_title = "Time & Material (T&M)"
         type_short_label = "Time & Material"
@@ -3657,14 +4424,7 @@ def page_attendance_payout(filters: dict) -> str:
         for val, lbl in status_options
     ]
 
-    # Vendor options
-    vendor_options_html = ['<option value="">-- All Vendors --</option>']
-    for v in vendors:
-        sel = "selected" if vendor_filter == v["id"] else ""
-        v_title = v["short_name"] or v["company_name"] or f"Vendor #{v['id']}"
-        vendor_options_html.append(f'<option value="{v["id"]}" {sel}>{escape(v_title)}</option>')
-
-    # 3-Tab Bar for Dashboard
+    # 4-Tab Bar for Dashboard
     tab_base_qs = f"fy={fy}&status={status_filter}&vendor_id={vendor_filter or ''}&q={urllib.parse.quote(q_filter)}"
 
     def _tab_pill(t_code, t_name, t_icon):
@@ -3678,6 +4438,7 @@ def page_attendance_payout(filters: dict) -> str:
     tabs_bar_html = f"""
     <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; background:#f8fafc; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0;">
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        {_tab_pill('dashboard', 'Dashboard', '📊')}
         {_tab_pill('tm', 'Time & Material (T&M)', '💵')}
         {_tab_pill('fixed_price', 'Fixed Price (Milestones)', '🎯')}
         {_tab_pill('recurring', 'Recurring Services (Internet / SaaS)', '🌐')}
@@ -3689,6 +4450,30 @@ def page_attendance_payout(filters: dict) -> str:
       </div>
     </div>
     """
+
+    conn = db_connect()
+    try:
+        vendors = conn.execute("SELECT id, company_name, short_name FROM vendors WHERE deleted_at IS NULL AND purchasing = 0 ORDER BY company_name").fetchall()
+        
+        # Vendor options
+        vendor_options_html = ['<option value="">-- All Vendors --</option>']
+        for v in vendors:
+            sel = "selected" if vendor_filter == v["id"] else ""
+            v_title = v["short_name"] or v["company_name"] or f"Vendor #{v['id']}"
+            vendor_options_html.append(f'<option value="{v["id"]}" {sel}>{escape(v_title)}</option>')
+
+        if billing_type == "dashboard":
+            return _render_payments_overview_dashboard(
+                conn, fy, vendor_filter, q_filter, sub_nav, tabs_bar_html, vendor_options_html, default_fy
+            )
+        elif billing_type == "fixed_price":
+            data = get_fixed_price_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+        elif billing_type == "recurring":
+            data = get_recurring_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+        else:
+            data = get_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+    finally:
+        conn.close()
 
     # Export URL
     export_url = f"/payments/export?type={billing_type}&fy={fy}&status={status_filter}&vendor_id={vendor_filter or ''}&q={urllib.parse.quote(q_filter)}"
@@ -4324,10 +5109,59 @@ def handle_attendance_payout_export_get(handler):
     vendor_filter = parse_int_or_none(qs.get("vendor_id", [""])[0])
     q_filter = (qs.get("q", [""])[0] or "").strip()
 
-    billing_type_raw = qs.get("type", ["tm"])[0]
-    billing_type = (billing_type_raw or "tm").strip().lower()
-    if billing_type not in ("tm", "fixed_price", "recurring"):
-        billing_type = "tm"
+    default_type = "tm" if parsed.path in ("/attendance/cashout/export", "/attendance/payout/export") else "dashboard"
+    billing_type_raw = qs.get("type", [default_type])[0]
+    billing_type = (billing_type_raw or "dashboard").strip().lower()
+    if billing_type not in ("dashboard", "overview", "tm", "fixed_price", "recurring"):
+        billing_type = "dashboard"
+    if billing_type == "overview":
+        billing_type = "dashboard"
+
+    if billing_type == "dashboard":
+        conn = db_connect()
+        try:
+            data_tm = get_payout_data(conn, fy, "all", vendor_filter, q_filter)
+            data_fp = get_fixed_price_payout_data(conn, fy, "all", vendor_filter, q_filter)
+            data_rec = get_recurring_payout_data(conn, fy, "all", vendor_filter, q_filter)
+        finally:
+            conn.close()
+
+        output = io.StringIO()
+        writer = csv.writer(output)
+        writer.writerow([f"Mizuho IT Outsourcing - Fiscal Year Overview Report {data_tm['fy_name']} (01/04/{fy} - 31/03/{fy+1})"])
+        writer.writerow([f"Exported At: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"])
+        writer.writerow([])
+        writer.writerow(["Model", "Committed / Planned (VND)", "Cash-out YTD (VND)", "Execution Rate (%)"])
+        tm_co = data_tm["grand_cashout_total"]
+        tm_plan = data_tm["grand_payroll_total"]
+        fp_co = data_fp["grand_cashout_total"]
+        fp_plan = data_fp["grand_payroll_total"]
+        rec_co = data_rec["grand_cashout_total"]
+        rec_plan = data_rec["grand_payroll_total"]
+        tot_co = tm_co + fp_co + rec_co
+        tot_plan = tm_plan + fp_plan + rec_plan
+        writer.writerow(["Time & Material (T&M)", f"{int(round(tm_plan)):,}", f"{int(round(tm_co)):,}", f"{(tm_co/tm_plan*100):.1f}%" if tm_plan else "0.0%"])
+        writer.writerow(["Fixed Price (Milestones)", f"{int(round(fp_plan)):,}", f"{int(round(fp_co)):,}", f"{(fp_co/fp_plan*100):.1f}%" if fp_plan else "0.0%"])
+        writer.writerow(["Recurring Services (Internet / SaaS)", f"{int(round(rec_plan)):,}", f"{int(round(rec_co)):,}", f"{(rec_co/rec_plan*100):.1f}%" if rec_plan else "0.0%"])
+        writer.writerow(["TOTAL", f"{int(round(tot_plan)):,}", f"{int(round(tot_co)):,}", f"{(tot_co/tot_plan*100):.1f}%" if tot_plan else "0.0%"])
+        writer.writerow([])
+        writer.writerow(["Monthly Cash-out Breakdown (VND)"])
+        m_row_hdr = ["Month"] + data_tm["fy_months"] + ["FY Total"]
+        writer.writerow(m_row_hdr)
+        writer.writerow(["Time & Material"] + [f"{int(round(data_tm['col_cashout_totals'][m])):,}" for m in data_tm["fy_months"]] + [f"{int(round(tm_co)):,}"])
+        writer.writerow(["Fixed Price"] + [f"{int(round(data_fp['col_cashout_totals'][m])):,}" for m in data_fp["fy_months"]] + [f"{int(round(fp_co)):,}"])
+        writer.writerow(["Recurring Services"] + [f"{int(round(data_rec['col_cashout_totals'][m])):,}" for m in data_rec["fy_months"]] + [f"{int(round(rec_co)):,}"])
+        monthly_tot = [data_tm['col_cashout_totals'][m] + data_fp['col_cashout_totals'][m] + data_rec['col_cashout_totals'][m] for m in data_tm["fy_months"]]
+        writer.writerow(["TOTAL CASH-OUT"] + [f"{int(round(x)):,}" for x in monthly_tot] + [f"{int(round(tot_co)):,}"])
+        csv_bytes = "\ufeff".encode("utf-8") + output.getvalue().encode("utf-8")
+        fn = f"payments_dashboard_{data_tm['fy_name']}.csv"
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/csv; charset=utf-8")
+        handler.send_header("Content-Length", str(len(csv_bytes)))
+        handler.send_header("Content-Disposition", f'attachment; filename="{fn}"')
+        handler.end_headers()
+        handler.wfile.write(csv_bytes)
+        return
 
     conn = db_connect()
     try:
