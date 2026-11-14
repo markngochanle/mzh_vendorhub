@@ -233,6 +233,7 @@ TEST_SUITES = [
         "desc": "Verify fixed price contracts, annex milestones lifecycle, and status transitions.",
         "cases": [
             ("test_framework_contract_with_fixed_price_annex", "Support fixed-price annex within framework contracts with milestones"),
+            ("test_milestone_overdue_and_quick_invoice_import", "Verify overdue milestone warnings, status transitions, and quick invoice import linking"),
             ("test_standalone_fixed_price_contract_and_milestones", "Support standalone fixed price contract and milestone lifecycle")
         ],
         "steps": "Run automated test suite assertions.",
@@ -244,6 +245,8 @@ TEST_SUITES = [
         "desc": "Verify recurring services contracts, invoice reconciliation, and centralized payment views.",
         "cases": [
             ("test_fixed_price_dashboard_view", "Render centralized dashboard for fixed price contracts"),
+            ("test_payments_dashboard_filtering_and_popovers", "Verify status filters (cashout_only, all), vendor filter, and multi-milestone monthly popovers"),
+            ("test_payments_dashboard_three_tabs_and_cashout_matrix", "Verify 3-tab payment dashboard, Fiscal Year cashout matrix table, popover breakdown tooltips, and CSV export"),
             ("test_payments_server_routes", "Verify payments navigation and summary route endpoints"),
             ("test_recurring_contract_and_invoice_reconciliation", "Verify recurring contract services and invoice reconciliation")
         ],
@@ -261,6 +264,25 @@ TEST_SUITES = [
             ("test_logo_and_favicon_static_routes_and_layout", "Verify custom logo and favicon asset delivery"),
             ("test_offline_static_assets_and_no_external_cdns", "Verify all static JS/CSS assets are hosted locally without CDN dependencies"),
             ("test_page_new_invoice_renders_three_tabs_and_preselected_model", "Render three contract model tabs on invoice creation")
+        ],
+        "steps": "Run automated test suite assertions.",
+        "expect": "All assertions pass with 0 errors and 0 failures."
+    },
+    {
+        "id": "TestContractRenewal",
+        "name": "Test Contract Renewal & Summary",
+        "desc": "Verify recurring contract renewal policy, notice window, auto/manual renewal lifecycle, contract summary CRUD and search.",
+        "cases": [
+            ("test_calculate_suggested_renewal_end_date", "Compute suggested renewal dates based on contract duration or period"),
+            ("test_contract_creation_defaults_and_custom_renewal", "Validate contract renewal defaults and matrix structural enforcement"),
+            ("test_contract_list_and_renewal_ui", "Render renewal badges, action buttons, and modal dialogs"),
+            ("test_contract_summary_crud_and_search", "Create, update, display, and search by contract summary scope notes"),
+            ("test_contract_update_renewal_policy", "Update contract renewal policy, notice days, and period"),
+            ("test_get_contract_renewal_status", "Determine renewal alert status (Active, Renewal Due, Expiring Soon, Expired)"),
+            ("test_handle_contract_renew_post", "Process contract renewal extension and write audit log"),
+            ("test_handle_contract_renew_validation", "Enforce renewal validation rules on contract type and dates"),
+            ("test_matrix_contract_structure_rules", "Enforce contract structural rules between Standalone and Framework"),
+            ("test_recurring_service_month_expiration_validation", "Block invoice import and cashout for service months past contract expiration")
         ],
         "steps": "Run automated test suite assertions.",
         "expect": "All assertions pass with 0 errors and 0 failures."

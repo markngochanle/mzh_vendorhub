@@ -1398,7 +1398,19 @@ class TestServerRoutes(BaseTestCase):
             ("/staff", "Contract Staff (HR)"),
             ("/staff/shifts", "Staff Work Shifts Settings"),
             ("/attendance", "Time Attendance"),
+            ("/attendance/monthly", "Monthly Payroll"),
+            ("/attendance/acceptance", "Acceptance"),
             ("/attendance/cashout", "Fiscal Year Cash-out Overview"),
+            ("/payments", "Fiscal Year Cash-out Overview"),
+            ("/payments/dashboard", "Fiscal Year Cash-out Overview"),
+            ("/payments?type=fixed_price", "Fiscal Year Cash-out Overview"),
+            ("/payments?type=recurring", "Fiscal Year Cash-out Overview"),
+            ("/payments/fixed-price", "Fixed Price Payments"),
+            ("/payments/recurring", "Recurring Services"),
+            ("/projects", "Projects"),
+            ("/contracts/references", "Reference Numbers"),
+            ("/unit-tests", "Unit Test Runner"),
+            ("/audit-logs", "Audit Logs"),
             ("/invoice/new", "Import New Invoice"),
             ("/vendor/new", "Add Vendor"),
             (f"/vendor/edit?id={self.seller_id}", "Edit Vendor"),
@@ -1415,13 +1427,65 @@ class TestServerRoutes(BaseTestCase):
             self.assertIn(expected_text, output, f"Route {path} failed to return {expected_text}")
 
     def test_do_POST_routes(self):
-        # Test a simple route dispatching for POST
+        # 1. Test POST /delete-invoice
         body = b"id=1"
-        handler = StubHandler("/delete-invoice", "POST", headers={"content-length": str(len(body))}, body=body)
-        
-        # Delete invoice with ID=1 should redirect to /
+        handler = StubHandler("/delete-invoice", "POST", headers={"content-length": str(len(body)), "content-type": "application/x-www-form-urlencoded"}, body=body)
         handler.do_POST()
         self.assertEqual(handler.response_status, 302)
+
+        # 2. Test POST /payments/recurring/cashout (Pay & Cancel)
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (
+                buyer_vendor_id, seller_vendor_id, framework_no, framework_name,
+                contract_type, billing_type, recurring_fee, recurring_period,
+                start_date, end_date, is_active, created_at, updated_at
+            ) VALUES (?, ?, 'REC-POST-01', 'Test Recurring Post', 'STANDALONE', 'RECURRING', 5000000, 'MONTHLY', '2026-01-01', '2026-12-31', 1, datetime('now'), datetime('now'))
+        """, (self.buyer_id, self.seller_id))
+        rec_id = cur.lastrowid
+        self.conn.commit()
+
+        # Action = pay
+        body_pay = f"contract_id={rec_id}&service_month=2026-06&amount=5000000&cashout_date=2026-06-25&action=pay".encode()
+        h_pay = StubHandler("/payments/recurring/cashout", "POST", headers={"content-length": str(len(body_pay)), "content-type": "application/x-www-form-urlencoded"}, body=body_pay)
+        h_pay.do_POST()
+        self.assertEqual(h_pay.response_status, 302)
+        payout = self.conn.execute("SELECT * FROM recurring_payouts WHERE contract_id=? AND service_month='2026-06'", (rec_id,)).fetchone()
+        self.assertIsNotNone(payout)
+        self.assertEqual(payout["status"], "PAID")
+
+        # Action = cancel
+        body_cancel = f"contract_id={rec_id}&service_month=2026-06&action=cancel".encode()
+        h_cancel = StubHandler("/payments/recurring/cashout", "POST", headers={"content-length": str(len(body_cancel)), "content-type": "application/x-www-form-urlencoded"}, body=body_cancel)
+        h_cancel.do_POST()
+        self.assertEqual(h_cancel.response_status, 302)
+        payout_cancelled = self.conn.execute("SELECT * FROM recurring_payouts WHERE contract_id=? AND service_month='2026-06'", (rec_id,)).fetchone()
+        self.assertIsNone(payout_cancelled)
+
+        # 3. Test POST /contract/milestone/cashout (Pay & Cancel)
+        cur.execute("""
+            INSERT INTO contract_milestones (
+                contract_id, milestone_name, milestone_type, percentage, amount, planned_date, status, created_at, updated_at
+            ) VALUES (?, 'Milestone Server Post', 'DELIVERY', 100.0, 50000000, '2026-06-30', 'PENDING', datetime('now'), datetime('now'))
+        """, (self.contract_id,))
+        ms_id = cur.lastrowid
+        self.conn.commit()
+
+        body_ms_pay = f"id={ms_id}&cashout_date=2026-06-28&action=pay".encode()
+        h_ms = StubHandler("/contract/milestone/cashout", "POST", headers={"content-length": str(len(body_ms_pay)), "content-type": "application/x-www-form-urlencoded"}, body=body_ms_pay)
+        h_ms.do_POST()
+        self.assertEqual(h_ms.response_status, 302)
+        ms_row = self.conn.execute("SELECT * FROM contract_milestones WHERE id=?", (ms_id,)).fetchone()
+        self.assertEqual(ms_row["status"], "PAID")
+        self.assertEqual(ms_row["cashout_date"], "2026-06-28")
+
+        body_ms_cancel = f"id={ms_id}&action=cancel".encode()
+        h_ms_cancel = StubHandler("/contract/milestone/cashout", "POST", headers={"content-length": str(len(body_ms_cancel)), "content-type": "application/x-www-form-urlencoded"}, body=body_ms_cancel)
+        h_ms_cancel.do_POST()
+        self.assertEqual(h_ms_cancel.response_status, 302)
+        ms_row_cancelled = self.conn.execute("SELECT * FROM contract_milestones WHERE id=?", (ms_id,)).fetchone()
+        self.assertEqual(ms_row_cancelled["status"], "PENDING")
+        self.assertFalse(ms_row_cancelled["cashout_date"])
 
 
 # ==================== 8. Test New Improvements ====================
@@ -3035,6 +3099,57 @@ class TestFixedPriceMilestones(BaseTestCase):
         self.assertIn("Payment Milestones & Schedule", html_annex)
         self.assertIn("Giai đoạn 1", html_annex)
 
+    def test_milestone_overdue_and_quick_invoice_import(self):
+        import payments
+        cur = self.conn.cursor()
+        # Create a Fixed Price contract with overdue milestone and future milestone
+        cur.execute("""
+            INSERT INTO contracts (
+              buyer_vendor_id, seller_vendor_id, framework_no, framework_name,
+              contract_type, billing_type, contract_value, is_active, created_at, updated_at
+            ) VALUES (?, ?, 'FP-OVERDUE-01', 'Core Security System', 'STANDALONE', 'FIXED_PRICE', 200000000, 1, datetime('now'), datetime('now'))
+        """, (self.buyer_id, self.seller_id))
+        c_id = cur.lastrowid
+
+        # Past planned date with PENDING status -> OVERDUE
+        cur.execute("""
+            INSERT INTO contract_milestones (
+              contract_id, milestone_name, milestone_type, percentage, amount, planned_date, status, created_at, updated_at
+            ) VALUES (?, 'Security Design Signoff', 'DELIVERY', 50.0, 100000000, '2026-01-15', 'PENDING', datetime('now'), datetime('now'))
+        """, (c_id,))
+        m1_id = cur.lastrowid
+
+        # Future planned date with PENDING status -> Upcoming (NOT Overdue)
+        cur.execute("""
+            INSERT INTO contract_milestones (
+              contract_id, milestone_name, milestone_type, percentage, amount, planned_date, status, created_at, updated_at
+            ) VALUES (?, 'Final Deployment UAT', 'ACCEPTANCE', 50.0, 100000000, '2029-12-31', 'PENDING', datetime('now'), datetime('now'))
+        """, (c_id,))
+        m2_id = cur.lastrowid
+        self.conn.commit()
+
+        # Render Fixed Price payments view
+        html = payments.page_payments_fixed_price()
+        self.assertIn("FP-OVERDUE-01", html)
+        self.assertIn("Security Design Signoff", html)
+        self.assertIn("Overdue", html)
+
+        # Quick import invoice button has proper parameters
+        self.assertIn("contract_no=FP-OVERDUE-01", html)
+        self.assertIn(f"milestone_id={m1_id}", html)
+        self.assertIn("📥 Import Invoice", html)
+
+        # Filter by status=OVERDUE
+        html_overdue_only = payments.page_payments_fixed_price(status="OVERDUE")
+        self.assertIn("Security Design Signoff", html_overdue_only)
+        self.assertNotIn("Final Deployment UAT", html_overdue_only)
+
+        # Once cashed out, milestone is PAID and no longer OVERDUE
+        cur.execute("UPDATE contract_milestones SET status = 'PAID', cashout_date = '2026-02-01' WHERE id = ?", (m1_id,))
+        self.conn.commit()
+        html_after_paid = payments.page_payments_fixed_price(status="OVERDUE")
+        self.assertNotIn("Security Design Signoff", html_after_paid)
+
 
 class TestRecurringAndPaymentsDashboards(BaseTestCase):
     def test_recurring_contract_and_invoice_reconciliation(self):
@@ -3333,6 +3448,82 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         self.assertIn("Monthly Fee", csv_rec)
         self.assertIn("Cash-out", csv_rec)
         self.assertIn("REC-MATRIX-01", csv_rec)
+
+    def test_payments_dashboard_filtering_and_popovers(self):
+        import attendance
+        cur = self.conn.cursor()
+
+        # Create two Fixed Price contracts under self.seller_id
+        # Contract A with 2 milestones in the same month (Jun 2026): Advance (30M) + Delivery (70M)
+        cur.execute("""
+            INSERT INTO contracts (
+              buyer_vendor_id, seller_vendor_id, framework_no, framework_name,
+              contract_type, billing_type, contract_value, is_active, created_at, updated_at
+            ) VALUES (?, ?, 'FP-DUAL-01', 'Multi-Milestone Project', 'STANDALONE', 'FIXED_PRICE', 100000000, 1, datetime('now'), datetime('now'))
+        """, (self.buyer_id, self.seller_id))
+        ca_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_milestones (
+              contract_id, milestone_name, milestone_type, percentage, amount, planned_date, cashout_date, status, created_at, updated_at
+            ) VALUES (?, 'Milestone A1', 'ADVANCE', 30.0, 30000000, '2026-06-10', '2026-06-15', 'PAID', datetime('now'), datetime('now'))
+        """, (ca_id,))
+        cur.execute("""
+            INSERT INTO contract_milestones (
+              contract_id, milestone_name, milestone_type, percentage, amount, planned_date, cashout_date, status, created_at, updated_at
+            ) VALUES (?, 'Milestone A2', 'DELIVERY', 70.0, 70000000, '2026-06-25', '2026-06-30', 'PAID', datetime('now'), datetime('now'))
+        """, (ca_id,))
+
+        # Contract B with 0 cashouts (only planned in 2026-10)
+        cur.execute("""
+            INSERT INTO contracts (
+              buyer_vendor_id, seller_vendor_id, framework_no, framework_name,
+              contract_type, billing_type, contract_value, is_active, created_at, updated_at
+            ) VALUES (?, ?, 'FP-ZERO-02', 'Zero Cashout Project', 'STANDALONE', 'FIXED_PRICE', 50000000, 1, datetime('now'), datetime('now'))
+        """, (self.buyer_id, self.seller_id))
+        cb_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_milestones (
+              contract_id, milestone_name, milestone_type, percentage, amount, planned_date, cashout_date, status, created_at, updated_at
+            ) VALUES (?, 'Milestone B1', 'ADVANCE', 100.0, 50000000, '2026-10-15', '', 'PENDING', datetime('now'), datetime('now'))
+        """, (cb_id,))
+        self.conn.commit()
+
+        # 1. Test status filter: status=cashout_only
+        # Contract A has cashouts (100M) -> displayed.
+        # Contract B has 0 cashouts -> must be hidden when status=cashout_only.
+        stub_co = StubHandler("/payments?type=fixed_price&fy=2026&status=cashout_only", method="GET")
+        stub_co.do_GET()
+        html_co = stub_co.get_output_text()
+        self.assertIn("FP-DUAL-01", html_co)
+        self.assertNotIn("FP-ZERO-02", html_co)
+
+        # 2. Test status filter: status=all
+        stub_all = StubHandler("/payments?type=fixed_price&fy=2026&status=all", method="GET")
+        stub_all.do_GET()
+        html_all = stub_all.get_output_text()
+        self.assertIn("FP-DUAL-01", html_all)
+        self.assertIn("FP-ZERO-02", html_all)
+
+        # 3. Test popover tooltip JSON data contains both milestones for Jun (Month 06)
+        self.assertIn("Milestone A1", html_all)
+        self.assertIn("Milestone A2", html_all)
+        self.assertIn("30,000,000", html_all)
+        self.assertIn("70,000,000", html_all)
+        # Verify combined sum in the cell: 30M + 70M = 100M
+        self.assertIn("100,000,000", html_all)
+
+        # 4. Test vendor filter
+        stub_vend = StubHandler(f"/payments?type=fixed_price&fy=2026&vendor_id={self.seller_id}", method="GET")
+        stub_vend.do_GET()
+        html_vend = stub_vend.get_output_text()
+        self.assertIn("FP-DUAL-01", html_vend)
+
+        stub_other_vend = StubHandler("/payments?type=fixed_price&fy=2026&vendor_id=99999", method="GET")
+        stub_other_vend.do_GET()
+        html_other = stub_other_vend.get_output_text()
+        self.assertNotIn("FP-DUAL-01", html_other)
 
 
 class TestMultiModelInvoiceImport(BaseTestCase):
