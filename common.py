@@ -1156,7 +1156,7 @@ def layout(title: str, body_html: str):
       document.querySelectorAll('.nav-link').forEach(link => {{
         const path = window.location.pathname;
         const href = link.getAttribute('href');
-        if (path === href || (href !== '/' && path.startsWith(href)) || (href === '/attendance' && path.startsWith('/payments'))) {{
+        if (path === href || (href !== '/' && path.startsWith(href)) || (href === '/payments' && path.startsWith('/attendance')) || (href === '/attendance' && path.startsWith('/payments'))) {{
           link.classList.add('active');
         }}
       }});

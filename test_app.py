@@ -3325,6 +3325,7 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         out_pay = stub_pay.get_output_text()
         self.assertIn("Fiscal Year Cash-out Overview", out_pay)
         self.assertIn("📊 Dashboard", out_pay)
+        self.assertIn("💵 Time & Material (T&M)", out_pay)
         self.assertIn("/payments/fixed-price", out_pay)
         self.assertIn("/payments/recurring", out_pay)
 
@@ -3335,6 +3336,7 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         self.assertIn("Fixed Price Payments", out_fp)
         self.assertIn("Milestones Committed", out_fp)
         self.assertIn("📊 Dashboard", out_fp)
+        self.assertIn("💵 Time & Material (T&M)", out_fp)
 
         # Test GET /payments/recurring via server Handler
         stub_rec = StubHandler("/payments/recurring", method="GET")
@@ -3343,6 +3345,16 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         self.assertIn("Recurring Services", out_rec)
         self.assertIn("Commitment for", out_rec)
         self.assertIn("📊 Dashboard", out_rec)
+        self.assertIn("💵 Time & Material (T&M)", out_rec)
+
+        # Test GET /attendance renders top level Payments sub-bar
+        stub_att = StubHandler("/attendance", method="GET")
+        stub_att.do_GET()
+        out_att = stub_att.get_output_text()
+        self.assertIn("📊 Dashboard", out_att)
+        self.assertIn("💵 Time & Material (T&M)", out_att)
+        self.assertIn("🎯 Fixed Price (Milestones)", out_att)
+        self.assertIn("🌐 Recurring Services (Internet / SaaS)", out_att)
 
     def test_payments_dashboard_three_tabs_and_cashout_matrix(self):
         import attendance

@@ -602,8 +602,12 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
         sel = "selected" if annex_filter == a["id"] else ""
         annex_opts.append(f'<option value="{a["id"]}" data-contract-id="{a["contract_id"]}" data-vendor-id="{a["seller_vendor_id"]}" {sel}>{escape(a["annex_name"])}</option>')
 
+    from payments import render_payments_tabs
+    top_payments_nav = render_payments_tabs("tm")
+
     body = f"""
     {extra_styles}
+    {top_payments_nav}
     {sub_nav}
     {error_html}
     {success_html}
@@ -1881,7 +1885,11 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
     </div>
     """
 
+    from payments import render_payments_tabs
+    top_payments_nav = render_payments_tabs("tm")
+
     body = f"""
+    {top_payments_nav}
     <style>
       .ms-container {{
         position: relative;
@@ -2653,7 +2661,11 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
     </script>
     """
 
+    from payments import render_payments_tabs
+    top_payments_nav = render_payments_tabs("tm")
+
     body = f"""
+    {top_payments_nav}
     {sub_nav}
     {error_html}
     {success_html}

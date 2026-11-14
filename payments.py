@@ -18,6 +18,7 @@ def render_payments_tabs(active_tab: str) -> str:
     """Renders the top navigation sub-bar for Payments."""
     tabs = [
         ("/payments", "📊 Dashboard", active_tab == "dashboard"),
+        ("/attendance", "💵 Time & Material (T&M)", active_tab == "tm"),
         ("/payments/fixed-price", "🎯 Fixed Price (Milestones)", active_tab == "fixed_price"),
         ("/payments/recurring", "🌐 Recurring Services (Internet / SaaS)", active_tab == "recurring"),
     ]
@@ -34,7 +35,7 @@ def render_payments_tabs(active_tab: str) -> str:
         {''.join(links)}
       </div>
       <div>
-        <a href="/attendance" style="font-size:12px; font-weight:600; color:#475569; text-decoration:none;" title="View Timesheet & Monthly Payroll">📅 Timesheet & Attendance →</a>
+        <a href="/invoice/new" style="font-size:12px; font-weight:600; color:#0b57d0; text-decoration:none; display:inline-flex; align-items:center; gap:4px; padding:4px 10px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px;" title="Import Invoice for any model">📥 Import Invoice</a>
       </div>
     </div>
     """
