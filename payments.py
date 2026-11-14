@@ -17,7 +17,7 @@ from common import (
 def render_payments_tabs(active_tab: str) -> str:
     """Renders the top navigation sub-bar for Payments."""
     tabs = [
-        ("/attendance", "💵 Timesheet & Payroll (T&M)", active_tab == "tm"),
+        ("/payments", "📊 Dashboard", active_tab == "dashboard"),
         ("/payments/fixed-price", "🎯 Fixed Price (Milestones)", active_tab == "fixed_price"),
         ("/payments/recurring", "🌐 Recurring Services (Internet / SaaS)", active_tab == "recurring"),
     ]
@@ -29,10 +29,21 @@ def render_payments_tabs(active_tab: str) -> str:
             links.append(f'<a href="{url}" style="margin-right: 18px; font-weight: 500; color:#64748b; text-decoration:none; padding-bottom: 8px;">{label}</a>')
     
     return f"""
-    <div class="actions" style="margin-bottom: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">
-      {''.join(links)}
+    <div class="actions" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px; margin-bottom: 18px; border-bottom: 1px solid #e2e8f0; padding-bottom: 8px;">
+      <div style="display:flex; align-items:center; flex-wrap:wrap;">
+        {''.join(links)}
+      </div>
+      <div>
+        <a href="/attendance" style="font-size:12px; font-weight:600; color:#475569; text-decoration:none;" title="View Timesheet & Monthly Payroll">📅 Timesheet & Attendance →</a>
+      </div>
     </div>
     """
+
+
+def page_payments_dashboard(filters: dict) -> str:
+    """Payments Dashboard view: renders T&M Cash-out overview."""
+    from attendance import page_attendance_payout
+    return page_attendance_payout(filters)
 
 
 # ==============================================================================
@@ -75,10 +86,15 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
             where.append("m.milestone_type = ?")
             params.append(milestone_type)
 
+        today_str = now_iso()[:10]
+
         if status == "PAID":
             where.append("(m.status = 'PAID' OR (m.cashout_date IS NOT NULL AND m.cashout_date != ''))")
         elif status == "PENDING":
             where.append("m.status = 'PENDING' AND (m.cashout_date IS NULL OR m.cashout_date = '')")
+        elif status == "OVERDUE":
+            where.append("m.planned_date < ? AND (m.actual_date IS NULL OR m.actual_date = '') AND m.status != 'PAID' AND (m.cashout_date IS NULL OR m.cashout_date = '')")
+            params.append(today_str)
         elif status in ("ACCEPTED", "INVOICED"):
             where.append("m.status = ? AND (m.cashout_date IS NULL OR m.cashout_date = '')")
             params.append(status)
@@ -109,11 +125,12 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
                 COUNT(DISTINCT c.id) AS total_contracts,
                 COUNT(m.id) AS total_milestones,
                 COALESCE(SUM(m.amount), 0.0) AS total_amount,
-                COALESCE(SUM(CASE WHEN m.status = 'PAID' OR (m.cashout_date IS NOT NULL AND m.cashout_date != '') THEN m.amount ELSE 0 END), 0.0) AS paid_amount
+                COALESCE(SUM(CASE WHEN m.status = 'PAID' OR (m.cashout_date IS NOT NULL AND m.cashout_date != '') THEN m.amount ELSE 0 END), 0.0) AS paid_amount,
+                COUNT(CASE WHEN m.planned_date < ? AND (m.actual_date IS NULL OR m.actual_date = '') AND m.status != 'PAID' AND (m.cashout_date IS NULL OR m.cashout_date = '') THEN 1 END) AS overdue_count
             FROM contract_milestones m
             JOIN contracts c ON c.id = m.contract_id
             WHERE c.is_active = 1
-        """).fetchone()
+        """, (today_str,)).fetchone()
 
     finally:
         conn.close()
@@ -122,6 +139,7 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
     total_amount = float(metrics["total_amount"] if metrics else 0.0)
     paid_amount = float(metrics["paid_amount"] if metrics else 0.0)
     pending_amount = max(0.0, total_amount - paid_amount)
+    overdue_count = metrics["overdue_count"] if metrics else 0
 
     # Vendor select options
     seller_opts = ['<option value="">All Vendors</option>']
@@ -159,6 +177,7 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
           <div class="label">Status</div>
           <select name="status">
             <option value="">All Statuses</option>
+            <option value="OVERDUE" {"selected" if status=="OVERDUE" else ""}>⚠️ Overdue</option>
             <option value="PENDING" {"selected" if status=="PENDING" else ""}>Pending</option>
             <option value="ACCEPTED" {"selected" if status=="ACCEPTED" else ""}>Accepted</option>
             <option value="INVOICED" {"selected" if status=="INVOICED" else ""}>Invoiced</option>
@@ -193,6 +212,21 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
             "PAID": '<span class="tag tag-active" style="background:#047857; color:#fff; border-color:#047857;">✓ Paid</span>',
         }.get("PAID" if is_paid else r["status"], '<span class="tag">Pending</span>')
 
+        # Check overdue status
+        is_overdue = False
+        overdue_badge = ""
+        if r["planned_date"] and not is_paid and not r["actual_date"]:
+            if r["planned_date"] < today_str:
+                is_overdue = True
+                try:
+                    p_d = datetime.strptime(r["planned_date"], "%Y-%m-%d").date()
+                    t_d = datetime.strptime(today_str, "%Y-%m-%d").date()
+                    days = (t_d - p_d).days
+                    p_date_str = r["planned_date"]
+                    overdue_badge = f'<div style="margin-top:2px;"><span class="tag tag-danger" style="font-size:10px; padding:1px 5px;" title="Planned for {p_date_str}, overdue by {days} days">⚠️ Overdue {days}d</span></div>'
+                except Exception:
+                    overdue_badge = '<div style="margin-top:2px;"><span class="tag tag-danger" style="font-size:10px; padding:1px 5px;">⚠️ Overdue</span></div>'
+
         # Contract or annex title link
         if r["annex_id"]:
             parent_link = f"""
@@ -212,10 +246,25 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
         contract_target = r["annex_name"] if r["annex_id"] else r["framework_no"]
         import_inv_url = f"/invoice/new?billing_type=FIXED_PRICE&contract_no={urllib.parse.quote(contract_target or '')}&milestone_id={r['id']}&return_to={urllib.parse.quote(return_to)}"
 
+        # Reconciliation check
+        recon_badge = ""
+        inv_amt = float(r["inv_amount"] or 0)
+        mile_amt = float(r["amount"] or 0)
+        if r["invoice_id"] and r["inv_amount"] is not None:
+            diff = inv_amt - mile_amt
+            if abs(diff) < 1.0:
+                recon_badge = '<span class="tag tag-active" style="font-size:10px; padding:1px 5px;" title="Invoice amount matches milestone exactly">✓ Matched</span>'
+            elif diff > 0:
+                recon_badge = f'<span class="tag tag-danger" style="font-size:10px; padding:1px 5px;" title="Invoice ({inv_amt:,.0f}) exceeds milestone ({mile_amt:,.0f}) by {diff:,.0f} VND">⚠️ Mismatch: +{diff:,.0f} VND</span>'
+            else:
+                recon_badge = f'<span class="tag tag-warning" style="font-size:10px; padding:1px 5px;" title="Invoice ({inv_amt:,.0f}) is less than milestone ({mile_amt:,.0f}) by {abs(diff):,.0f} VND">⚠️ Mismatch: -{abs(diff):,.0f} VND</span>'
+
         if r["shdon"]:
             inv_display = f"""
             <div>
               <a href="/invoice?id={r['invoice_id']}"><b>{escape(r['shdon'])}</b></a>
+              <div class="muted" style="font-size:11px; font-family:monospace;">{inv_amt:,.0f} VND</div>
+              {f"<div style='margin-top:2px;'>{recon_badge}</div>" if recon_badge else ""}
               <div style="margin-top:2px;">
                 <a href="{import_inv_url}" style="font-size:10px; color:#2563eb; text-decoration:none;" title="Import replacement invoice">↺ Re-import</a>
               </div>
@@ -225,6 +274,8 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
             inv_display = f"""
             <div>
               <a href="/invoice?id={r['invoice_id']}">Invoice #{r['invoice_id']}</a>
+              <div class="muted" style="font-size:11px; font-family:monospace;">{inv_amt:,.0f} VND</div>
+              {f"<div style='margin-top:2px;'>{recon_badge}</div>" if recon_badge else ""}
               <div style="margin-top:2px;">
                 <a href="{import_inv_url}" style="font-size:10px; color:#2563eb; text-decoration:none;" title="Import replacement invoice">↺ Re-import</a>
               </div>
@@ -277,8 +328,9 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
           <td style="text-align:right; font-family:monospace;">{pct_disp}</td>
           <td style="text-align:right; font-family:monospace; font-weight:600;">{amt_disp}</td>
           <td style="font-size:11px;">
-            <div>Plan: {escape(r['planned_date'] or '-')}</div>
+            <div>Plan: <span style="{'color:var(--danger); font-weight:600;' if is_overdue else ''}">{escape(r['planned_date'] or '-')}</span></div>
             {f"<div style='color:var(--success); font-weight:500;'>Act: {escape(r['actual_date'])}</div>" if r['actual_date'] else ""}
+            {overdue_badge}
           </td>
           <td style="font-size:11px;">{inv_display}</td>
           <td>{cashout_html}</td>
@@ -305,6 +357,7 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
       <div class="card" style="padding:14px;">
         <div class="muted" style="font-size:12px;">Remaining Pending Payment</div>
         <b style="font-size:18px; color:var(--danger); font-family:monospace;">{int(round(pending_amount)):,} VND</b>
+        {f'<div style="font-size:11px; color:var(--danger); font-weight:600; margin-top:3px;"><a href="/payments/fixed-price?status=OVERDUE" style="color:var(--danger); text-decoration:underline;">⚠️ {overdue_count} overdue milestone{"s" if overdue_count > 1 else ""}</a></div>' if overdue_count > 0 else ""}
       </div>
     </div>
 
@@ -337,13 +390,14 @@ def page_payments_fixed_price(q: str = "", vendor_id: str = "", milestone_type: 
 # ==============================================================================
 # 2. RECURRING SERVICES DASHBOARD (Internet, SaaS, Maintenance)
 # ==============================================================================
-def page_payments_recurring(month: str | None = None, q: str = "", *, return_to: str | None = None):
+def page_payments_recurring(month: str | None = None, q: str = "", vendor_id: str = "", *, return_to: str | None = None):
     # Default to current month YYYY-MM
     now = datetime.now()
     if not month or len(month) != 7 or "-" not in month:
         month = f"{now.year:04d}-{now.month:02d}"
 
     q = (q or "").strip()
+    vendor_id = (vendor_id or "").strip()
     return_to = return_to or f"/payments/recurring?month={month}"
 
     # Calculate previous and next months
@@ -360,6 +414,14 @@ def page_payments_recurring(month: str | None = None, q: str = "", *, return_to:
 
     conn = db_connect()
     try:
+        # Load vendors list for filter dropdown
+        sellers = conn.execute("""
+            SELECT id, company_name, company_name_vi, tax_id
+            FROM vendors
+            WHERE is_active = 1 AND purchasing = 0
+            ORDER BY company_name ASC, company_name_vi ASC
+        """).fetchall()
+
         # Load all recurring contracts (standalone or framework)
         c_where = ["c.is_active = 1", "c.billing_type = 'RECURRING'"]
         c_params = []
@@ -370,6 +432,9 @@ def page_payments_recurring(month: str | None = None, q: str = "", *, return_to:
                 OR sv.company_name LIKE ? OR sv.company_name_vi LIKE ? OR sv.tax_id LIKE ?
             )""")
             c_params.extend([like, like, like, like, like])
+        if vendor_id.isdigit():
+            c_where.append("c.seller_vendor_id = ?")
+            c_params.append(int(vendor_id))
 
         contracts_rows = conn.execute(f"""
             SELECT
@@ -395,6 +460,9 @@ def page_payments_recurring(month: str | None = None, q: str = "", *, return_to:
                 OR sv.company_name LIKE ? OR sv.company_name_vi LIKE ? OR sv.tax_id LIKE ?
             )""")
             a_params.extend([like, like, like, like, like, like])
+        if vendor_id.isdigit():
+            a_where.append("c.seller_vendor_id = ?")
+            a_params.append(int(vendor_id))
 
         annexes_rows = conn.execute(f"""
             SELECT
@@ -440,12 +508,24 @@ def page_payments_recurring(month: str | None = None, q: str = "", *, return_to:
 
     # Add standalone or direct contracts
     for c in contracts_rows:
+        # Check validity for the selected service month
+        in_period = True
+        if c["start_date"] and str(c["start_date"])[:7] > month:
+            in_period = False
+        if c["end_date"] and str(c["end_date"])[:7] < month:
+            in_period = False
+
+        has_payout = (c["id"], None) in payout_map
+        if not in_period and not has_payout:
+            continue
+
         fee = c["recurring_fee"] if (c["recurring_fee"] is not None and c["recurring_fee"] > 0) else (c["contract_value"] or 0.0)
         items.append({
             "is_annex": False,
             "contract_id": c["id"],
             "annex_id": None,
             "no": c["framework_no"],
+            "contract_target": c["framework_no"],
             "name": c["framework_name"],
             "buyer": f"{c['buyer_name']} ({c['buyer_tax']})",
             "seller": f"{c['seller_name']} ({c['seller_tax']})",
@@ -454,16 +534,28 @@ def page_payments_recurring(month: str | None = None, q: str = "", *, return_to:
             "period": c["recurring_period"] or "MONTHLY",
             "start_date": c["start_date"],
             "end_date": c["end_date"],
+            "is_expired": not in_period,
         })
 
     # Add annexes
     for a in annexes_rows:
+        in_period = True
+        if a["start_date"] and str(a["start_date"])[:7] > month:
+            in_period = False
+        if a["end_date"] and str(a["end_date"])[:7] < month:
+            in_period = False
+
+        has_payout = (a["contract_id"], a["annex_id"]) in payout_map
+        if not in_period and not has_payout:
+            continue
+
         fee = a["recurring_fee"] if (a["recurring_fee"] is not None and a["recurring_fee"] > 0) else (a["annex_value"] or 0.0)
         items.append({
             "is_annex": True,
             "contract_id": a["contract_id"],
             "annex_id": a["annex_id"],
             "no": f"{a['framework_no']} / {a['annex_name']}",
+            "contract_target": a["annex_name"],
             "name": a["annex_name"],
             "buyer": f"{a['buyer_name']} ({a['buyer_tax']})",
             "seller": f"{a['seller_name']} ({a['seller_tax']})",
@@ -472,6 +564,7 @@ def page_payments_recurring(month: str | None = None, q: str = "", *, return_to:
             "period": a["recurring_period"] or "MONTHLY",
             "start_date": a["start_date"],
             "end_date": a["end_date"],
+            "is_expired": not in_period,
         })
 
     # Calculate metrics for the month
@@ -494,17 +587,45 @@ def page_payments_recurring(month: str | None = None, q: str = "", *, return_to:
         for inv in invoices:
             c_no_clean = (inv["contract_no"] or "").strip().lower()
             it_no_clean = (it["no"] or "").strip().lower()
-            if (c_no_clean and (c_no_clean == it_no_clean or c_no_clean in it_no_clean or it_no_clean in c_no_clean)):
+            c_target_clean = (it.get("contract_target") or "").strip().lower()
+            if c_no_clean and (c_no_clean == it_no_clean or c_no_clean == c_target_clean or c_no_clean in it_no_clean or it_no_clean in c_no_clean):
                 matched_inv = inv
                 break
 
+        # Quick import invoice URL for this recurring service month
+        contract_target = it.get("contract_target") or it["no"]
+        import_inv_url = f"/invoice/new?billing_type=RECURRING&contract_no={urllib.parse.quote(contract_target or '')}&service_year={year_int}&service_month={month_int}&return_to={urllib.parse.quote(return_to)}"
+
         if matched_inv:
+            inv_amt = float(matched_inv["tg_tttbso"] or 0)
+            fee_amt = float(it["fee"] or 0)
+            diff = inv_amt - fee_amt
+            if abs(diff) < 1.0:
+                recon_badge = '<span class="tag tag-active" style="font-size:10px; padding:1px 5px;" title="Invoice amount matches recurring fee exactly">✓ Matched Fee</span>'
+            elif diff > 0:
+                recon_badge = f'<span class="tag tag-danger" style="font-size:10px; padding:1px 5px;" title="Invoice ({inv_amt:,.0f}) exceeds recurring fee ({fee_amt:,.0f}) by {diff:,.0f} VND">⚠️ Mismatch: +{diff:,.0f} VND</span>'
+            else:
+                recon_badge = f'<span class="tag tag-warning" style="font-size:10px; padding:1px 5px;" title="Invoice ({inv_amt:,.0f}) is less than recurring fee ({fee_amt:,.0f}) by {abs(diff):,.0f} VND">⚠️ Mismatch: -{abs(diff):,.0f} VND</span>'
+
             inv_display = f"""
-            <a href="/invoice?id={matched_inv['id']}"><b>{escape(matched_inv['shdon'] or 'Inv')}</b></a>
-            <div class="muted" style="font-size:11px; font-family:monospace;">{float(matched_inv['tg_tttbso'] or 0):,.0f} VND</div>
+            <div>
+              <a href="/invoice?id={matched_inv['id']}"><b>{escape(matched_inv['shdon'] or 'Inv')}</b></a>
+              <div class="muted" style="font-size:11px; font-family:monospace;">{inv_amt:,.0f} VND</div>
+              <div style="margin-top:2px;">{recon_badge}</div>
+              <div style="margin-top:2px;">
+                <a href="{import_inv_url}" style="font-size:10px; color:#2563eb; text-decoration:none;" title="Import replacement invoice">↺ Re-import</a>
+              </div>
+            </div>
             """
         else:
-            inv_display = '<span class="muted" style="font-size:11px;">No invoice linked</span>'
+            inv_display = f"""
+            <div>
+              <span class="muted" style="font-size:11px; display:block; margin-bottom:3px;">No invoice linked</span>
+              <a href="{import_inv_url}" class="btn-secondary" style="font-size:11px; padding:2px 8px; text-decoration:none; display:inline-flex; align-items:center; gap:4px; font-weight:600; color:#0b57d0; border-color:#0b57d0; background:#f0f7ff; border-radius:6px; white-space:nowrap;" title="Import Invoice for this service month">
+                📥 Import Invoice
+              </a>
+            </div>
+            """
 
         # Cashout controls
         if is_paid:
@@ -561,16 +682,28 @@ def page_payments_recurring(month: str | None = None, q: str = "", *, return_to:
 
     remaining_sum = max(0.0, monthly_commitment - paid_sum)
 
+    # Vendor select options for Recurring
+    seller_opts = ['<option value="">All Vendors</option>']
+    for s in sellers:
+        s_name = (s["company_name"] or s["company_name_vi"] or "").strip()
+        s_tax = (s["tax_id"] or "").strip()
+        label = f"{s_name} ({s_tax})" if s_tax else s_name
+        sel = "selected" if str(s["id"]) == vendor_id else ""
+        seller_opts.append(f'<option value="{s["id"]}" {sel}>{escape(label)}</option>')
+
     filter_html = f"""
     <div class="card" style="margin-bottom: 16px;">
       <form class="filters" method="GET" action="/payments/recurring" style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:10px;">
         <div style="display:flex; align-items:center; gap:8px;">
-          <a href="/payments/recurring?month={prev_month}&q={escape(q)}"><button class="btn-secondary" type="button">← {prev_month}</button></a>
+          <a href="/payments/recurring?month={prev_month}&q={escape(q)}&vendor_id={vendor_id}"><button class="btn-secondary" type="button">← {prev_month}</button></a>
           <input type="month" name="month" value="{month}" onchange="this.form.submit()" style="font-weight:600; font-size:14px; padding:4px 8px;">
-          <a href="/payments/recurring?month={next_month}&q={escape(q)}"><button class="btn-secondary" type="button">{next_month} →</button></a>
+          <a href="/payments/recurring?month={next_month}&q={escape(q)}&vendor_id={vendor_id}"><button class="btn-secondary" type="button">{next_month} →</button></a>
         </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          <input type="text" name="q" placeholder="Search service / contract / vendor..." value="{escape(q)}" style="min-width:240px;">
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <select name="vendor_id" onchange="this.form.submit()" style="min-width:180px;">
+            {''.join(seller_opts)}
+          </select>
+          <input type="text" name="q" placeholder="Search service / contract / vendor..." value="{escape(q)}" style="min-width:220px;">
           <button type="submit">Filter</button>
           <a class="muted" href="/payments/recurring?month={month}">Reset</a>
           <a href="/invoice/new" style="text-decoration:none;"><button class="btn-secondary" type="button" style="color:#0b57d0; border-color:#0b57d0; font-weight:600;">📄 + Import Invoice</button></a>
@@ -671,6 +804,22 @@ def handle_recurring_cashout_post(handler):
                 cur.execute("DELETE FROM recurring_payouts WHERE id = ?", (existing["id"],))
                 log_action(cur, "CANCEL_RECURRING_CASHOUT", "recurring_payouts", existing["id"], f"Cancelled recurring cashout for contract #{contract_id} (Month: {service_month})")
         else:
+            # Validate service month against contract validity
+            c_row = cur.execute("SELECT start_date, end_date FROM contracts WHERE id = ?", (contract_id,)).fetchone()
+            a_row = None
+            if annex_id is not None:
+                a_row = cur.execute("SELECT start_date, end_date FROM contract_annexes WHERE id = ?", (annex_id,)).fetchone()
+
+            s_date = (a_row and a_row["start_date"]) or (c_row and c_row["start_date"])
+            e_date = (a_row and a_row["end_date"]) or (c_row and c_row["end_date"])
+
+            if s_date and service_month < str(s_date)[:7]:
+                send_html(handler, layout("Error", f"<div class='card danger'>Cannot record payment: Service month {service_month} is prior to contract start date ({s_date}).</div>"), status=400)
+                return
+            if e_date and service_month > str(e_date)[:7]:
+                send_html(handler, layout("Error", f"<div class='card danger'>Cannot record payment: Contract expired on {e_date}. Service month {service_month} does not exist for this contract. Please renew first.</div>"), status=400)
+                return
+
             # Pay / cashout
             if existing:
                 cur.execute("""

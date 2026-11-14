@@ -83,15 +83,23 @@ def get_contract_renewal_status(r, today_date=None):
 
     r_dict = dict(r) if hasattr(r, "keys") else (r if isinstance(r, dict) else {})
     end_date_str = r_dict.get("end_date")
-    renewal_type = (r_dict.get("renewal_type") or "MANUAL").upper()
-    notice_days = r_dict.get("renewal_notice_days")
-    if notice_days is None:
-        notice_days = 60
-    else:
-        try:
-            notice_days = int(notice_days)
-        except ValueError:
+    c_type = (r_dict.get("contract_type") or "FRAMEWORK").upper()
+    b_type = (r_dict.get("billing_type") or "TM").upper()
+    is_standalone_rec = (c_type == "STANDALONE" and b_type == "RECURRING")
+
+    if is_standalone_rec:
+        renewal_type = (r_dict.get("renewal_type") or "MANUAL").upper()
+        notice_days = r_dict.get("renewal_notice_days")
+        if notice_days is None:
             notice_days = 60
+        else:
+            try:
+                notice_days = int(notice_days)
+            except ValueError:
+                notice_days = 60
+    else:
+        renewal_type = "NONE"
+        notice_days = 30
 
     if not end_date_str:
         return {
@@ -162,20 +170,20 @@ def page_contracts_list(q: str = "", status: str = "active", renewal_type: str =
         where.append("c.is_active = 0")
 
     if renewal_type in ("MANUAL", "AUTO", "NONE"):
-        where.append("c.renewal_type = ?")
+        where.append("c.contract_type = 'STANDALONE' AND c.billing_type = 'RECURRING' AND c.renewal_type = ?")
         params.append(renewal_type)
 
     if renewal_due in ("1", "true", "yes", "due"):
-        where.append("c.end_date IS NOT NULL AND c.end_date != '' AND c.end_date <= date('now', '+' || COALESCE(c.renewal_notice_days, 60) || ' days')")
+        where.append("c.contract_type = 'STANDALONE' AND c.billing_type = 'RECURRING' AND c.renewal_type != 'NONE' AND c.end_date IS NOT NULL AND c.end_date != '' AND c.end_date <= date('now', '+' || COALESCE(c.renewal_notice_days, 60) || ' days')")
 
     if q:
         where.append("""(
-            c.framework_no LIKE ? OR c.framework_name LIKE ?
+            c.framework_no LIKE ? OR c.framework_name LIKE ? OR c.contract_summary LIKE ?
             OR bv.company_name_vi LIKE ? OR bv.company_name LIKE ? OR bv.tax_id LIKE ?
             OR sv.company_name_vi LIKE ? OR sv.company_name LIKE ? OR sv.tax_id LIKE ?
         )""")
         like = f"%{q}%"
-        params += [like, like, like, like, like, like, like, like]
+        params += [like, like, like, like, like, like, like, like, like]
 
     where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
@@ -228,7 +236,7 @@ def page_contracts_list(q: str = "", status: str = "active", renewal_type: str =
         <div style="display:flex; align-items:center; gap:6px; padding-top:20px;">
           <label style="cursor:pointer; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:500;">
             <input type="checkbox" name="renewal_due" value="1" {"checked" if renewal_due in ('1', 'true', 'yes', 'due') else ""} style="cursor:pointer;">
-            <span>⚠️ Sắp đến hạn gia hạn (Renewal Due)</span>
+            <span>⚠️ Renewal Due</span>
           </label>
         </div>
         <div class="actions">
@@ -279,27 +287,33 @@ def page_contracts_list(q: str = "", status: str = "active", renewal_type: str =
         else:
             annex_display = f"{r['annex_count']} annex(es)"
 
-        # Renewal info & badge
-        ren_type = (r["renewal_type"] or "MANUAL").upper()
+        # Renewal info & badge (Only applicable for STANDALONE contract with RECURRING billing type)
+        c_type = (r["contract_type"] or "FRAMEWORK").upper()
+        b_type = (r["billing_type"] or "TM").upper()
+        is_standalone_rec = (c_type == "STANDALONE" and b_type == "RECURRING")
         ren_status = get_contract_renewal_status(r)
-        if ren_type == "AUTO":
-            ren_badge = '<span class="tag tag-purple">Auto-Renew</span>'
-        elif ren_type == "MANUAL":
-            ren_badge = '<span class="tag tag-info">Manual-Renew</span>'
-        else:
-            ren_badge = '<span class="tag" style="background:#f1f5f9; color:#64748b;">Non-Renewable</span>'
-
-        suggested_end = calculate_suggested_renewal_end_date(r["start_date"], r["end_date"], r["renewal_period_months"])
-
+        ren_badge = ""
         renew_btn = ""
-        if int(r["is_active"]) == 1 and ren_type != "NONE":
-            renew_btn = f"""
-            <button type="button" class="btn-secondary"
-                    style="font-size:11px; padding: 4px 8px; margin-top:2px; color:var(--success); border-color:var(--success); font-weight:600;"
-                    onclick="openRenewalModal('{r['id']}', '{escape(r['framework_no'] or '')}', '{escape(r['framework_name'] or '')}', '{r['start_date'] or ''}', '{r['end_date'] or ''}', '{suggested_end}')">
-              🔄 Renew
-            </button>
-            """
+
+        if is_standalone_rec:
+            ren_type = (r["renewal_type"] or "MANUAL").upper()
+            if ren_type == "AUTO":
+                ren_badge = '<span class="tag tag-purple">Auto-Renew</span>'
+            elif ren_type == "MANUAL":
+                ren_badge = '<span class="tag tag-info">Manual-Renew</span>'
+            else:
+                ren_badge = '<span class="tag" style="background:#f1f5f9; color:#64748b;">Non-Renewable</span>'
+
+            suggested_end = calculate_suggested_renewal_end_date(r["start_date"], r["end_date"], r["renewal_period_months"])
+
+            if int(r["is_active"]) == 1 and ren_type != "NONE":
+                renew_btn = f"""
+                <button type="button" class="btn-secondary"
+                        style="font-size:11px; padding: 4px 8px; margin-top:2px; color:var(--success); border-color:var(--success); font-weight:600;"
+                        onclick="openRenewalModal('{r['id']}', '{escape(r['framework_no'] or '')}', '{escape(r['framework_name'] or '')}', '{r['start_date'] or ''}', '{r['end_date'] or ''}', '{suggested_end}')">
+                  🔄 Renew
+                </button>
+                """
 
         actions = f'<a href="/contract/edit?id={r["id"]}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>'
         if renew_btn:
@@ -326,6 +340,15 @@ def page_contracts_list(q: str = "", status: str = "active", renewal_type: str =
               </form>
             """
 
+        summary_html = ""
+        if r["contract_summary"]:
+            summary_preview = r["contract_summary"].strip()
+            summary_html = f"""
+            <div class="muted" style="margin-top:3px; font-size:11px; max-width:280px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:#64748b;" title="{escape(summary_preview)}">
+              📝 {escape(summary_preview)}
+            </div>
+            """
+
         trs.append(f"""
         <tr>
           <td>{idx}</td>
@@ -335,6 +358,7 @@ def page_contracts_list(q: str = "", status: str = "active", renewal_type: str =
               {type_badge} {billing_badge}
             </div>
             <div class="muted" style="margin-top:2px;">{escape(r["framework_name"] or "")}</div>
+            {summary_html}
           </td>
           <td>{escape(buyer)}</td>
           <td>{escape(seller)}</td>
@@ -393,7 +417,7 @@ def render_renewal_modal_html():
     <div id="renewal_modal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); overflow:auto;">
       <div style="background:#fff; margin:8% auto; padding:24px; border-radius:10px; width:520px; max-width:92%; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
         <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">
-          <b style="font-size:16px; color:var(--text-primary);">🔄 Renew Contract (Gia hạn hợp đồng)</b>
+          <b style="font-size:16px; color:var(--text-primary);">🔄 Renew Contract</b>
           <button type="button" style="background:none; border:none; font-size:18px; cursor:pointer;" onclick="closeRenewalModal()">✕</button>
         </div>
         
@@ -407,16 +431,16 @@ def render_renewal_modal_html():
           <input type="hidden" name="return_to" id="renew_modal_return_to" value="">
 
           <div style="margin-bottom:14px;">
-            <div class="label" style="font-weight:600;">New End Date (Ngày kết thúc mới) *</div>
+            <div class="label" style="font-weight:600;">New End Date *</div>
             <input type="date" name="new_end_date" id="renew_modal_new_end_date" value="" style="width:100%; font-size:14px; padding:8px;" required>
             <div class="muted" style="font-size:11px; margin-top:5px; line-height:1.4;">
-              💡 <b>Gợi ý:</b> Mặc định được tính bằng ngày kết thúc cũ cộng thêm đúng kỳ hạn của hợp đồng. Bạn có thể tự do điều chỉnh ngày này theo thỏa thuận thực tế.
+              💡 <b>Suggestion:</b> Default is computed from current end date plus original contract duration. You can adjust this date according to mutual agreement.
             </div>
           </div>
 
           <div style="margin-bottom:14px;">
-            <div class="label">Renewal Note / Amendment Reference (Ghi chú / Số phụ lục gia hạn)</div>
-            <input type="text" name="renewal_note" id="renew_modal_note" placeholder="VD: Phụ lục gia hạn số 02 ký ngày 2026-11-15..." style="width:100%; font-size:13px; padding:8px;">
+            <div class="label">Renewal Note / Amendment Reference</div>
+            <input type="text" name="renewal_note" id="renew_modal_note" placeholder="e.g. Amendment 02 signed on 2026-11-15..." style="width:100%; font-size:13px; padding:8px;">
           </div>
 
           <div style="text-align:right; margin-top:20px; display:flex; justify-content:flex-end; gap:10px;">
@@ -695,7 +719,7 @@ def render_milestones_card(contract_id: int, annex_id: int | None, milestones: l
         </tbody>
       </table>
 
-      <!-- Form Thêm mốc mới -->
+      <!-- Form Add Milestone -->
       <div id="{form_id}" style="display:none; background:#f1f5f9; border:1px solid #cbd5e1; border-radius:8px; padding:16px; margin-top:14px;">
         <b style="font-size:14px; display:block; margin-bottom:10px;">+ New Payment Milestone</b>
         <form method="POST" action="/contract/milestone/create">
@@ -867,7 +891,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
 
     renewal_card_html = ""
     suggested_end_date = ""
-    if mode == "edit" and contract_row:
+    if mode == "edit" and contract_row and c_type_val == "STANDALONE" and b_type_val == "RECURRING":
         p_m = int(ren_period_months_val) if ren_period_months_val.isdigit() else None
         suggested_end_date = calculate_suggested_renewal_end_date(contract_row["start_date"], contract_row["end_date"], p_m)
         ren_status = get_contract_renewal_status(dict(contract_row))
@@ -903,12 +927,16 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
         """
 
     milestones_html = ""
+    has_active_annexes = False
+    has_direct_milestones = False
     if mode == "edit" and contract_row:
         conn = db_connect()
         try:
             ms = get_milestones_for_contract(conn, contract_row["id"], annex_id=None)
         finally:
             conn.close()
+        has_active_annexes = any(int(a["is_active"]) == 1 for a in (annex_rows or []))
+        has_direct_milestones = len(ms) > 0
         milestones_html = render_milestones_card(
             contract_id=contract_row["id"],
             annex_id=None,
@@ -1096,6 +1124,25 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
             </div>
             """
 
+    c_type_lock_note = ""
+    if has_active_annexes:
+        c_type_lock_note = '<div class="muted" style="font-size:11px; margin-top:4px; color:#4f46e5;">🔒 Structure locked: Contract has active annexes.</div>'
+        c_type_options = """
+              <option value="FRAMEWORK" selected>Framework Agreement (MSA)</option>
+              <option value="STANDALONE" disabled>Standalone / Direct Contract (Locked)</option>
+        """
+    elif has_direct_milestones:
+        c_type_lock_note = '<div class="muted" style="font-size:11px; margin-top:4px; color:#b45309;">🔒 Structure locked: Contract has direct payment milestone(s).</div>'
+        c_type_options = """
+              <option value="FRAMEWORK" disabled>Framework Agreement (Locked)</option>
+              <option value="STANDALONE" selected>Standalone / Direct Contract</option>
+        """
+    else:
+        c_type_options = f"""
+              <option value="FRAMEWORK" {"selected" if c_type_val=="FRAMEWORK" else ""}>Framework Agreement (MSA)</option>
+              <option value="STANDALONE" {"selected" if c_type_val=="STANDALONE" else ""}>Standalone / Direct Contract</option>
+        """
+
     body = f"""
     {error_html}
     {renewal_card_html}
@@ -1111,15 +1158,15 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
         <div class="grid">
           <div>
             <div class="label">Contract Structure</div>
-            <select name="contract_type" id="contract_type" style="width:100%;">
-              <option value="FRAMEWORK" {"selected" if c_type_val=="FRAMEWORK" else ""}>Framework Agreement (MSA)</option>
-              <option value="STANDALONE" {"selected" if c_type_val=="STANDALONE" else ""}>Standalone / Direct Contract</option>
+            <select name="contract_type" id="contract_type" style="width:100%;" onchange="updateContractFormState();">
+              {c_type_options}
             </select>
+            {c_type_lock_note}
           </div>
 
           <div>
             <div class="label">Billing Type</div>
-            <select name="billing_type" id="billing_type" style="width:100%;" onchange="var rf=document.getElementById('contract_recurring_fields'); if (rf) rf.style.display=(this.value==='RECURRING'?'block':'none');">
+            <select name="billing_type" id="billing_type" style="width:100%;" onchange="updateContractFormState();">
               <option value="TM" {"selected" if b_type_val=="TM" else ""}>Time & Material (T&M)</option>
               <option value="FIXED_PRICE" {"selected" if b_type_val=="FIXED_PRICE" else ""}>Fixed Price (Milestones)</option>
               <option value="RECURRING" {"selected" if b_type_val=="RECURRING" else ""}>Recurring (Internet / SaaS / Utility)</option>
@@ -1168,33 +1215,45 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
             <input type="date" name="end_date" value="{escape(gv("end_date"))}" style="width:100%;">
           </div>
 
-          <div>
-            <div class="label">Renewal Policy</div>
-            <select name="renewal_type" id="renewal_type" style="width:100%;" onchange="var rf=document.getElementById('renewal_period_block'); if(rf) rf.style.display=(this.value==='AUTO'?'block':'none');">
-              <option value="MANUAL" {"selected" if ren_type_val=="MANUAL" else ""}>Manual Renewal (Gia hạn thủ công)</option>
-              <option value="AUTO" {"selected" if ren_type_val=="AUTO" else ""}>Auto Renewal (Tự động gia hạn theo kỳ hạn)</option>
-              <option value="NONE" {"selected" if ren_type_val=="NONE" else ""}>Non-Renewable (Hợp đồng 1 lần / Không gia hạn)</option>
-            </select>
-          </div>
-
-          <div>
-            <div class="label">Renewal Notice Period (Days)</div>
-            <input type="number" name="renewal_notice_days" value="{escape(ren_notice_days_val)}" style="width:100%;" min="1" placeholder="Mặc định: 60 ngày">
-            <div class="muted" style="font-size:11px; margin-top:2px;">Số ngày báo trước khi hết hạn (Mặc định: 60 ngày).</div>
-          </div>
-
-          <div id="renewal_period_block" style="display:{'block' if ren_type_val=='AUTO' else 'none'};">
-            <div class="label">Auto-Renew Term (Months)</div>
-            <input type="number" name="renewal_period_months" value="{escape(ren_period_months_val)}" style="width:100%;" min="1" placeholder="Mặc định: Theo kỳ hạn gốc">
-            <div class="muted" style="font-size:11px; margin-top:2px;">Số tháng gia hạn mỗi chu kỳ (để trống sẽ tự tính theo kỳ hạn gốc).</div>
-          </div>
-
           <div style="grid-column: span 2;">
-            <div class="label">Renewal Notes / Ghi chú điều khoản gia hạn</div>
-            <input type="text" name="renewal_note" value="{escape(ren_note_val)}" style="width:100%;" placeholder="VD: Báo trước 60 ngày bằng văn bản, gia hạn thêm 12 tháng...">
+            <div class="label">Contract Summary / Scope Notes</div>
+            <textarea name="contract_summary" rows="3" style="width:100%; font-size:13px; font-family:inherit; padding:8px 10px; border:1px solid var(--border); border-radius:6px; box-sizing:border-box;" placeholder="e.g. Scope of work summary, key terms, SLA notes, or internal responsibilities...">{escape(gv("contract_summary"))}</textarea>
           </div>
 
-          <div id="contract_recurring_fields" style="display:{'block' if b_type_val=='RECURRING' else 'none'}; grid-column:span 2; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px;">
+          <div id="contract_renewal_fields" style="display:{'block' if (c_type_val=='STANDALONE' and b_type_val=='RECURRING') else 'none'}; grid-column:span 2; background:#f8fafc; border:1px solid #cbd5e1; border-radius:8px; padding:14px; margin-top:2px;">
+            <div style="font-weight:700; color:var(--text-primary); font-size:13px; margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+              🔄 Recurring Renewal Policy
+            </div>
+            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+              <div>
+                <div class="label">Renewal Policy</div>
+                <select name="renewal_type" id="renewal_type" style="width:100%;" onchange="var rf=document.getElementById('renewal_period_block'); if(rf) rf.style.display=(this.value==='AUTO'?'block':'none');">
+                  <option value="MANUAL" {"selected" if ren_type_val=="MANUAL" else ""}>Manual Renewal</option>
+                  <option value="AUTO" {"selected" if ren_type_val=="AUTO" else ""}>Auto Renewal</option>
+                  <option value="NONE" {"selected" if ren_type_val=="NONE" else ""}>Non-Renewable</option>
+                </select>
+              </div>
+
+              <div>
+                <div class="label">Renewal Notice Period (Days)</div>
+                <input type="number" name="renewal_notice_days" value="{escape(ren_notice_days_val)}" style="width:100%;" min="1" placeholder="Default: 60 days">
+                <div class="muted" style="font-size:11px; margin-top:2px;">Advance notice in days before expiration (Default: 60 days).</div>
+              </div>
+
+              <div id="renewal_period_block" style="display:{'block' if ren_type_val=='AUTO' else 'none'}; grid-column:span 2;">
+                <div class="label">Auto-Renew Term (Months)</div>
+                <input type="number" name="renewal_period_months" value="{escape(ren_period_months_val)}" style="width:100%;" min="1" placeholder="Default: Follows original duration">
+                <div class="muted" style="font-size:11px; margin-top:2px;">Renewal duration in months per cycle (leave empty to follow original term).</div>
+              </div>
+
+              <div style="grid-column: span 2;">
+                <div class="label">Renewal Notes / Terms</div>
+                <input type="text" name="renewal_note" value="{escape(ren_note_val)}" style="width:100%;" placeholder="e.g. 60 days written notice, 12 months extension...">
+              </div>
+            </div>
+          </div>
+
+          <div id="contract_recurring_fields" style="display:{'block' if (c_type_val=='STANDALONE' and b_type_val=='RECURRING') else 'none'}; grid-column:span 2; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px;">
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
               <div>
                 <div class="label">Recurring Fee (VND)</div>
@@ -1220,16 +1279,31 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
       </form>
     </div>
 
-    {milestones_html if (c_type_val == "STANDALONE" or b_type_val == "FIXED_PRICE") else ""}
-    {annex_html if c_type_val != "STANDALONE" else f"""
-    <div class="card" style="background:#f8fafc; border-color:#e2e8f0; padding:15px;">
+    <script>
+    function updateContractFormState() {{
+      var cTypeEl = document.getElementById('contract_type');
+      var bTypeEl = document.getElementById('billing_type');
+      if (!cTypeEl || !bTypeEl) return;
+      var isStandaloneRec = (cTypeEl.value === 'STANDALONE' && bTypeEl.value === 'RECURRING');
+
+      var rwf = document.getElementById('contract_renewal_fields');
+      if (rwf) rwf.style.display = isStandaloneRec ? 'block' : 'none';
+
+      var rf = document.getElementById('contract_recurring_fields');
+      if (rf) rf.style.display = isStandaloneRec ? 'block' : 'none';
+    }}
+    </script>
+
+    {milestones_html if (c_type_val == "STANDALONE" and b_type_val == "FIXED_PRICE") else ""}
+    {annex_html if c_type_val == "FRAMEWORK" else f"""
+    <div class="card" style="background:#f8fafc; border-color:#e2e8f0; padding:15px; margin-top:16px;">
       <span class="muted" style="font-size:13px; font-weight:500;">
-        ℹ️ This is a <b>Standalone / Direct Contract</b>: Payment schedule is tracked directly via <b>Payment Milestones</b> above without annexes.
+        ℹ️ This is a <b>Standalone / Direct Contract</b>: Operates independently as a single-tier agreement without annexes.
       </span>
     </div>
     """}
-    {staff_block_html if c_type_val != "STANDALONE" else ""}
-    {render_renewal_modal_html()}
+    {staff_block_html if (c_type_val == "FRAMEWORK" or b_type_val == "TM") else ""}
+    {render_renewal_modal_html() if (c_type_val == "STANDALONE" and b_type_val == "RECURRING") else ""}
     """
     return layout(title, body)
 
@@ -1344,6 +1418,7 @@ def handle_contract_create_post(handler):
     seller_id = (form.get("seller_vendor_id", [""])[0] or "").strip()
     framework_no = (form.get("framework_no", [""])[0] or "").strip() or None
     framework_name = (form.get("framework_name", [""])[0] or "").strip() or None
+    contract_summary = (form.get("contract_summary", [""])[0] or "").strip() or None
     contract_type = (form.get("contract_type", ["FRAMEWORK"])[0] or "FRAMEWORK").strip()
     billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip()
     recurring_fee_raw = (form.get("recurring_fee", [""])[0] or "").strip()
@@ -1366,24 +1441,30 @@ def handle_contract_create_post(handler):
         except ValueError:
             pass
 
-    renewal_type = (form.get("renewal_type", ["MANUAL"])[0] or "MANUAL").strip().upper()
-    if renewal_type not in ("MANUAL", "AUTO", "NONE"):
-        renewal_type = "MANUAL"
+    if contract_type == "STANDALONE" and billing_type == "RECURRING":
+        renewal_type = (form.get("renewal_type", ["MANUAL"])[0] or "MANUAL").strip().upper()
+        if renewal_type not in ("MANUAL", "AUTO", "NONE"):
+            renewal_type = "MANUAL"
 
-    renewal_notice_days_raw = (form.get("renewal_notice_days", ["60"])[0] or "60").strip()
-    try:
-        renewal_notice_days = int(renewal_notice_days_raw)
-        if renewal_notice_days <= 0:
+        renewal_notice_days_raw = (form.get("renewal_notice_days", ["60"])[0] or "60").strip()
+        try:
+            renewal_notice_days = int(renewal_notice_days_raw)
+            if renewal_notice_days <= 0:
+                renewal_notice_days = 60
+        except ValueError:
             renewal_notice_days = 60
-    except ValueError:
+
+        renewal_period_months_raw = (form.get("renewal_period_months", [""])[0] or "").strip()
+        renewal_period_months = None
+        if renewal_period_months_raw.isdigit():
+            renewal_period_months = int(renewal_period_months_raw)
+
+        renewal_note = (form.get("renewal_note", [""])[0] or "").strip() or None
+    else:
+        renewal_type = "NONE"
         renewal_notice_days = 60
-
-    renewal_period_months_raw = (form.get("renewal_period_months", [""])[0] or "").strip()
-    renewal_period_months = None
-    if renewal_period_months_raw.isdigit():
-        renewal_period_months = int(renewal_period_months_raw)
-
-    renewal_note = (form.get("renewal_note", [""])[0] or "").strip() or None
+        renewal_period_months = None
+        renewal_note = None
 
     if not buyer_id.isdigit() or not seller_id.isdigit():
         send_html(handler, layout("Error", "<div class='card danger'>Invalid Buyer/Seller Vendor ID</div>"), status=400)
@@ -1403,13 +1484,13 @@ def handle_contract_create_post(handler):
         cur.execute("""
             INSERT INTO contracts (
               buyer_vendor_id, seller_vendor_id,
-              framework_no, framework_name, contract_value,
+              framework_no, framework_name, contract_summary, contract_value,
               start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period,
               renewal_type, renewal_notice_days, renewal_period_months, renewal_note,
               is_active, deleted_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), now_iso()))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_summary, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), now_iso()))
         new_id = cur.lastrowid
         log_action(cur, "CREATE_CONTRACT", "contracts", new_id, f"Created new contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type}, Renewal: {renewal_type})")
         conn.commit()
@@ -1430,6 +1511,7 @@ def handle_contract_update_post(handler):
     seller_id = (form.get("seller_vendor_id", [""])[0] or "").strip()
     framework_no = (form.get("framework_no", [""])[0] or "").strip() or None
     framework_name = (form.get("framework_name", [""])[0] or "").strip() or None
+    contract_summary = (form.get("contract_summary", [""])[0] or "").strip() or None
     contract_type = (form.get("contract_type", ["FRAMEWORK"])[0] or "FRAMEWORK").strip()
     billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip()
     recurring_fee_raw = (form.get("recurring_fee", [""])[0] or "").strip()
@@ -1452,24 +1534,30 @@ def handle_contract_update_post(handler):
         except ValueError:
             pass
 
-    renewal_type = (form.get("renewal_type", ["MANUAL"])[0] or "MANUAL").strip().upper()
-    if renewal_type not in ("MANUAL", "AUTO", "NONE"):
-        renewal_type = "MANUAL"
+    if contract_type == "STANDALONE" and billing_type == "RECURRING":
+        renewal_type = (form.get("renewal_type", ["MANUAL"])[0] or "MANUAL").strip().upper()
+        if renewal_type not in ("MANUAL", "AUTO", "NONE"):
+            renewal_type = "MANUAL"
 
-    renewal_notice_days_raw = (form.get("renewal_notice_days", ["60"])[0] or "60").strip()
-    try:
-        renewal_notice_days = int(renewal_notice_days_raw)
-        if renewal_notice_days <= 0:
+        renewal_notice_days_raw = (form.get("renewal_notice_days", ["60"])[0] or "60").strip()
+        try:
+            renewal_notice_days = int(renewal_notice_days_raw)
+            if renewal_notice_days <= 0:
+                renewal_notice_days = 60
+        except ValueError:
             renewal_notice_days = 60
-    except ValueError:
+
+        renewal_period_months_raw = (form.get("renewal_period_months", [""])[0] or "").strip()
+        renewal_period_months = None
+        if renewal_period_months_raw.isdigit():
+            renewal_period_months = int(renewal_period_months_raw)
+
+        renewal_note = (form.get("renewal_note", [""])[0] or "").strip() or None
+    else:
+        renewal_type = "NONE"
         renewal_notice_days = 60
-
-    renewal_period_months_raw = (form.get("renewal_period_months", [""])[0] or "").strip()
-    renewal_period_months = None
-    if renewal_period_months_raw.isdigit():
-        renewal_period_months = int(renewal_period_months_raw)
-
-    renewal_note = (form.get("renewal_note", [""])[0] or "").strip() or None
+        renewal_period_months = None
+        renewal_note = None
 
     if not buyer_id.isdigit() or not seller_id.isdigit():
         send_html(handler, layout("Error", "<div class='card danger'>Invalid Buyer/Seller Vendor ID</div>"), status=400)
@@ -1479,10 +1567,25 @@ def handle_contract_update_post(handler):
     try:
         cur = conn.cursor()
 
-        row = cur.execute("SELECT id FROM contracts WHERE id=?", (int(cid),)).fetchone()
+        row = cur.execute("SELECT id, contract_type FROM contracts WHERE id=?", (int(cid),)).fetchone()
         if not row:
             send_html(handler, layout("Not Found", f"<div class='card'>Contract ID={cid} not found</div>"), status=404)
             return
+
+        old_c_type = (row["contract_type"] or "FRAMEWORK").upper()
+        if contract_type == "STANDALONE" and old_c_type == "FRAMEWORK":
+            annex_cnt_row = cur.execute("SELECT COUNT(*) AS cnt FROM contract_annexes WHERE contract_id=? AND is_active=1", (int(cid),)).fetchone()
+            annex_cnt = annex_cnt_row["cnt"] if annex_cnt_row else 0
+            if annex_cnt > 0:
+                send_html(handler, layout("Error", f"<div class='card danger'>Cannot change contract structure to Standalone because it already has {annex_cnt} active annex(es). Please delete or deactivate the annexes before converting.</div>"), status=400)
+                return
+
+        if contract_type == "FRAMEWORK" and old_c_type == "STANDALONE":
+            ms_cnt_row = cur.execute("SELECT COUNT(*) AS cnt FROM contract_milestones WHERE contract_id=? AND annex_id IS NULL", (int(cid),)).fetchone()
+            ms_cnt = ms_cnt_row["cnt"] if ms_cnt_row else 0
+            if ms_cnt > 0:
+                send_html(handler, layout("Error", f"<div class='card danger'>Cannot change contract structure to Framework because it already has {ms_cnt} direct milestone(s). A Framework agreement cannot hold direct payment milestones; please remove or reassign the milestones first.</div>"), status=400)
+                return
 
         b_ok = cur.execute("SELECT 1 FROM vendors WHERE id=? AND is_active=1 AND purchasing=1", (int(buyer_id),)).fetchone()
         s_ok = cur.execute("SELECT 1 FROM vendors WHERE id=? AND is_active=1 AND purchasing=0", (int(seller_id),)).fetchone()
@@ -1496,6 +1599,7 @@ def handle_contract_update_post(handler):
                 seller_vendor_id=?,
                 framework_no=?,
                 framework_name=?,
+                contract_summary=?,
                 contract_value=?,
                 start_date=?,
                 end_date=?,
@@ -1509,7 +1613,7 @@ def handle_contract_update_post(handler):
                 renewal_note=?,
                 updated_at=?
             WHERE id=?
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), int(cid)))
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_summary, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), int(cid)))
         log_action(cur, "UPDATE_CONTRACT", "contracts", int(cid), f"Updated contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type}, Renewal: {renewal_type})")
         conn.commit()
     finally:
@@ -1536,9 +1640,16 @@ def handle_contract_renew_post(handler):
     conn = db_connect()
     try:
         cur = conn.cursor()
-        row = cur.execute("SELECT id, framework_no, framework_name, start_date, end_date, renewal_note FROM contracts WHERE id=?", (int(cid),)).fetchone()
+        row = cur.execute("SELECT id, framework_no, framework_name, start_date, end_date, contract_type, billing_type, renewal_type, renewal_note FROM contracts WHERE id=?", (int(cid),)).fetchone()
         if not row:
             send_html(handler, layout("Not Found", f"<div class='card'>Contract ID={cid} not found</div>"), status=404)
+            return
+
+        # Ràng buộc ma trận: Chỉ được gia hạn cho Standalone có billing_type là RECURRING
+        c_type = (row["contract_type"] or "FRAMEWORK").strip().upper()
+        b_type = (row["billing_type"] or "").strip().upper()
+        if c_type != "STANDALONE" or b_type != "RECURRING":
+            send_html(handler, layout("Error", "<div class='card danger'>Contract renewal is only allowed for Standalone contracts with RECURRING billing type.</div>"), status=400)
             return
 
         old_end_date = row["end_date"] or "None"
@@ -1646,14 +1757,17 @@ def handle_annex_create_post(handler):
     conn = db_connect()
     try:
         cur = conn.cursor()
-        row = cur.execute("SELECT id FROM contracts WHERE id=? AND is_active=1", (int(contract_id),)).fetchone()
+        row = cur.execute("SELECT id, framework_no, contract_type FROM contracts WHERE id=? AND is_active=1", (int(contract_id),)).fetchone()
         if not row:
             send_html(handler, layout("Error", "<div class='card danger'>Contract does not exist or has been deleted</div>"), status=400)
             return
 
-        # Get contract framework no for log
-        c_row = cur.execute("SELECT framework_no FROM contracts WHERE id=?", (int(contract_id),)).fetchone()
-        c_name = c_row["framework_no"] if c_row else f"ID {contract_id}"
+        c_type = (row["contract_type"] or "FRAMEWORK").upper()
+        if c_type != "FRAMEWORK":
+            send_html(handler, layout("Error", "<div class='card danger'>Cannot add annex to a Standalone contract. Annexes are only permitted for Framework Agreements.</div>"), status=400)
+            return
+
+        c_name = row["framework_no"] if row["framework_no"] else f"ID {contract_id}"
 
         cur.execute("""
             INSERT INTO contract_annexes (
@@ -2386,8 +2500,8 @@ def page_contract_references(vendor_id="", contract_id="", annex_id="", month=""
           <label style="font-weight: 600; font-size: 13px; color: var(--text-secondary); display: block; margin-bottom: 6px;">Sent MGS</label>
           <select name="sent_mgs" style="width: 100%; padding: 8px 12px; border-radius: 6px; border: 1px solid var(--border); font-size: 13px;">
             <option value="">-- all --</option>
-            <option value="yes" {"selected" if sent_mgs == "yes" else ""}>Sent (Đã gửi)</option>
-            <option value="no" {"selected" if sent_mgs == "no" else ""}>Not Sent (Chưa gửi)</option>
+            <option value="yes" {"selected" if sent_mgs == "yes" else ""}>Sent</option>
+            <option value="no" {"selected" if sent_mgs == "no" else ""}>Not Sent</option>
           </select>
         </div>
         <div style="display: flex; gap: 8px; margin-top: 8px;">
@@ -2715,7 +2829,7 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
         for s in staff_rows:
             unused_h, p_link = get_staff_previous_unused_leave(cur, s["id"], default_jdate, exclude_link_id=link_id)
             if unused_h > 0:
-                p_annex = (p_link["annex_name"] if p_link and "annex_name" in p_link.keys() and p_link["annex_name"] else "Phụ lục trước")
+                p_annex = (p_link["annex_name"] if p_link and "annex_name" in p_link.keys() and p_link["annex_name"] else "Previous Annex")
                 prev_leave_data[str(s["id"])] = {
                     "hours": round(unused_h, 1),
                     "days": round(unused_h / 8.0, 2),
@@ -2888,8 +3002,8 @@ def page_contract_assign_staff(contract_id: int, annex_id: int | None = None, li
         if (sid && PREV_UNUSED_LEAVE && PREV_UNUSED_LEAVE[sid] && PREV_UNUSED_LEAVE[sid].hours > 0) {
           const p = PREV_UNUSED_LEAVE[sid];
           box.innerHTML = `<div style="font-size:10px; color:#0b57d0; background:#e8f0fe; padding:2px 4px; border-radius:3px; line-height:1.2;">
-            💡 ${p.annex_name} còn dư <b>${p.hours}h</b> (${p.days}d)
-            <a href="javascript:void(0)" onclick="setCarriedOver(this, ${p.hours})" style="font-weight:bold; color:#1a73e8; text-decoration:underline; margin-left:3px;">[Chuyển tiếp]</a>
+            💡 ${p.annex_name} remaining: <b>${p.hours}h</b> (${p.days}d)
+            <a href="javascript:void(0)" onclick="setCarriedOver(this, ${p.hours})" style="font-weight:bold; color:#1a73e8; text-decoration:underline; margin-left:3px;">[Carry Over]</a>
           </div>`;
         } else {
           box.innerHTML = "";

@@ -332,8 +332,8 @@ def page_unittest_runner(handler):
           <tr style="background: #f8fafc; border-bottom: 1px solid var(--border);">
             <th style="width: 140px; text-align: left; padding-left: 12px;">Class Name</th>
             <th style="text-align: left; width: 180px;">Test Suite</th>
-            <th style="text-align: left; width: 280px;">Chi tiết {total_test_cases} Test Cases (Test Methods)</th>
-            <th style="text-align: left; width: 260px;">Trình tự thực hiện (Execution Steps)</th>
+            <th style="text-align: left; width: 280px;">{total_test_cases} Test Cases Details (Test Methods)</th>
+            <th style="text-align: left; width: 260px;">Execution Steps</th>
             <th style="text-align: left; width: 180px;">Expected Result</th>
             <th style="width: 100px; text-align: center;">Status</th>
             <th style="width: 80px; text-align: center;">Action</th>

@@ -3080,6 +3080,33 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         self.assertIn("FPT SOFTWARE", html_rec)
         self.assertIn("15,000,000 VND", html_rec)
         self.assertIn("Commitment for 2026-11", html_rec)
+        self.assertIn("📥 Import Invoice", html_rec)
+        self.assertIn("billing_type=RECURRING", html_rec)
+
+        # Test Vendor filter on Recurring dashboard
+        html_by_vendor = payments.page_payments_recurring(month="2026-11", vendor_id=str(self.seller_id))
+        self.assertIn("INTERNET-VNPT-2026", html_by_vendor)
+        html_other_vendor = payments.page_payments_recurring(month="2026-11", vendor_id="99999")
+        self.assertNotIn("INTERNET-VNPT-2026", html_other_vendor)
+
+        # Test Fee Reconciliation badge
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO invoices (
+                shdon, tg_tttbso, nlap, seller_mst, seller_name, contract_no, service_year, service_month, created_at, updated_at
+            ) VALUES ('INV-REC-01', 15000000.0, '2026-11-05', '0101234567', 'FPT SOFTWARE', 'INTERNET-VNPT-2026', 2026, 11, datetime('now'), datetime('now'))
+        """)
+        rec_inv_id = cur.lastrowid
+        self.conn.commit()
+
+        html_rec_matched = payments.page_payments_recurring(month="2026-11")
+        self.assertIn("✓ Matched Fee", html_rec_matched)
+
+        # Update invoice amount to 16,500,000 VND (mismatch +1,500,000)
+        cur.execute("UPDATE invoices SET tg_tttbso = 16500000.0 WHERE id = ?", (rec_inv_id,))
+        self.conn.commit()
+        html_rec_mismatch = payments.page_payments_recurring(month="2026-11")
+        self.assertIn("⚠️ Mismatch: +1,500,000 VND", html_rec_mismatch)
 
         # 4. Test Recurring cashout handler (Pay)
         body_cashout = (
@@ -3105,6 +3132,21 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
 
         payout_cancelled = self.conn.execute("SELECT * FROM recurring_payouts WHERE contract_id=? AND service_month='2026-11'", (c["id"],)).fetchone()
         self.assertIsNone(payout_cancelled)
+
+        # 6. Test Expiration / Validity filtering for recurring payments
+        # Contract ends on 2026-12-31. In month 2027-01, it must NOT appear.
+        html_2027_01 = payments.page_payments_recurring(month="2027-01")
+        self.assertNotIn("INTERNET-VNPT-2026", html_2027_01)
+
+        # Attempting to cashout for month 2027-01 must be rejected with 400
+        body_invalid_month = (
+            f"contract_id={c['id']}&service_month=2027-01&amount=15000000"
+            f"&cashout_date=2027-01-10&action=pay"
+        ).encode()
+        h_inv = MockHandler(body=body_invalid_month, headers={"content-length": str(len(body_invalid_month))})
+        payments.handle_recurring_cashout_post(h_inv)
+        self.assertEqual(h_inv.response_status, 400)
+        self.assertIn("Contract expired on", h_inv.get_output_text())
 
     def test_fixed_price_dashboard_view(self):
         import payments
@@ -3134,13 +3176,50 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         self.assertIn("Delivery", html_fp)
         self.assertIn("Total Milestones Committed", html_fp)
 
+        # Overdue check: Planned date 2026-06-30 is in the past, status is PENDING -> must show Overdue
+        self.assertIn("Overdue", html_fp)
+        html_overdue = payments.page_payments_fixed_price(status="OVERDUE")
+        self.assertIn("Phase 1 Delivery", html_overdue)
+
+        # 3. Test Invoice Reconciliation on Fixed Price
+        # Create an invoice linked to this milestone with matching amount (200,000,000 VND)
+        cur.execute("""
+            INSERT INTO invoices (
+                shdon, tg_tttbso, nlap, seller_mst, seller_name, contract_no, milestone_id, created_at, updated_at
+            ) VALUES ('INV-MATCH-01', 200000000.0, '2026-07-01', '0101234567', 'FPT SOFTWARE', 'FP-DASH-01', 1, datetime('now'), datetime('now'))
+        """)
+        inv_id = cur.lastrowid
+        cur.execute("UPDATE contract_milestones SET invoice_id = ?, status = 'INVOICED' WHERE id = 1", (inv_id,))
+        self.conn.commit()
+
+        html_matched = payments.page_payments_fixed_price()
+        self.assertIn("✓ Matched", html_matched)
+        self.assertIn("INV-MATCH-01", html_matched)
+
+        # Update invoice amount to mismatch (220,000,000 VND -> mismatch +20,000,000)
+        cur.execute("UPDATE invoices SET tg_tttbso = 220000000.0 WHERE id = ?", (inv_id,))
+        self.conn.commit()
+
+        html_mismatch = payments.page_payments_fixed_price()
+        self.assertIn("⚠️ Mismatch: +20,000,000 VND", html_mismatch)
+
     def test_payments_server_routes(self):
+        # Test GET /payments (Dashboard route displaying T&M Cash-out)
+        stub_pay = StubHandler("/payments", method="GET")
+        stub_pay.do_GET()
+        out_pay = stub_pay.get_output_text()
+        self.assertIn("Fiscal Year Cash-out Overview", out_pay)
+        self.assertIn("📊 Dashboard", out_pay)
+        self.assertIn("/payments/fixed-price", out_pay)
+        self.assertIn("/payments/recurring", out_pay)
+
         # Test GET /payments/fixed-price via server Handler
         stub_fp = StubHandler("/payments/fixed-price", method="GET")
         stub_fp.do_GET()
         out_fp = stub_fp.get_output_text()
         self.assertIn("Fixed Price Payments", out_fp)
         self.assertIn("Milestones Committed", out_fp)
+        self.assertIn("📊 Dashboard", out_fp)
 
         # Test GET /payments/recurring via server Handler
         stub_rec = StubHandler("/payments/recurring", method="GET")
@@ -3148,6 +3227,112 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         out_rec = stub_rec.get_output_text()
         self.assertIn("Recurring Services", out_rec)
         self.assertIn("Commitment for", out_rec)
+        self.assertIn("📊 Dashboard", out_rec)
+
+    def test_payments_dashboard_three_tabs_and_cashout_matrix(self):
+        import attendance
+
+        cur = self.conn.cursor()
+
+        # 1. Setup a Fixed Price contract with milestones
+        cur.execute("""
+            INSERT INTO contracts (
+              buyer_vendor_id, seller_vendor_id, framework_no, framework_name,
+              contract_type, billing_type, contract_value, is_active, created_at, updated_at
+            ) VALUES (?, ?, 'FP-MATRIX-01', 'Core Banking Upgrade', 'STANDALONE', 'FIXED_PRICE', 300000000, 1, datetime('now'), datetime('now'))
+        """, (self.buyer_id, self.seller_id))
+        fp_c_id = cur.lastrowid
+
+        # Milestone 1: planned 2026-06-15, cashed out 2026-06-25 (Q1 Jun)
+        cur.execute("""
+            INSERT INTO contract_milestones (
+              contract_id, milestone_name, milestone_type, percentage, amount, planned_date, cashout_date, status, created_at, updated_at
+            ) VALUES (?, 'Milestone 1 Advance', 'ADVANCE', 30.0, 90000000, '2026-06-15', '2026-06-25', 'PAID', datetime('now'), datetime('now'))
+        """, (fp_c_id,))
+
+        # Milestone 2: planned 2026-11-20, no cashout yet (Q3 Nov)
+        cur.execute("""
+            INSERT INTO contract_milestones (
+              contract_id, milestone_name, milestone_type, percentage, amount, planned_date, cashout_date, status, created_at, updated_at
+            ) VALUES (?, 'Milestone 2 Delivery', 'DELIVERY', 70.0, 210000000, '2026-11-20', '', 'PENDING', datetime('now'), datetime('now'))
+        """, (fp_c_id,))
+
+        # 2. Setup a Recurring contract with payout
+        cur.execute("""
+            INSERT INTO contracts (
+              buyer_vendor_id, seller_vendor_id, framework_no, framework_name,
+              contract_type, billing_type, recurring_fee, recurring_period, start_date, end_date, is_active, created_at, updated_at
+            ) VALUES (?, ?, 'REC-MATRIX-01', 'Cloud Leased Line', 'STANDALONE', 'RECURRING', 15000000, 'MONTHLY', '2026-04-01', '2027-03-31', 1, datetime('now'), datetime('now'))
+        """, (self.buyer_id, self.seller_id))
+        rec_c_id = cur.lastrowid
+
+        # Payout for 2026-05, cashed out 2026-06-05
+        cur.execute("""
+            INSERT INTO recurring_payouts (
+              contract_id, service_month, amount, status, cashout_date, created_at, updated_at
+            ) VALUES (?, '2026-05', 15000000, 'PAID', '2026-06-05', datetime('now'), datetime('now'))
+        """, (rec_c_id,))
+        self.conn.commit()
+
+        # 3. Test Dashboard Tab 1: Time & Material (T&M) default
+        stub_tm = StubHandler("/payments?type=tm&fy=2026", method="GET")
+        stub_tm.do_GET()
+        html_tm = stub_tm.get_output_text()
+        self.assertIn("Time & Material (T&M)", html_tm)
+        self.assertIn("Fixed Price (Milestones)", html_tm)
+        self.assertIn("Recurring Services (Internet / SaaS)", html_tm)
+        self.assertIn("Framework / Annex", html_tm)
+        self.assertIn("Total FY Payroll", html_tm)
+        self.assertIn("Total FY Cash-out", html_tm)
+        self.assertIn("/attendance", html_tm)
+
+        # 4. Test Dashboard Tab 2: Fixed Price (Milestones)
+        stub_fp = StubHandler("/payments?type=fixed_price&fy=2026", method="GET")
+        stub_fp.do_GET()
+        html_fp = stub_fp.get_output_text()
+        self.assertIn("Fiscal Year Cash-out Overview - FY26 (Fixed Price)", html_fp)
+        self.assertIn("Contract / Project", html_fp)
+        self.assertIn("Total FY Planned", html_fp)
+        self.assertIn("Total FY Cash-out", html_fp)
+        self.assertIn("FP-MATRIX-01", html_fp)
+        self.assertIn("Core Banking Upgrade", html_fp)
+        self.assertIn("90,000,000", html_fp) # Milestone 1 planned & cashout in Jun
+        self.assertIn("210,000,000", html_fp) # Milestone 2 planned in Nov
+        self.assertIn("/payments/fixed-price", html_fp)
+
+        # Tooltip breakdown check for Fixed Price
+        self.assertIn("showCoTip", html_fp)
+        self.assertIn("Milestone: Milestone 1 Advance", html_fp)
+
+        # 5. Test Dashboard Tab 3: Recurring Services
+        stub_rec = StubHandler("/payments?type=recurring&fy=2026", method="GET")
+        stub_rec.do_GET()
+        html_rec = stub_rec.get_output_text()
+        self.assertIn("Fiscal Year Cash-out Overview - FY26 (Recurring Services)", html_rec)
+        self.assertIn("Contract / Service", html_rec)
+        self.assertIn("Total FY Fee", html_rec)
+        self.assertIn("Total FY Cash-out", html_rec)
+        self.assertIn("REC-MATRIX-01", html_rec)
+        self.assertIn("Cloud Leased Line", html_rec)
+        self.assertIn("15,000,000", html_rec)
+        self.assertIn("/payments/recurring", html_rec)
+
+        # 6. Test CSV Exports for Fixed Price & Recurring
+        h_fp_exp = StubHandler("/payments/export?type=fixed_price&fy=2026", method="GET")
+        h_fp_exp.do_GET()
+        csv_fp = h_fp_exp.get_output_text()
+        self.assertIn("Fixed Price Milestones", csv_fp)
+        self.assertIn("Planned", csv_fp)
+        self.assertIn("Cash-out", csv_fp)
+        self.assertIn("FP-MATRIX-01", csv_fp)
+
+        h_rec_exp = StubHandler("/payments/export?type=recurring&fy=2026", method="GET")
+        h_rec_exp.do_GET()
+        csv_rec = h_rec_exp.get_output_text()
+        self.assertIn("Recurring Services", csv_rec)
+        self.assertIn("Monthly Fee", csv_rec)
+        self.assertIn("Cash-out", csv_rec)
+        self.assertIn("REC-MATRIX-01", csv_rec)
 
 
 class TestMultiModelInvoiceImport(BaseTestCase):
@@ -3504,55 +3689,71 @@ class TestContractRenewal(BaseTestCase):
         from datetime import date
         today = date(2026, 6, 1)
 
-        # Active contract (> 60 days left)
-        r_active = {"end_date": "2026-12-31", "renewal_type": "MANUAL", "renewal_notice_days": 60}
+        # Active recurring contract (> 60 days left) - STANDALONE
+        r_active = {"end_date": "2026-12-31", "contract_type": "STANDALONE", "billing_type": "RECURRING", "renewal_type": "MANUAL", "renewal_notice_days": 60}
         st_active = contracts.get_contract_renewal_status(r_active, today_date=today)
         self.assertEqual(st_active["status"], "ACTIVE")
         self.assertGreater(st_active["days_left"], 60)
 
-        # Renewal Due contract (<= 60 days left, MANUAL)
-        r_due = {"end_date": "2026-07-15", "renewal_type": "MANUAL", "renewal_notice_days": 60}
+        # Renewal Due recurring contract (<= 60 days left, MANUAL) - STANDALONE
+        r_due = {"end_date": "2026-07-15", "contract_type": "STANDALONE", "billing_type": "RECURRING", "renewal_type": "MANUAL", "renewal_notice_days": 60}
         st_due = contracts.get_contract_renewal_status(r_due, today_date=today)
         self.assertEqual(st_due["status"], "RENEWAL_DUE")
         self.assertEqual(st_due["days_left"], 44)
         self.assertIn("Renewal Due", st_due["badge"])
 
-        # Expiring soon (<= 60 days left, NONE)
-        r_none = {"end_date": "2026-07-15", "renewal_type": "NONE", "renewal_notice_days": 60}
-        st_none = contracts.get_contract_renewal_status(r_none, today_date=today)
-        self.assertEqual(st_none["status"], "EXPIRING_SOON")
-        self.assertIn("Ending soon", st_none["badge"])
+        # FRAMEWORK recurring contract: NEVER enters RENEWAL_DUE because renewal is N/A for FRAMEWORK
+        # 1. 44 days left (> 30 days notice for general contracts) -> ACTIVE, not RENEWAL_DUE
+        r_fw = {"end_date": "2026-07-15", "contract_type": "FRAMEWORK", "billing_type": "RECURRING", "renewal_type": "MANUAL", "renewal_notice_days": 60}
+        st_fw = contracts.get_contract_renewal_status(r_fw, today_date=today)
+        self.assertEqual(st_fw["status"], "ACTIVE")
+        self.assertNotEqual(st_fw["status"], "RENEWAL_DUE")
+
+        # 2. 19 days left (<= 30 days notice) -> EXPIRING_SOON, not RENEWAL_DUE
+        r_fw_soon = {"end_date": "2026-06-20", "contract_type": "FRAMEWORK", "billing_type": "RECURRING", "renewal_type": "MANUAL", "renewal_notice_days": 60}
+        st_fw_soon = contracts.get_contract_renewal_status(r_fw_soon, today_date=today)
+        self.assertEqual(st_fw_soon["status"], "EXPIRING_SOON")
+        self.assertNotEqual(st_fw_soon["status"], "RENEWAL_DUE")
+        self.assertIn("Ending soon", st_fw_soon["badge"])
+
+        # Non-recurring contract (TM / Fixed Price): NEVER enters RENEWAL_DUE even if expiring soon
+        r_tm = {"end_date": "2026-06-20", "contract_type": "STANDALONE", "billing_type": "TM", "renewal_type": "MANUAL", "renewal_notice_days": 60}
+        st_tm = contracts.get_contract_renewal_status(r_tm, today_date=today)
+        self.assertEqual(st_tm["status"], "EXPIRING_SOON")
+        self.assertNotEqual(st_tm["status"], "RENEWAL_DUE")
+        self.assertIn("Ending soon", st_tm["badge"])
 
         # Expired contract (< 0 days)
-        r_exp = {"end_date": "2026-05-15", "renewal_type": "MANUAL", "renewal_notice_days": 60}
+        r_exp = {"end_date": "2026-05-15", "contract_type": "STANDALONE", "billing_type": "RECURRING", "renewal_type": "MANUAL", "renewal_notice_days": 60}
         st_exp = contracts.get_contract_renewal_status(r_exp, today_date=today)
         self.assertEqual(st_exp["status"], "EXPIRED")
         self.assertEqual(st_exp["days_left"], -17)
 
         # No expiry contract
-        r_no_exp = {"end_date": None, "renewal_type": "MANUAL"}
+        r_no_exp = {"end_date": None, "contract_type": "STANDALONE", "billing_type": "RECURRING", "renewal_type": "MANUAL"}
         st_no_exp = contracts.get_contract_renewal_status(r_no_exp, today_date=today)
         self.assertEqual(st_no_exp["status"], "NO_EXPIRY")
 
     def test_contract_creation_defaults_and_custom_renewal(self):
-        # 1. Create with defaults
-        body_default = (
-            f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
-            f"framework_no=MHB/DEF/01&framework_name=Default+Renewal&start_date=2026-01-01&end_date=2026-12-31"
+        # 1. Create STANDALONE RECURRING contract with defaults -> defaults renewal_type to MANUAL and notice_days to 60
+        body_rec_default = (
+            f"contract_type=STANDALONE&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/DEF/01&framework_name=Default+Renewal&billing_type=RECURRING&start_date=2026-01-01&end_date=2026-12-31"
         ).encode()
-        h_def = MockHandler(body=body_default, headers={"content-length": str(len(body_default))})
+        h_def = MockHandler(body=body_rec_default, headers={"content-length": str(len(body_rec_default))})
         contracts.handle_contract_create_post(h_def)
         self.assertEqual(h_def.response_status, 302)
 
         c_def = self.conn.execute("SELECT * FROM contracts WHERE framework_no='MHB/DEF/01'").fetchone()
         self.assertIsNotNone(c_def)
+        self.assertEqual(c_def["contract_type"], "STANDALONE")
         self.assertEqual(c_def["renewal_type"], "MANUAL")
         self.assertEqual(c_def["renewal_notice_days"], 60)
 
-        # 2. Create with custom renewal policy
+        # 2. Create STANDALONE RECURRING contract with custom renewal policy
         body_custom = (
-            f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
-            f"framework_no=MHB/AUTO/02&framework_name=Auto+Renewal&start_date=2026-01-01&end_date=2026-12-31&"
+            f"contract_type=STANDALONE&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/AUTO/02&framework_name=Auto+Renewal&billing_type=RECURRING&start_date=2026-01-01&end_date=2026-12-31&"
             f"renewal_type=AUTO&renewal_notice_days=45&renewal_period_months=12&renewal_note=Automatic+annual+extension"
         ).encode()
         h_custom = MockHandler(body=body_custom, headers={"content-length": str(len(body_custom))})
@@ -3566,45 +3767,115 @@ class TestContractRenewal(BaseTestCase):
         self.assertEqual(c_custom["renewal_period_months"], 12)
         self.assertEqual(c_custom["renewal_note"], "Automatic annual extension")
 
+        # 3. Create FRAMEWORK contract with RECURRING -> renewal_type is forced to NONE by matrix rule
+        body_fw = (
+            f"contract_type=FRAMEWORK&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/FW/03&framework_name=Framework+Contract&billing_type=RECURRING&renewal_type=AUTO"
+        ).encode()
+        h_fw = MockHandler(body=body_fw, headers={"content-length": str(len(body_fw))})
+        contracts.handle_contract_create_post(h_fw)
+        self.assertEqual(h_fw.response_status, 302)
+
+        c_fw = self.conn.execute("SELECT * FROM contracts WHERE framework_no='MHB/FW/03'").fetchone()
+        self.assertEqual(c_fw["renewal_type"], "NONE")
+
+        # 4. Create STANDALONE non-recurring (TM) contract -> renewal_type is forced to NONE
+        body_tm = (
+            f"contract_type=STANDALONE&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/TM/03&framework_name=TM+Contract&billing_type=TM&renewal_type=AUTO"
+        ).encode()
+        h_tm = MockHandler(body=body_tm, headers={"content-length": str(len(body_tm))})
+        contracts.handle_contract_create_post(h_tm)
+        self.assertEqual(h_tm.response_status, 302)
+
+        c_tm = self.conn.execute("SELECT * FROM contracts WHERE framework_no='MHB/TM/03'").fetchone()
+        self.assertEqual(c_tm["renewal_type"], "NONE")
+
     def test_contract_update_renewal_policy(self):
+        # Create a dedicated STANDALONE RECURRING contract
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (framework_no, framework_name, buyer_vendor_id, seller_vendor_id, contract_type, billing_type, start_date, end_date, renewal_type, renewal_notice_days, is_active, created_at, updated_at)
+            VALUES ('MHB/SA/REC01', 'Standalone Rec', ?, ?, 'STANDALONE', 'RECURRING', '2025-01-01', '2026-12-31', 'MANUAL', 60, 1, '2025-01-01T00:00:00', '2025-01-01T00:00:00')
+        """, (self.buyer_id, self.seller_id))
+        standalone_id = cur.lastrowid
+        self.conn.commit()
+
         body_update = (
-            f"id={self.contract_id}&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
-            f"framework_no=MHB/FPT/2025/001&framework_name=Updated+Policy&start_date=2025-01-01&end_date=2026-12-31&"
+            f"id={standalone_id}&contract_type=STANDALONE&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/SA/REC01&framework_name=Updated+Policy&billing_type=RECURRING&start_date=2025-01-01&end_date=2026-12-31&"
             f"renewal_type=AUTO&renewal_notice_days=90&renewal_period_months=6&renewal_note=Updated+terms"
         ).encode()
         h_up = MockHandler(body=body_update, headers={"content-length": str(len(body_update))})
         contracts.handle_contract_update_post(h_up)
         self.assertEqual(h_up.response_status, 302)
 
-        c = self.conn.execute("SELECT * FROM contracts WHERE id=?", (self.contract_id,)).fetchone()
+        c = self.conn.execute("SELECT * FROM contracts WHERE id=?", (standalone_id,)).fetchone()
+        self.assertEqual(c["billing_type"], "RECURRING")
         self.assertEqual(c["renewal_type"], "AUTO")
         self.assertEqual(c["renewal_notice_days"], 90)
         self.assertEqual(c["renewal_period_months"], 6)
         self.assertEqual(c["renewal_note"], "Updated terms")
 
     def test_handle_contract_renew_post(self):
+        # Create a dedicated STANDALONE RECURRING contract
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (framework_no, framework_name, buyer_vendor_id, seller_vendor_id, contract_type, billing_type, start_date, end_date, renewal_type, renewal_notice_days, is_active, created_at, updated_at)
+            VALUES ('MHB/RENEW/01', 'Renewable Contract', ?, ?, 'STANDALONE', 'RECURRING', '2025-01-01', '2026-12-31', 'MANUAL', 60, 1, '2025-01-01T00:00:00', '2025-01-01T00:00:00')
+        """, (self.buyer_id, self.seller_id))
+        renew_cid = cur.lastrowid
+        self.conn.commit()
+
         # Initial end_date is 2026-12-31
         body_renew = (
-            f"id={self.contract_id}&new_end_date=2027-12-31&renewal_note=Extension+Annex+02&return_to=/contracts"
+            f"id={renew_cid}&new_end_date=2027-12-31&renewal_note=Extension+Annex+02&return_to=/contracts"
         ).encode()
         h_renew = MockHandler(body=body_renew, headers={"content-length": str(len(body_renew))})
         contracts.handle_contract_renew_post(h_renew)
         self.assertEqual(h_renew.response_status, 302)
 
-        c = self.conn.execute("SELECT * FROM contracts WHERE id=?", (self.contract_id,)).fetchone()
+        c = self.conn.execute("SELECT * FROM contracts WHERE id=?", (renew_cid,)).fetchone()
         self.assertEqual(c["end_date"], "2027-12-31")
         self.assertIsNotNone(c["last_renewed_at"])
         self.assertIn("Extension Annex 02", c["renewal_note"])
         self.assertIn("Renewed to 2027-12-31", c["renewal_note"])
 
         # Check audit log
-        audit = self.conn.execute("SELECT * FROM audit_logs WHERE record_id=? AND action='RENEW_CONTRACT'", (self.contract_id,)).fetchone()
+        audit = self.conn.execute("SELECT * FROM audit_logs WHERE record_id=? AND action='RENEW_CONTRACT'", (renew_cid,)).fetchone()
         self.assertIsNotNone(audit)
         self.assertIn("Renewed contract", audit["description"])
 
     def test_handle_contract_renew_validation(self):
+        # Create a STANDALONE TM contract
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (framework_no, framework_name, buyer_vendor_id, seller_vendor_id, contract_type, billing_type, start_date, end_date, renewal_type, renewal_notice_days, is_active, created_at, updated_at)
+            VALUES ('MHB/VAL/01', 'Validation Contract', ?, ?, 'STANDALONE', 'TM', '2025-01-01', '2026-12-31', 'NONE', 0, 1, '2025-01-01T00:00:00', '2025-01-01T00:00:00')
+        """, (self.buyer_id, self.seller_id))
+        val_cid = cur.lastrowid
+        self.conn.commit()
+
+        # 1. Reject renewal if contract is not RECURRING (e.g. TM)
+        body_tm = f"id={val_cid}&new_end_date=2027-12-31".encode()
+        h_tm = MockHandler(body=body_tm, headers={"content-length": str(len(body_tm))})
+        contracts.handle_contract_renew_post(h_tm)
+        self.assertEqual(h_tm.response_status, 400)
+        self.assertIn("Contract renewal is only allowed for Standalone contracts with RECURRING billing type", h_tm.get_output_text())
+
+        # 2. Reject renewal if contract is FRAMEWORK
+        body_fw = f"id={self.contract_id}&new_end_date=2027-12-31".encode()
+        h_fw = MockHandler(body=body_fw, headers={"content-length": str(len(body_fw))})
+        contracts.handle_contract_renew_post(h_fw)
+        self.assertEqual(h_fw.response_status, 400)
+        self.assertIn("Contract renewal is only allowed for Standalone contracts with RECURRING billing type", h_fw.get_output_text())
+
+        # Set val_cid to RECURRING for remaining validation tests
+        self.conn.execute("UPDATE contracts SET billing_type='RECURRING' WHERE id=?", (val_cid,))
+        self.conn.commit()
+
         # Missing new_end_date
-        body_bad = f"id={self.contract_id}&new_end_date=&renewal_note=Test".encode()
+        body_bad = f"id={val_cid}&new_end_date=&renewal_note=Test".encode()
         h_bad = MockHandler(body=body_bad, headers={"content-length": str(len(body_bad))})
         contracts.handle_contract_renew_post(h_bad)
         self.assertEqual(h_bad.response_status, 400)
@@ -3622,39 +3893,235 @@ class TestContractRenewal(BaseTestCase):
         self.assertEqual(h_nf.response_status, 404)
 
     def test_contract_list_and_renewal_ui(self):
-        # Set contract to expire in 10 days to trigger renewal due
         from datetime import date, timedelta
         soon = (date.today() + timedelta(days=10)).isoformat()
-        self.conn.execute("UPDATE contracts SET end_date=?, renewal_type='MANUAL', renewal_notice_days=60 WHERE id=?", (soon, self.contract_id))
+
+        # Insert a STANDALONE RECURRING contract expiring soon
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (framework_no, framework_name, buyer_vendor_id, seller_vendor_id, contract_type, billing_type, start_date, end_date, renewal_type, renewal_notice_days, is_active, created_at, updated_at)
+            VALUES ('MHB/UI/01', 'UI Contract', ?, ?, 'STANDALONE', 'RECURRING', '2025-01-01', ?, 'MANUAL', 60, 1, '2025-01-01T00:00:00', '2025-01-01T00:00:00')
+        """, (self.buyer_id, self.seller_id, soon))
+        ui_cid = cur.lastrowid
         self.conn.commit()
 
-        # View contracts list
+        # 1. When contract is STANDALONE RECURRING and expires soon: shows Renewal Due and Renew button
         html_list = contracts.page_contracts_list(return_to="/contracts")
         self.assertIn("Manual-Renew", html_list)
         self.assertIn("Renewal Due", html_list)
-        self.assertIn("openRenewalModal", html_list)
+        self.assertIn(f"openRenewalModal('{ui_cid}'", html_list)
 
-        # View contract edit form
-        c_row = self.conn.execute("SELECT * FROM contracts WHERE id=?", (self.contract_id,)).fetchone()
+        # View contract edit form for STANDALONE RECURRING contract
+        c_row = self.conn.execute("SELECT * FROM contracts WHERE id=?", (ui_cid,)).fetchone()
         html_edit = contracts.page_contract_form("edit", c_row, [])
         self.assertIn("Contract Renewal & Validity", html_edit)
-        self.assertIn("Renewal Policy", html_edit)
-        self.assertIn("Renewal Notice Period", html_edit)
+        self.assertIn("Recurring Renewal Policy", html_edit)
+        self.assertIn("Standalone / Direct Contract", html_edit)
+
+        # 2. When contract is STANDALONE TM (non-recurring): does NOT show Renewal Policy badge or Renew button
+        self.conn.execute("UPDATE contracts SET billing_type='TM', end_date=?, renewal_type='NONE' WHERE id=?", (soon, ui_cid))
+        self.conn.commit()
+
+        html_list_tm = contracts.page_contracts_list(return_to="/contracts")
+        self.assertNotIn(f"openRenewalModal('{ui_cid}'", html_list_tm)
+
+        # Set back to RECURRING with MANUAL policy for server route test
+        self.conn.execute("UPDATE contracts SET billing_type='RECURRING', renewal_type='MANUAL' WHERE id=?", (ui_cid,))
+        self.conn.commit()
 
         # Check server route GET /contracts with renewal filter
         stub = StubHandler("/contracts?renewal_type=MANUAL&renewal_due=1", method="GET")
         stub.do_GET()
         self.assertEqual(stub.response_status, 200)
-        self.assertIn("MHB/FPT/2025/001", stub.get_output_text())
+        self.assertIn("MHB/UI/01", stub.get_output_text())
 
         # Check server route POST /contract/renew
-        body_post = f"id={self.contract_id}&new_end_date=2028-06-30&renewal_note=Via+Server+Route".encode()
+        body_post = f"id={ui_cid}&new_end_date=2028-06-30&renewal_note=Via+Server+Route".encode()
         stub_post = StubHandler("/contract/renew", method="POST", headers={"content-length": str(len(body_post))}, body=body_post)
         stub_post.do_POST()
         self.assertEqual(stub_post.response_status, 302)
 
-        c_updated = self.conn.execute("SELECT end_date FROM contracts WHERE id=?", (self.contract_id,)).fetchone()
+        c_updated = self.conn.execute("SELECT end_date FROM contracts WHERE id=?", (ui_cid,)).fetchone()
         self.assertEqual(c_updated["end_date"], "2028-06-30")
+
+    def test_matrix_contract_structure_rules(self):
+        # Test 1: Transition from FRAMEWORK to STANDALONE blocked when active annexes exist
+        body_invalid_transition = (
+            f"id={self.contract_id}&contract_type=STANDALONE&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/FPT/2025/001&framework_name=Master+Agreement&billing_type=FIXED_PRICE"
+        ).encode()
+        h_fail = MockHandler(body=body_invalid_transition, headers={"content-length": str(len(body_invalid_transition))})
+        contracts.handle_contract_update_post(h_fail)
+        self.assertEqual(h_fail.response_status, 400)
+        self.assertIn("Cannot change contract structure to Standalone", h_fail.get_output_text())
+
+        # Test 2: Adding Annex to STANDALONE contract is rejected
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (framework_no, framework_name, buyer_vendor_id, seller_vendor_id, contract_type, billing_type, start_date, end_date, renewal_type, renewal_notice_days, is_active, created_at, updated_at)
+            VALUES ('MHB/SA/TEST01', 'Standalone Matrix Test', ?, ?, 'STANDALONE', 'FIXED_PRICE', '2025-01-01', '2025-12-31', 'NONE', 0, 1, '2025-01-01T00:00:00', '2025-01-01T00:00:00')
+        """, (self.buyer_id, self.seller_id))
+        standalone_id = cur.lastrowid
+        self.conn.commit()
+
+        body_annex = (
+            f"contract_id={standalone_id}&annex_no=ANX/INVALID/01&annex_name=Invalid+Annex&"
+            f"billing_type=FIXED_PRICE&start_date=2025-01-01&end_date=2025-06-30&value_ceiling=50000"
+        ).encode()
+        h_annex = MockHandler(body=body_annex, headers={"content-length": str(len(body_annex))})
+        contracts.handle_annex_create_post(h_annex)
+        self.assertEqual(h_annex.response_status, 400)
+        self.assertIn("Cannot add annex to a Standalone contract", h_annex.get_output_text())
+
+        # Test 3: GET /annex/new for STANDALONE contract is rejected by server route
+        stub_new = StubHandler(f"/annex/new?contract_id={standalone_id}", method="GET")
+        stub_new.do_GET()
+        self.assertEqual(stub_new.response_status, 400)
+        self.assertIn("Cannot add annex to a Standalone contract", stub_new.get_output_text())
+
+        # Test 4: Transition from STANDALONE to FRAMEWORK blocked when direct milestones exist
+        cur.execute("""
+            INSERT INTO contract_milestones (contract_id, annex_id, milestone_name, milestone_type, percentage, amount, planned_date, status, created_at, updated_at)
+            VALUES (?, NULL, 'Milestone 1', 'ADVANCE', 50.0, 50000000, '2025-06-30', 'PENDING', '2025-01-01', '2025-01-01')
+        """, (standalone_id,))
+        self.conn.commit()
+
+        body_sa_to_fw = (
+            f"id={standalone_id}&contract_type=FRAMEWORK&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/SA/TEST01&framework_name=Converted+Framework&billing_type=FIXED_PRICE"
+        ).encode()
+        h_ms_fail = MockHandler(body=body_sa_to_fw, headers={"content-length": str(len(body_sa_to_fw))})
+        contracts.handle_contract_update_post(h_ms_fail)
+        self.assertEqual(h_ms_fail.response_status, 400)
+        self.assertIn("Cannot change contract structure to Framework because it already has 1 direct milestone", h_ms_fail.get_output_text())
+
+        # When milestone is removed, transition to FRAMEWORK is permitted
+        cur.execute("DELETE FROM contract_milestones WHERE contract_id=?", (standalone_id,))
+        self.conn.commit()
+
+        h_ms_ok = MockHandler(body=body_sa_to_fw, headers={"content-length": str(len(body_sa_to_fw))})
+        contracts.handle_contract_update_post(h_ms_ok)
+        self.assertEqual(h_ms_ok.response_status, 302)
+        c_fw_check = self.conn.execute("SELECT contract_type FROM contracts WHERE id=?", (standalone_id,)).fetchone()
+        self.assertEqual(c_fw_check["contract_type"], "FRAMEWORK")
+
+    def test_contract_summary_crud_and_search(self):
+        from urllib.parse import quote_plus
+
+        # 1. Create contract with contract_summary
+        summary_text = "Annual cleaning service for 4th floor Hanoi office. Mon-Fri schedule."
+        body_create = (
+            f"contract_type=STANDALONE&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/GA/CLEAN-01&framework_name=Office+Cleaning&billing_type=RECURRING&"
+            f"contract_summary={quote_plus(summary_text)}&start_date=2026-01-01&end_date=2026-12-31"
+        ).encode()
+        h_create = MockHandler(body=body_create, headers={"content-length": str(len(body_create))})
+        contracts.handle_contract_create_post(h_create)
+        self.assertEqual(h_create.response_status, 302)
+
+        c = self.conn.execute("SELECT * FROM contracts WHERE framework_no='MHB/GA/CLEAN-01'").fetchone()
+        self.assertIsNotNone(c)
+        self.assertEqual(c["contract_summary"], summary_text)
+
+        # 2. Update contract_summary
+        updated_summary = "Updated cleaning service: 4th floor and 5th floor meeting rooms."
+        body_update = (
+            f"id={c['id']}&contract_type=STANDALONE&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/GA/CLEAN-01&framework_name=Office+Cleaning+Extended&billing_type=RECURRING&"
+            f"contract_summary={quote_plus(updated_summary)}&start_date=2026-01-01&end_date=2026-12-31"
+        ).encode()
+        h_update = MockHandler(body=body_update, headers={"content-length": str(len(body_update))})
+        contracts.handle_contract_update_post(h_update)
+        self.assertEqual(h_update.response_status, 302)
+
+        c_updated = self.conn.execute("SELECT * FROM contracts WHERE id=?", (c["id"],)).fetchone()
+        self.assertEqual(c_updated["contract_summary"], updated_summary)
+
+        # 3. Form rendering includes contract_summary in textarea
+        form_html = contracts.page_contract_form("edit", c_updated, [])
+        self.assertIn("Contract Summary / Scope Notes", form_html)
+        self.assertIn(updated_summary, form_html)
+
+        # 4. Contracts list includes contract_summary preview
+        list_html = contracts.page_contracts_list(return_to="/contracts")
+        self.assertIn(updated_summary, list_html)
+
+        # 5. Search query matching words in contract_summary
+        search_html = contracts.page_contracts_list(q="meeting rooms", return_to="/contracts")
+        self.assertIn("MHB/GA/CLEAN-01", search_html)
+
+    def test_recurring_service_month_expiration_validation(self):
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (
+                framework_no, framework_name, buyer_vendor_id, seller_vendor_id,
+                contract_type, billing_type, start_date, end_date, recurring_fee, recurring_period,
+                renewal_type, renewal_notice_days, is_active, created_at, updated_at
+            )
+            VALUES ('MHB/NET/2026', 'Internet Service 2026', ?, ?, 'STANDALONE', 'RECURRING', '2026-01-01', '2026-12-31', 15000000, 'MONTHLY', 'MANUAL', 60, 1, '2026-01-01', '2026-01-01')
+        """, (self.buyer_id, self.seller_id))
+        rec_cid = cur.lastrowid
+        self.conn.commit()
+
+        # 1. Direct validation helper check:
+        # Valid month: 2026-12 (within validity)
+        ok_valid, msg_valid = invoices.validate_recurring_service_month(self.conn, 'MHB/NET/2026', 2026, 12)
+        self.assertTrue(ok_valid)
+        self.assertIsNone(msg_valid)
+
+        # Invalid month: 2027-01 (month after expiration) -> Rejected!
+        ok_exp, msg_exp = invoices.validate_recurring_service_month(self.conn, 'MHB/NET/2026', 2027, 1)
+        self.assertFalse(ok_exp)
+        self.assertIn("Invalid Billing Month: Service Month 2027-01 does not exist within the contract validity period", msg_exp)
+        self.assertIn("Please renew the contract first", msg_exp)
+
+        # Invalid month: 2025-12 (month prior to start date) -> Rejected!
+        ok_pre, msg_pre = invoices.validate_recurring_service_month(self.conn, 'MHB/NET/2026', 2025, 12)
+        self.assertFalse(ok_pre)
+        self.assertIn("prior to contract start date", msg_pre)
+
+        # 2. Form POST validation: handle_new_invoice_post rejecting month after expiration
+        boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
+        body_parts = [
+            f"--{boundary}",
+            'Content-Disposition: form-data; name="billing_type"',
+            '',
+            'RECURRING',
+            f"--{boundary}",
+            'Content-Disposition: form-data; name="contract_no_rec"',
+            '',
+            'MHB/NET/2026',
+            f"--{boundary}",
+            'Content-Disposition: form-data; name="recurring_month"',
+            '',
+            '2027-01',
+            f"--{boundary}",
+            'Content-Disposition: form-data; name="import_type"',
+            '',
+            'paste',
+            f"--{boundary}",
+            'Content-Disposition: form-data; name="xml_content"',
+            '',
+            '<invoice>test</invoice>',
+            f"--{boundary}--",
+            ''
+        ]
+        body_bytes = "\r\n".join(body_parts).encode("utf-8")
+        headers = {
+            "content-type": f"multipart/form-data; boundary={boundary}",
+            "content-length": str(len(body_bytes))
+        }
+        h_inv = MockHandler(body=body_bytes, headers=headers)
+        invoices.handle_new_invoice_post(h_inv)
+        self.assertIn("Invalid Billing Month: Service Month 2027-01 does not exist within the contract validity period", h_inv.get_output_text())
+
+        # 3. After renewing contract to 2027-12-31, 2027-01 is now valid
+        self.conn.execute("UPDATE contracts SET end_date='2027-12-31' WHERE id=?", (rec_cid,))
+        self.conn.commit()
+
+        ok_renewed, msg_renewed = invoices.validate_recurring_service_month(self.conn, 'MHB/NET/2026', 2027, 1)
+        self.assertTrue(ok_renewed)
+        self.assertIsNone(msg_renewed)
 
 
 if __name__ == "__main__":

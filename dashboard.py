@@ -181,7 +181,7 @@ def page_dashboard(handler):
         # Load active contracts expiring within notice window / 30 days
         all_contracts = conn.execute("""
             SELECT id, framework_no, framework_name, start_date, end_date, seller_vendor_id,
-                   renewal_type, renewal_notice_days, renewal_period_months
+                   contract_type, billing_type, renewal_type, renewal_notice_days, renewal_period_months
             FROM contracts
             WHERE is_active = 1
         """).fetchall()
@@ -202,8 +202,11 @@ def page_dashboard(handler):
                 try:
                     ed = datetime.strptime(c["end_date"].strip(), "%Y-%m-%d").date()
                     delta = (ed - today).days
-                    notice_days = c["renewal_notice_days"] if (c["renewal_notice_days"] is not None and c["renewal_notice_days"] > 0) else 60
-                    threshold = max(30, notice_days)
+                    c_type = (c["contract_type"] or "FRAMEWORK").upper()
+                    b_type = (c["billing_type"] or "TM").upper()
+                    is_standalone_rec = (c_type == "STANDALONE" and b_type == "RECURRING")
+                    notice_days = c["renewal_notice_days"] if (is_standalone_rec and c["renewal_notice_days"] is not None and c["renewal_notice_days"] > 0) else 60
+                    threshold = max(30, notice_days) if is_standalone_rec else 30
                     if delta <= threshold:
                         expiring_contracts.append({
                             "id": c["id"],
@@ -215,7 +218,9 @@ def page_dashboard(handler):
                             "display_no": c["framework_no"],
                             "display_name": c["framework_name"] or "Framework Contract",
                             "type": "contract",
-                            "renewal_type": (c["renewal_type"] or "MANUAL").upper(),
+                            "contract_type": c_type,
+                            "billing_type": b_type,
+                            "renewal_type": (c["renewal_type"] or "MANUAL").upper() if is_standalone_rec else "NONE",
                             "renewal_notice_days": notice_days,
                             "renewal_period_months": c["renewal_period_months"]
                         })
@@ -530,7 +535,7 @@ def page_dashboard(handler):
 
             badge_html = ""
             action_html = ""
-            if ec.get("type") == "contract":
+            if ec.get("type") == "contract" and ec.get("contract_type") == "STANDALONE" and ec.get("billing_type") == "RECURRING":
                 ren_type = ec.get("renewal_type", "MANUAL")
                 if ren_type == "AUTO":
                     badge_html = '<span class="tag tag-purple" style="font-size:10px; margin-left:4px;">Auto-Renew</span>'

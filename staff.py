@@ -268,7 +268,7 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
         <div class="actions">
           <button type="submit">Filter</button>
           <a class="muted" href="/staff">Reset</a>
-          <a href="/staff/shifts"><button class="btn-secondary" type="button">Ca làm việc (Shifts)</button></a>
+          <a href="/staff/shifts"><button class="btn-secondary" type="button">Shifts</button></a>
           <a href="/projects/assign"><button class="btn-secondary" type="button">Assign to Project</button></a>
           <a href="/staff/new"><button class="btn-secondary" type="button">+ Add Staff</button></a>
         </div>
@@ -357,7 +357,7 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
           <th>Monthly Rate</th>
           <th>Man-day Rate</th>
           <th>Locked Payroll</th>
-          <th>Paid leave (Avail / Used / Total HĐ)</th>
+          <th>Paid leave (Avail / Used / Contract Total)</th>
           <th>OT</th>
           <th>Status</th>
           <th>Action</th>
@@ -406,8 +406,8 @@ def page_staff_list(q: str, vendor_id: str, contract_id: str, annex_id: str = ""
               f'''<div style="font-weight:600; color:{'#137333' if (staff_leave_status_map.get(r['id']) or {}).get('active_remaining_hours', 0.0) > 0 else '#666'};" title="Remaining: {(staff_leave_status_map.get(r['id']) or {}).get('active_remaining_hours', 0.0):.1f}h ({((staff_leave_status_map.get(r['id']) or {}).get('active_remaining_hours', 0.0)/8.0):.2f}d)">
                 {(staff_leave_status_map.get(r['id']) or {}).get('active_remaining_hours', 0.0):.1f}h rem ({((staff_leave_status_map.get(r['id']) or {}).get('active_remaining_hours', 0.0)/8.0):.1f}d)
               </div>
-              <div class="muted" style="font-size:10px;" title="Active quota: {(staff_leave_status_map.get(r['id']) or {}).get('active_budget_hours', 0.0):.1f}h, Active used: {(staff_leave_status_map.get(r['id']) or {}).get('active_used_hours', 0.0):.1f}h, Total used (HĐ): {(staff_leave_status_map.get(r['id']) or {}).get('total_used_hours', 0.0):.1f}h, Total contract: {(staff_leave_status_map.get(r['id']) or {}).get('contract_total_hours', 0.0):.1f}h">
-                Active: {(staff_leave_status_map.get(r['id']) or {}).get('active_budget_hours', 0.0):.1f}h | Đã dùng: {(staff_leave_status_map.get(r['id']) or {}).get('total_used_hours', 0.0):.1f}h (HĐ: {(staff_leave_status_map.get(r['id']) or {}).get('contract_total_hours', 0.0):.1f}h)
+              <div class="muted" style="font-size:10px;" title="Active quota: {(staff_leave_status_map.get(r['id']) or {}).get('active_budget_hours', 0.0):.1f}h, Active used: {(staff_leave_status_map.get(r['id']) or {}).get('active_used_hours', 0.0):.1f}h, Total used (Contract): {(staff_leave_status_map.get(r['id']) or {}).get('total_used_hours', 0.0):.1f}h, Total contract: {(staff_leave_status_map.get(r['id']) or {}).get('contract_total_hours', 0.0):.1f}h">
+                Active: {(staff_leave_status_map.get(r['id']) or {}).get('active_budget_hours', 0.0):.1f}h | Used: {(staff_leave_status_map.get(r['id']) or {}).get('total_used_hours', 0.0):.1f}h (Contract: {(staff_leave_status_map.get(r['id']) or {}).get('contract_total_hours', 0.0):.1f}h)
               </div>''' if staff_leave_status_map.get(r['id']) else f"{escape('' if r['paid_leave_total_hours'] is None else str(r['paid_leave_total_hours']))} / {escape('' if r['paid_leave_used_hours'] is None else str(r['paid_leave_used_hours']))}"
             }
           </td>

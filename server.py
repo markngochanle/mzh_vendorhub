@@ -430,6 +430,17 @@ class Handler(BaseHTTPRequestHandler):
                 if not cid.isdigit():
                     send_html(self, layout("Error", "<div class='card danger'>Missing or invalid contract ID</div>"), status=400)
                     return
+                conn = db_connect()
+                try:
+                    c = conn.execute("SELECT id, contract_type FROM contracts WHERE id=? AND is_active=1", (int(cid),)).fetchone()
+                finally:
+                    conn.close()
+                if not c:
+                    send_html(self, layout("Error", "<div class='card danger'>Contract not found or deactivated</div>"), status=404)
+                    return
+                if (c["contract_type"] or "FRAMEWORK").upper() != "FRAMEWORK":
+                    send_html(self, layout("Error", f"<div class='card danger'>Cannot add annex to a Standalone contract. Annexes are only permitted for Framework Agreements. <a href='/contract/edit?id={cid}'>Back</a></div>"), status=400)
+                    return
                 send_html(self, page_annex_form("new", None, int(cid), None))
                 return
 
@@ -540,8 +551,9 @@ class Handler(BaseHTTPRequestHandler):
                 send_html(self, page_attendance_timesheet_report(filters))
                 return
 
-            if path in ("/attendance/cashout", "/attendance/payout"):
+            if path in ("/payments", "/payments/dashboard", "/attendance/cashout", "/attendance/payout"):
                 filters = {
+                    "type": qs.get("type", ["tm"])[0],
                     "fy": qs.get("fy", []),
                     "status": qs.get("status", []),
                     "vendor_id": qs.get("vendor_id", []),
@@ -550,7 +562,7 @@ class Handler(BaseHTTPRequestHandler):
                 send_html(self, page_attendance_payout(filters))
                 return
 
-            if path in ("/attendance/cashout/export", "/attendance/payout/export"):
+            if path in ("/payments/export", "/payments/dashboard/export", "/attendance/cashout/export", "/attendance/payout/export"):
                 handle_attendance_payout_export_get(self)
                 return
 
@@ -566,7 +578,8 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/payments/recurring":
                 month = qs.get("month", [""])[0]
                 q = qs.get("q", [""])[0]
-                send_html(self, page_payments_recurring(month=month, q=q, return_to=self.path))
+                vendor_id = qs.get("vendor_id", [""])[0]
+                send_html(self, page_payments_recurring(month=month, q=q, vendor_id=vendor_id, return_to=self.path))
                 return
 
             # ---------------- Projects ----------------
@@ -834,7 +847,7 @@ class Handler(BaseHTTPRequestHandler):
 
             send_html(
                 self,
-                layout("404", f"<div class='card'>Không hỗ trợ POST: <code>{escape(path)}</code></div>"),
+                layout("404", f"<div class='card'>POST method not supported: <code>{escape(path)}</code></div>"),
                 status=404,
             )
 

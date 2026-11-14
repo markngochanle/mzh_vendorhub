@@ -1240,6 +1240,66 @@ def page_edit_invoice(invoice_id: int, error_msg: str | None = None):
     return layout(f"Edit Invoice #{invoice_id}", body)
 
 
+def validate_recurring_service_month(conn, contract_no, service_year, service_month):
+    """
+    Validates that the service month (service_year-service_month) falls within
+    the validity period of the recurring contract or annex.
+    Returns (True, None) if valid or if not a recurring contract,
+    or (False, error_message) if invalid.
+    """
+    if not contract_no or not service_year or not service_month:
+        return True, None
+
+    cur = conn.cursor()
+    # Check if contract is RECURRING
+    c = cur.execute("""
+        SELECT id, framework_no, contract_type, billing_type, start_date, end_date
+        FROM contracts
+        WHERE framework_no = ? AND is_active = 1
+    """, (contract_no,)).fetchone()
+
+    start_d = None
+    end_d = None
+    b_type = None
+
+    if c:
+        b_type = (c["billing_type"] or "").upper()
+        start_d = c["start_date"]
+        end_d = c["end_date"]
+    else:
+        # Check annexes
+        a = cur.execute("""
+            SELECT a.id, a.annex_name, a.billing_type, a.start_date, a.end_date, c.start_date as c_start, c.end_date as c_end
+            FROM contract_annexes a
+            JOIN contracts c ON c.id = a.contract_id
+            WHERE a.annex_name = ? AND a.is_active = 1
+        """, (contract_no,)).fetchone()
+        if a:
+            b_type = (a["billing_type"] or "").upper()
+            start_d = a["start_date"] or a["c_start"]
+            end_d = a["end_date"] or a["c_end"]
+
+    if b_type != "RECURRING":
+        return True, None
+
+    try:
+        req_month_str = f"{int(service_year):04d}-{int(service_month):02d}"
+    except Exception:
+        return True, None
+
+    if end_d:
+        end_month_str = str(end_d)[:7]
+        if req_month_str > end_month_str:
+            return False, f"Invalid Billing Month: Service Month {req_month_str} does not exist within the contract validity period (ended on {end_d}). Please renew the contract first."
+
+    if start_d:
+        start_month_str = str(start_d)[:7]
+        if req_month_str < start_month_str:
+            return False, f"Invalid Billing Month: Service Month {req_month_str} is prior to contract start date ({start_d})."
+
+    return True, None
+
+
 def handle_edit_invoice_post(handler):
     form = read_post_form(handler)
     invoice_id_raw = (form.get("id", [""])[0] or "").strip()
@@ -1277,6 +1337,12 @@ def handle_edit_invoice_post(handler):
 
     conn = db_connect()
     try:
+        if contract_no and sy and sm:
+            is_valid, err_msg = validate_recurring_service_month(conn, contract_no, sy, sm)
+            if not is_valid:
+                send_html(handler, page_edit_invoice(invoice_id, err_msg))
+                return
+
         # Get invoice info for log
         inv_row = conn.execute("SELECT khhdon, shdon FROM invoices WHERE id=?", (invoice_id,)).fetchone()
         inv_name = f"{inv_row['khhdon']}/{inv_row['shdon']}" if inv_row else f"ID {invoice_id}"
@@ -1320,7 +1386,7 @@ def handle_delete_invoice_post(handler):
     try:
         # Get invoice info for log before delete
         inv_row = conn.execute("SELECT khhdon, shdon, seller_name FROM invoices WHERE id=?", (invoice_id,)).fetchone()
-        inv_name = f"{inv_row['khhdon']}/{inv_row['shdon']} của {inv_row['seller_name']}" if inv_row else f"ID {invoice_id}"
+        inv_name = f"{inv_row['khhdon']}/{inv_row['shdon']} from {inv_row['seller_name']}" if inv_row else f"ID {invoice_id}"
         
         cur = conn.cursor()
         cur.execute("DELETE FROM invoice_tax_lines WHERE invoice_id=?", (invoice_id,))
@@ -1950,11 +2016,11 @@ def page_new_invoice(
               </select>
             </div>
             <div>
-              <div class="label">Billing Month (Kỳ cước) *</div>
+              <div class="label">Billing Month *</div>
               <input type="month" name="recurring_month" value="{escape(default_rec_month)}" style="width:100%; padding:6px 8px; font-weight:600;">
             </div>
           </div>
-          <div class="muted" style="margin-top:8px; font-size:12px;">ℹ️ Recurring invoices are reconciled automatically against monthly recurring fees without timesheets.</div>
+          <div class="muted" style="margin-top:8px; font-size:12px;">ℹ️ Recurring invoices are reconciled automatically against monthly recurring fees without timesheets. Billing Month must be within the contract validity period. For months after expiration, please renew the contract first.</div>
         </div>
 
         <h3 style="margin-top: 24px; font-size:15px;">2. Invoice Import Method</h3>
@@ -2128,6 +2194,24 @@ def handle_new_invoice_post(handler):
         if service_year is not None and not (1900 <= service_year <= 2100):
             send_html(handler, render_err("Year should be between 1900 and 2100, or empty"))
             return
+
+    if billing_type == "RECURRING":
+        if not contract_no:
+            send_html(handler, render_err("Please select a Recurring Service contract."))
+            return
+        if not service_year or not service_month:
+            send_html(handler, render_err("Billing Month is required for Recurring Services."))
+            return
+
+    if contract_no and service_year and service_month:
+        conn = db_connect()
+        try:
+            is_valid, err_msg = validate_recurring_service_month(conn, contract_no, service_year, service_month)
+            if not is_valid:
+                send_html(handler, render_err(err_msg))
+                return
+        finally:
+            conn.close()
 
     # Collect XML items to process: list of tuples (filename/source, xml_bytes)
     xml_items = []

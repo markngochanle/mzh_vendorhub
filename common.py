@@ -334,6 +334,7 @@ def init_db():
         ensure_column(conn, "contracts", "renewal_period_months", "INTEGER NULL")
         ensure_column(conn, "contracts", "renewal_note", "TEXT NULL")
         ensure_column(conn, "contracts", "last_renewed_at", "TEXT NULL")
+        ensure_column(conn, "contracts", "contract_summary", "TEXT NULL")
         ensure_column(conn, "contract_annexes", "billing_type", "TEXT NOT NULL DEFAULT 'TM'")
         ensure_column(conn, "contract_annexes", "recurring_fee", "REAL NULL")
         ensure_column(conn, "contract_annexes", "recurring_period", "TEXT NOT NULL DEFAULT 'MONTHLY'")
@@ -680,8 +681,9 @@ def layout(title: str, body_html: str):
       </div>
       <a href="/projects" class="nav-link">Projects</a>
       <div class="nav-dropdown">
-        <a href="/attendance" class="nav-link nav-dropdown-toggle">Payments <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
+        <a href="/payments" class="nav-link nav-dropdown-toggle">Payments <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
         <div class="nav-dropdown-menu">
+          <a href="/payments" class="nav-dropdown-item">Dashboard</a>
           <a href="/attendance" class="nav-dropdown-item">Timesheet & Payroll (T&M)</a>
           <a href="/payments/fixed-price" class="nav-dropdown-item">Fixed Price (Milestones)</a>
           <a href="/payments/recurring" class="nav-dropdown-item">Recurring Services (Internet/SaaS)</a>

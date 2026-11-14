@@ -1839,8 +1839,8 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
           <td style="text-align:center;">
             <input type="number" step="0.5" min="0" name="pl_{sid}_{m_val}" value="{pl:.1f}" {disabled_attr}
                    style="width: 55px; padding: 4px; font-size:12px; text-align:center;"
-                   title="Remaining active balance: {rem_pl_days:.2f} days ({rem_pl_hours:.1f}h) | Total HĐ: {tot_pl:.1f}h">
-            <div style="font-size:9px; color:#666; margin-top:2px;" title="Active: {active_budget:.1f}h, Used: {active_used:.1f}h, Total HĐ: {tot_pl:.1f}h">
+                   title="Remaining active balance: {rem_pl_days:.2f} days ({rem_pl_hours:.1f}h) | Total Contract: {tot_pl:.1f}h">
+            <div style="font-size:9px; color:#666; margin-top:2px;" title="Active: {active_budget:.1f}h, Used: {active_used:.1f}h, Total Contract: {tot_pl:.1f}h">
               Rem: {rem_pl_days:.1f}d
             </div>
           </td>
@@ -2727,6 +2727,24 @@ def handle_attendance_cashout_post(handler):
     redirect(handler, return_url)
 
 
+def _format_dmy(date_str):
+    if not date_str:
+        return ""
+    parts = date_str.strip().split("-")
+    if len(parts) == 3:
+        return f"{parts[2]}/{parts[1]}/{parts[0]}"
+    return date_str
+
+
+def _format_my(month_str):
+    if not month_str:
+        return ""
+    parts = month_str.strip().split("-")
+    if len(parts) == 2:
+        return f"{parts[1]}/{parts[0]}"
+    return month_str
+
+
 def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None, q_filter: str):
     q1_months = [f"{fy:04d}-04", f"{fy:04d}-05", f"{fy:04d}-06"]
     q2_months = [f"{fy:04d}-07", f"{fy:04d}-08", f"{fy:04d}-09"]
@@ -2768,6 +2786,8 @@ def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None
         JOIN contracts c ON a.contract_id = c.id
         JOIN vendors v ON c.seller_vendor_id = v.id
         WHERE a.deleted_at IS NULL AND c.deleted_at IS NULL AND v.deleted_at IS NULL
+          AND (a.billing_type IS NULL OR a.billing_type = '' OR a.billing_type = 'TM')
+          AND (c.billing_type IS NULL OR c.billing_type = '' OR c.billing_type = 'TM')
     """
     annex_params = []
     if vendor_filter:
@@ -2995,6 +3015,514 @@ def get_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None
     }
 
 
+def get_fixed_price_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None, q_filter: str):
+    q1_months = [f"{fy:04d}-04", f"{fy:04d}-05", f"{fy:04d}-06"]
+    q2_months = [f"{fy:04d}-07", f"{fy:04d}-08", f"{fy:04d}-09"]
+    q3_months = [f"{fy:04d}-10", f"{fy:04d}-11", f"{fy:04d}-12"]
+    q4_months = [f"{fy+1:04d}-01", f"{fy+1:04d}-02", f"{fy+1:04d}-03"]
+    fy_months = q1_months + q2_months + q3_months + q4_months
+
+    fy_start_date = f"{fy:04d}-04-01"
+    fy_end_date = f"{fy+1:04d}-03-31"
+
+    month_info = {
+        f"{fy:04d}-04": {"num": "04", "name": "Apr", "quarter": "Q1", "sub": f"04/{fy}"},
+        f"{fy:04d}-05": {"num": "05", "name": "May", "quarter": "Q1", "sub": f"05/{fy}"},
+        f"{fy:04d}-06": {"num": "06", "name": "Jun", "quarter": "Q1", "sub": f"06/{fy}"},
+        f"{fy:04d}-07": {"num": "07", "name": "Jul", "quarter": "Q2", "sub": f"07/{fy}"},
+        f"{fy:04d}-08": {"num": "08", "name": "Aug", "quarter": "Q2", "sub": f"08/{fy}"},
+        f"{fy:04d}-09": {"num": "09", "name": "Sep", "quarter": "Q2", "sub": f"09/{fy}"},
+        f"{fy:04d}-10": {"num": "10", "name": "Oct", "quarter": "Q3", "sub": f"10/{fy}"},
+        f"{fy:04d}-11": {"num": "11", "name": "Nov", "quarter": "Q3", "sub": f"11/{fy}"},
+        f"{fy:04d}-12": {"num": "12", "name": "Dec", "quarter": "Q3", "sub": f"12/{fy}"},
+        f"{fy+1:04d}-01": {"num": "01", "name": "Jan", "quarter": "Q4", "sub": f"01/{fy+1}"},
+        f"{fy+1:04d}-02": {"num": "02", "name": "Feb", "quarter": "Q4", "sub": f"02/{fy+1}"},
+        f"{fy+1:04d}-03": {"num": "03", "name": "Mar", "quarter": "Q4", "sub": f"03/{fy+1}"},
+    }
+
+    # Query parent contracts and annexes
+    # 1. Standalone / Framework Fixed Price contracts
+    where_c = ["c.deleted_at IS NULL", "c.is_active = 1", "v.deleted_at IS NULL"]
+    where_c.append("(c.billing_type = 'FIXED_PRICE' OR EXISTS (SELECT 1 FROM contract_milestones cm WHERE cm.contract_id = c.id AND cm.annex_id IS NULL))")
+    params_c = []
+    if vendor_filter:
+        where_c.append("v.id = ?")
+        params_c.append(vendor_filter)
+    if q_filter:
+        where_c.append("(v.company_name LIKE ? OR v.short_name LIKE ? OR c.framework_no LIKE ? OR c.framework_name LIKE ?)")
+        params_c.extend([f"%{q_filter}%"] * 4)
+
+    sql_c = f"""
+        SELECT 
+            c.id as contract_id,
+            c.framework_no,
+            c.framework_name,
+            c.contract_type,
+            c.contract_value,
+            NULL as annex_id,
+            NULL as annex_name,
+            NULL as annex_value,
+            v.id as vendor_id,
+            v.company_name,
+            v.short_name,
+            v.tax_id
+        FROM contracts c
+        JOIN vendors v ON c.seller_vendor_id = v.id
+        WHERE {' AND '.join(where_c)}
+    """
+
+    # 2. Annexes
+    where_a = ["a.deleted_at IS NULL", "a.is_active = 1", "c.deleted_at IS NULL", "c.is_active = 1", "v.deleted_at IS NULL"]
+    where_a.append("(a.billing_type = 'FIXED_PRICE' OR EXISTS (SELECT 1 FROM contract_milestones cm WHERE cm.annex_id = a.id))")
+    params_a = []
+    if vendor_filter:
+        where_a.append("v.id = ?")
+        params_a.append(vendor_filter)
+    if q_filter:
+        where_a.append("(v.company_name LIKE ? OR v.short_name LIKE ? OR c.framework_no LIKE ? OR c.framework_name LIKE ? OR a.annex_name LIKE ?)")
+        params_a.extend([f"%{q_filter}%"] * 5)
+
+    sql_a = f"""
+        SELECT 
+            c.id as contract_id,
+            c.framework_no,
+            c.framework_name,
+            c.contract_type,
+            c.contract_value,
+            a.id as annex_id,
+            a.annex_name,
+            a.value as annex_value,
+            v.id as vendor_id,
+            v.company_name,
+            v.short_name,
+            v.tax_id
+        FROM contract_annexes a
+        JOIN contracts c ON a.contract_id = c.id
+        JOIN vendors v ON c.seller_vendor_id = v.id
+        WHERE {' AND '.join(where_a)}
+    """
+
+    full_sql = f"SELECT * FROM ( {sql_c} UNION ALL {sql_a} ) t ORDER BY COALESCE(NULLIF(t.short_name, ''), t.company_name) COLLATE NOCASE ASC, t.framework_no ASC, COALESCE(t.annex_name, '') ASC"
+    parent_rows = conn.execute(full_sql, params_c + params_a).fetchall()
+
+    # Query all milestones
+    milestone_sql = """
+        SELECT 
+            m.id, m.contract_id, m.annex_id, m.milestone_name, m.milestone_type,
+            m.percentage, m.amount, m.planned_date, m.actual_date, m.status,
+            m.acceptance_doc_no, m.cashout_date, m.invoice_id, m.note,
+            inv.shdon, inv.tg_tttbso as inv_amount
+        FROM contract_milestones m
+        LEFT JOIN invoices inv ON inv.id = m.invoice_id
+        ORDER BY m.planned_date ASC, m.id ASC
+    """
+    all_milestones = conn.execute(milestone_sql).fetchall()
+
+    ms_by_entity = {}
+    for m in all_milestones:
+        key = (m["contract_id"], m["annex_id"])
+        ms_by_entity.setdefault(key, []).append(m)
+
+    filtered_rows = []
+    for p in parent_rows:
+        c_id = p["contract_id"]
+        a_id = p["annex_id"]
+        entity_key = (c_id, a_id)
+        m_list = ms_by_entity.get(entity_key, [])
+
+        months_data = {}
+        row_planned_total = 0.0
+        row_cashout_total = 0.0
+        q_planned = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+        q_cashout = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+
+        for m_str in fy_months:
+            planned_items = [x for x in m_list if x["planned_date"] and x["planned_date"].strip()[:7] == m_str]
+            p_amt = sum(float(x["amount"] or 0.0) for x in planned_items)
+
+            co_items = [
+                x for x in m_list 
+                if (x["status"] == "PAID" or (x["cashout_date"] and str(x["cashout_date"]).strip()))
+                and x["cashout_date"] and str(x["cashout_date"]).strip()[:7] == m_str
+            ]
+            co_amt = sum(float(x["amount"] or 0.0) for x in co_items)
+
+            c_dates = [str(x["cashout_date"]).strip() for x in co_items if x["cashout_date"]]
+            c_date_str = ", ".join(sorted(list(set(c_dates)))) if c_dates else ""
+
+            cashout_breakdown = []
+            for item in co_items:
+                item_dict = dict(item)
+                c_amt = float(item_dict.get("amount") or 0.0)
+                basis_parts = [f"Milestone: {item_dict.get('milestone_name', '')} ({item_dict.get('milestone_type', '')})"]
+                if item_dict.get("shdon"):
+                    basis_parts.append(f"Inv #{item_dict['shdon']}")
+                if item_dict.get("acceptance_doc_no"):
+                    basis_parts.append(f"Doc: {item_dict['acceptance_doc_no']}")
+                p_date = item_dict.get("planned_date") or ""
+                cashout_breakdown.append({
+                    "service_month": p_date[:7] if p_date else "",
+                    "service_month_formatted": _format_my(p_date[:7]) if p_date else "",
+                    "cashout_date": item_dict.get("cashout_date"),
+                    "cashout_date_formatted": _format_dmy(item_dict.get("cashout_date")),
+                    "amount": c_amt,
+                    "amount_formatted": f"{int(round(c_amt)):,} VND",
+                    "basis": " • ".join(basis_parts),
+                    "milestone_name": item_dict.get("milestone_name", ""),
+                    "milestone_type": item_dict.get("milestone_type", ""),
+                    "shdon": item_dict.get("shdon") or ""
+                })
+
+            q_name = month_info[m_str]["quarter"]
+            q_planned[q_name] += p_amt
+            q_cashout[q_name] += co_amt
+
+            row_planned_total += p_amt
+            row_cashout_total += co_amt
+
+            months_data[m_str] = {
+                "payroll": p_amt,
+                "cashout": co_amt,
+                "cashout_dates": c_dates,
+                "cashout_date_str": c_date_str,
+                "cashout_breakdown": cashout_breakdown,
+                "amount": co_amt if co_amt > 0 else p_amt,
+                "cashout_date": c_dates[0] if c_dates else None
+            }
+
+        has_planned = row_planned_total > 0
+        has_cashout = row_cashout_total > 0
+        has_activity = has_planned or has_cashout
+
+        if status_filter in ("cashout_only", "cashed_out") and not has_cashout:
+            continue
+        elif status_filter in ("payroll_only", "planned_only", "fee_only") and not has_planned:
+            continue
+        elif status_filter in ("all_active", "with_cashout", "with_payout") and not has_activity:
+            continue
+
+        annex_repr = {
+            "annex_id": a_id,
+            "annex_name": p["annex_name"] if a_id else (p["framework_name"] or "Fixed Price Standalone"),
+            "contract_id": c_id,
+            "framework_no": p["framework_no"],
+            "vendor_id": p["vendor_id"],
+            "company_name": p["company_name"],
+            "short_name": p["short_name"],
+            "tax_id": p["tax_id"]
+        }
+
+        filtered_rows.append({
+            "annex": annex_repr,
+            "months": months_data,
+            "q_payroll": q_planned,
+            "q_cashout": q_cashout,
+            "q_totals": q_cashout,
+            "row_payroll_total": row_planned_total,
+            "row_cashout_total": row_cashout_total,
+            "row_total": row_cashout_total if row_cashout_total > 0 else row_planned_total,
+            "has_cashout": has_cashout,
+            "has_payroll": has_planned,
+            "has_payout": has_activity
+        })
+
+    col_planned_totals = {m: 0.0 for m in fy_months}
+    col_cashout_totals = {m: 0.0 for m in fy_months}
+    q_col_planned_totals = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+    q_col_cashout_totals = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+    grand_planned_total = 0.0
+    grand_cashout_total = 0.0
+
+    for item in filtered_rows:
+        grand_planned_total += item["row_payroll_total"]
+        grand_cashout_total += item["row_cashout_total"]
+
+        for q_k in ("Q1", "Q2", "Q3", "Q4"):
+            q_col_planned_totals[q_k] += item["q_payroll"][q_k]
+            q_col_cashout_totals[q_k] += item["q_cashout"][q_k]
+
+        for m in fy_months:
+            col_planned_totals[m] += item["months"][m]["payroll"]
+            col_cashout_totals[m] += item["months"][m]["cashout"]
+
+    return {
+        "fy": fy,
+        "fy_name": f"FY{str(fy)[-2:]}",
+        "q1_months": q1_months,
+        "q2_months": q2_months,
+        "q3_months": q3_months,
+        "q4_months": q4_months,
+        "fy_months": fy_months,
+        "month_info": month_info,
+        "rows": filtered_rows,
+        "col_payroll_totals": col_planned_totals,
+        "col_cashout_totals": col_cashout_totals,
+        "col_totals": col_cashout_totals,
+        "q_col_payroll_totals": q_col_planned_totals,
+        "q_col_cashout_totals": q_col_cashout_totals,
+        "q_col_totals": q_col_cashout_totals,
+        "grand_payroll_total": grand_planned_total,
+        "grand_cashout_total": grand_cashout_total,
+        "grand_total": grand_cashout_total if grand_cashout_total > 0 else grand_planned_total,
+        "status_filter": status_filter
+    }
+
+
+def get_recurring_payout_data(conn, fy: int, status_filter: str, vendor_filter: int | None, q_filter: str):
+    q1_months = [f"{fy:04d}-04", f"{fy:04d}-05", f"{fy:04d}-06"]
+    q2_months = [f"{fy:04d}-07", f"{fy:04d}-08", f"{fy:04d}-09"]
+    q3_months = [f"{fy:04d}-10", f"{fy:04d}-11", f"{fy:04d}-12"]
+    q4_months = [f"{fy+1:04d}-01", f"{fy+1:04d}-02", f"{fy+1:04d}-03"]
+    fy_months = q1_months + q2_months + q3_months + q4_months
+
+    fy_start_date = f"{fy:04d}-04-01"
+    fy_end_date = f"{fy+1:04d}-03-31"
+
+    month_info = {
+        f"{fy:04d}-04": {"num": "04", "name": "Apr", "quarter": "Q1", "sub": f"04/{fy}"},
+        f"{fy:04d}-05": {"num": "05", "name": "May", "quarter": "Q1", "sub": f"05/{fy}"},
+        f"{fy:04d}-06": {"num": "06", "name": "Jun", "quarter": "Q1", "sub": f"06/{fy}"},
+        f"{fy:04d}-07": {"num": "07", "name": "Jul", "quarter": "Q2", "sub": f"07/{fy}"},
+        f"{fy:04d}-08": {"num": "08", "name": "Aug", "quarter": "Q2", "sub": f"08/{fy}"},
+        f"{fy:04d}-09": {"num": "09", "name": "Sep", "quarter": "Q2", "sub": f"09/{fy}"},
+        f"{fy:04d}-10": {"num": "10", "name": "Oct", "quarter": "Q3", "sub": f"10/{fy}"},
+        f"{fy:04d}-11": {"num": "11", "name": "Nov", "quarter": "Q3", "sub": f"11/{fy}"},
+        f"{fy:04d}-12": {"num": "12", "name": "Dec", "quarter": "Q3", "sub": f"12/{fy}"},
+        f"{fy+1:04d}-01": {"num": "01", "name": "Jan", "quarter": "Q4", "sub": f"01/{fy+1}"},
+        f"{fy+1:04d}-02": {"num": "02", "name": "Feb", "quarter": "Q4", "sub": f"02/{fy+1}"},
+        f"{fy+1:04d}-03": {"num": "03", "name": "Mar", "quarter": "Q4", "sub": f"03/{fy+1}"},
+    }
+
+    # Query parent contracts and annexes
+    # 1. Standalone Recurring contracts
+    where_c = ["c.deleted_at IS NULL", "c.is_active = 1", "v.deleted_at IS NULL", "c.billing_type = 'RECURRING'"]
+    params_c = []
+    if vendor_filter:
+        where_c.append("v.id = ?")
+        params_c.append(vendor_filter)
+    if q_filter:
+        where_c.append("(v.company_name LIKE ? OR v.short_name LIKE ? OR c.framework_no LIKE ? OR c.framework_name LIKE ?)")
+        params_c.extend([f"%{q_filter}%"] * 4)
+
+    sql_c = f"""
+        SELECT 
+            c.id as contract_id,
+            c.framework_no,
+            c.framework_name,
+            c.contract_type,
+            c.recurring_fee as fee,
+            c.recurring_period as period,
+            c.start_date,
+            c.end_date,
+            NULL as annex_id,
+            NULL as annex_name,
+            v.id as vendor_id,
+            v.company_name,
+            v.short_name,
+            v.tax_id
+        FROM contracts c
+        JOIN vendors v ON c.seller_vendor_id = v.id
+        WHERE {' AND '.join(where_c)}
+    """
+
+    # 2. Recurring Annexes
+    where_a = ["a.deleted_at IS NULL", "a.is_active = 1", "c.deleted_at IS NULL", "c.is_active = 1", "v.deleted_at IS NULL", "a.billing_type = 'RECURRING'"]
+    params_a = []
+    if vendor_filter:
+        where_a.append("v.id = ?")
+        params_a.append(vendor_filter)
+    if q_filter:
+        where_a.append("(v.company_name LIKE ? OR v.short_name LIKE ? OR c.framework_no LIKE ? OR c.framework_name LIKE ? OR a.annex_name LIKE ?)")
+        params_a.extend([f"%{q_filter}%"] * 5)
+
+    sql_a = f"""
+        SELECT 
+            c.id as contract_id,
+            c.framework_no,
+            c.framework_name,
+            c.contract_type,
+            a.recurring_fee as fee,
+            a.recurring_period as period,
+            a.start_date,
+            a.end_date,
+            a.id as annex_id,
+            a.annex_name,
+            v.id as vendor_id,
+            v.company_name,
+            v.short_name,
+            v.tax_id
+        FROM contract_annexes a
+        JOIN contracts c ON a.contract_id = c.id
+        JOIN vendors v ON c.seller_vendor_id = v.id
+        WHERE {' AND '.join(where_a)}
+    """
+
+    full_sql = f"SELECT * FROM ( {sql_c} UNION ALL {sql_a} ) t ORDER BY COALESCE(NULLIF(t.short_name, ''), t.company_name) COLLATE NOCASE ASC, t.framework_no ASC, COALESCE(t.annex_name, '') ASC"
+    parent_rows = conn.execute(full_sql, params_c + params_a).fetchall()
+
+    # Query all recurring payouts occurring within this FY
+    payout_sql = """
+        SELECT 
+            rp.id, rp.contract_id, rp.annex_id, rp.service_month, rp.amount,
+            rp.status, rp.cashout_date, rp.invoice_id, rp.note,
+            inv.shdon, inv.tg_tttbso as inv_amount
+        FROM recurring_payouts rp
+        LEFT JOIN invoices inv ON inv.id = rp.invoice_id
+        WHERE (rp.status = 'PAID' OR (rp.cashout_date IS NOT NULL AND trim(rp.cashout_date) != ''))
+          AND rp.cashout_date >= ? AND rp.cashout_date <= ?
+    """
+    all_payouts = conn.execute(payout_sql, (fy_start_date, fy_end_date)).fetchall()
+
+    # Map payouts to (contract_id, annex_id, cashout_month)
+    payouts_by_entity_month = {}
+    for p in all_payouts:
+        c_date = (p["cashout_date"] or "").strip()
+        co_m = c_date[:7]
+        key = (p["contract_id"], p["annex_id"], co_m)
+        payouts_by_entity_month.setdefault(key, []).append(p)
+
+    filtered_rows = []
+    for p in parent_rows:
+        c_id = p["contract_id"]
+        a_id = p["annex_id"]
+        fee = float(p["fee"] or 0.0)
+        s_date = (p["start_date"] or "").strip()
+        e_date = (p["end_date"] or "").strip()
+
+        months_data = {}
+        row_fee_total = 0.0
+        row_cashout_total = 0.0
+        q_fee = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+        q_cashout = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+
+        for m_str in fy_months:
+            in_period = True
+            if s_date and s_date[:7] > m_str:
+                in_period = False
+            if e_date and e_date[:7] < m_str:
+                in_period = False
+
+            cur_fee = fee if in_period else 0.0
+
+            co_items = payouts_by_entity_month.get((c_id, a_id, m_str), [])
+            co_amt = sum(float(x["amount"] or 0.0) for x in co_items)
+
+            c_dates = [str(x["cashout_date"]).strip() for x in co_items if x["cashout_date"]]
+            c_date_str = ", ".join(sorted(list(set(c_dates)))) if c_dates else ""
+
+            cashout_breakdown = []
+            for item in co_items:
+                item_dict = dict(item)
+                c_amt = float(item_dict.get("amount") or 0.0)
+                basis_parts = [f"Recurring Service ({_format_my(item_dict.get('service_month', ''))})"]
+                if item_dict.get("shdon"):
+                    basis_parts.append(f"Inv #{item_dict['shdon']}")
+                cashout_breakdown.append({
+                    "service_month": item_dict.get("service_month", ""),
+                    "service_month_formatted": _format_my(item_dict.get("service_month", "")),
+                    "cashout_date": item_dict.get("cashout_date"),
+                    "cashout_date_formatted": _format_dmy(item_dict.get("cashout_date")),
+                    "amount": c_amt,
+                    "amount_formatted": f"{int(round(c_amt)):,} VND",
+                    "basis": " • ".join(basis_parts),
+                    "shdon": item_dict.get("shdon") or ""
+                })
+
+            q_name = month_info[m_str]["quarter"]
+            q_fee[q_name] += cur_fee
+            q_cashout[q_name] += co_amt
+
+            row_fee_total += cur_fee
+            row_cashout_total += co_amt
+
+            months_data[m_str] = {
+                "payroll": cur_fee,
+                "cashout": co_amt,
+                "cashout_dates": c_dates,
+                "cashout_date_str": c_date_str,
+                "cashout_breakdown": cashout_breakdown,
+                "amount": co_amt if co_amt > 0 else cur_fee,
+                "cashout_date": c_dates[0] if c_dates else None
+            }
+
+        has_fee = row_fee_total > 0
+        has_cashout = row_cashout_total > 0
+        has_activity = has_fee or has_cashout
+
+        if status_filter in ("cashout_only", "cashed_out") and not has_cashout:
+            continue
+        elif status_filter in ("payroll_only", "fee_only") and not has_fee:
+            continue
+        elif status_filter in ("all_active", "with_cashout", "with_payout") and not has_activity:
+            continue
+
+        annex_repr = {
+            "annex_id": a_id,
+            "annex_name": p["annex_name"] if a_id else (p["framework_name"] or "Recurring Service"),
+            "contract_id": c_id,
+            "framework_no": p["framework_no"],
+            "vendor_id": p["vendor_id"],
+            "company_name": p["company_name"],
+            "short_name": p["short_name"],
+            "tax_id": p["tax_id"]
+        }
+
+        filtered_rows.append({
+            "annex": annex_repr,
+            "months": months_data,
+            "q_payroll": q_fee,
+            "q_cashout": q_cashout,
+            "q_totals": q_cashout,
+            "row_payroll_total": row_fee_total,
+            "row_cashout_total": row_cashout_total,
+            "row_total": row_cashout_total if row_cashout_total > 0 else row_fee_total,
+            "has_cashout": has_cashout,
+            "has_payroll": has_fee,
+            "has_payout": has_activity
+        })
+
+    col_fee_totals = {m: 0.0 for m in fy_months}
+    col_cashout_totals = {m: 0.0 for m in fy_months}
+    q_col_fee_totals = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+    q_col_cashout_totals = {"Q1": 0.0, "Q2": 0.0, "Q3": 0.0, "Q4": 0.0}
+    grand_fee_total = 0.0
+    grand_cashout_total = 0.0
+
+    for item in filtered_rows:
+        grand_fee_total += item["row_payroll_total"]
+        grand_cashout_total += item["row_cashout_total"]
+
+        for q_k in ("Q1", "Q2", "Q3", "Q4"):
+            q_col_fee_totals[q_k] += item["q_payroll"][q_k]
+            q_col_cashout_totals[q_k] += item["q_cashout"][q_k]
+
+        for m in fy_months:
+            col_fee_totals[m] += item["months"][m]["payroll"]
+            col_cashout_totals[m] += item["months"][m]["cashout"]
+
+    return {
+        "fy": fy,
+        "fy_name": f"FY{str(fy)[-2:]}",
+        "q1_months": q1_months,
+        "q2_months": q2_months,
+        "q3_months": q3_months,
+        "q4_months": q4_months,
+        "fy_months": fy_months,
+        "month_info": month_info,
+        "rows": filtered_rows,
+        "col_payroll_totals": col_fee_totals,
+        "col_cashout_totals": col_cashout_totals,
+        "col_totals": col_cashout_totals,
+        "q_col_payroll_totals": q_col_fee_totals,
+        "q_col_cashout_totals": q_col_cashout_totals,
+        "q_col_totals": q_col_cashout_totals,
+        "grand_payroll_total": grand_fee_total,
+        "grand_cashout_total": grand_cashout_total,
+        "grand_total": grand_cashout_total if grand_cashout_total > 0 else grand_fee_total,
+        "status_filter": status_filter
+    }
+
+
 def page_attendance_payout(filters: dict) -> str:
     today = date.today()
     default_fy = today.year if today.month >= 4 else today.year - 1
@@ -3007,6 +3535,13 @@ def page_attendance_payout(filters: dict) -> str:
     except (ValueError, TypeError):
         fy = default_fy
 
+    billing_type_raw = filters.get("type", "tm")
+    if isinstance(billing_type_raw, list):
+        billing_type_raw = billing_type_raw[0] if billing_type_raw else "tm"
+    billing_type = (billing_type_raw or "tm").strip().lower()
+    if billing_type not in ("tm", "fixed_price", "recurring"):
+        billing_type = "tm"
+
     status_raw = filters.get("status")
     if isinstance(status_raw, list):
         status_filter = status_raw[0] if status_raw else "all_active"
@@ -3015,7 +3550,7 @@ def page_attendance_payout(filters: dict) -> str:
 
     if status_filter in ("cashout_only", "cashed_out"):
         status_filter = "cashout_only"
-    elif status_filter == "payroll_only":
+    elif status_filter in ("payroll_only", "planned_only", "fee_only"):
         status_filter = "payroll_only"
     elif status_filter == "all":
         status_filter = "all"
@@ -3035,26 +3570,79 @@ def page_attendance_payout(filters: dict) -> str:
     conn = db_connect()
     try:
         vendors = conn.execute("SELECT id, company_name, short_name FROM vendors WHERE deleted_at IS NULL AND purchasing = 0 ORDER BY company_name").fetchall()
-        data = get_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+        if billing_type == "fixed_price":
+            data = get_fixed_price_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+        elif billing_type == "recurring":
+            data = get_recurring_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+        else:
+            data = get_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
     finally:
         conn.close()
 
-    # Sub-nav
-    sub_nav = f"""
-    <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
-      <a href="/attendance" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
-      <a href="/attendance/monthly" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
-      <a href="/attendance/acceptance" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
-      <a href="/attendance/cashout?fy={fy}&status={status_filter}&vendor_id={vendor_filter or ''}&q={urllib.parse.quote(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💰 Cash-out</a>
-    </div>
-    """
+    # Dynamic labels and tabs configuration based on active payment type
+    if billing_type == "fixed_price":
+        type_title = "Fixed Price Milestones"
+        type_short_label = "Fixed Price"
+        col3_title = "Contract / Project"
+        l1_label = "Planned"
+        l1_abbr = "Plan"
+        l1_desc = "Planned milestone amounts"
+        l1_card_label = "Planned"
+        operational_url = "/payments/fixed-price"
+        operational_label = "🎯 Open Detailed Milestones List →"
+        operational_title = "View and manage individual milestone acceptances & payments"
+        status_options = [
+            ("all_active", "All Active (Both Planned & Cash-out)"),
+            ("cashout_only", "Cash-out Only (Hide Planned)"),
+            ("payroll_only", "Planned Only (Hide Cash-out)"),
+            ("all", "All Fixed Price Contracts"),
+        ]
+        empty_entity_desc = "contracts"
+    elif billing_type == "recurring":
+        type_title = "Recurring Services"
+        type_short_label = "Recurring Services"
+        col3_title = "Contract / Service"
+        l1_label = "Fee"
+        l1_abbr = "Fee"
+        l1_desc = "Active recurring subscription fees"
+        l1_card_label = "Fee"
+        operational_url = "/payments/recurring"
+        operational_label = "🌐 Open Monthly Recurring Services →"
+        operational_title = "View and manage monthly recurring bills and invoice payments"
+        status_options = [
+            ("all_active", "All Active (Both Fee & Cash-out)"),
+            ("cashout_only", "Cash-out Only (Hide Fee)"),
+            ("payroll_only", "Fee Only (Hide Cash-out)"),
+            ("all", "All Recurring Services"),
+        ]
+        empty_entity_desc = "recurring services"
+    else: # tm
+        type_title = "Time & Material (T&M)"
+        type_short_label = "Time & Material"
+        col3_title = "Framework / Annex"
+        l1_label = "Payroll"
+        l1_abbr = "P"
+        l1_desc = "Locked monthly payroll accruals"
+        l1_card_label = "Payroll"
+        operational_url = "/attendance"
+        operational_label = "📅 Open Timesheet & Monthly Payroll →"
+        operational_title = "View and manage timesheet & monthly payroll locks"
+        status_options = [
+            ("all_active", "All Active (Both Payroll & Cash-out)"),
+            ("cashout_only", "Cash-out Only (Hide Payroll)"),
+            ("payroll_only", "Payroll Only (Hide Cash-out)"),
+            ("all", "All Annexes"),
+        ]
+        empty_entity_desc = "annexes"
+
+    # Sub-nav (top level Payments navigation)
+    from payments import render_payments_tabs
+    sub_nav = render_payments_tabs("dashboard")
 
     # Status options
     status_options_html = [
-        f'<option value="all_active" {"selected" if status_filter == "all_active" else ""}>All Active (Both Payroll & Cash-out)</option>',
-        f'<option value="cashout_only" {"selected" if status_filter == "cashout_only" else ""}>Cash-out Only (Hide Payroll)</option>',
-        f'<option value="payroll_only" {"selected" if status_filter == "payroll_only" else ""}>Payroll Only (Hide Cash-out)</option>',
-        f'<option value="all" {"selected" if status_filter == "all" else ""}>All Annexes</option>',
+        f'<option value="{val}" {"selected" if status_filter == val else ""}>{escape(lbl)}</option>'
+        for val, lbl in status_options
     ]
 
     # Vendor options
@@ -3064,8 +3652,34 @@ def page_attendance_payout(filters: dict) -> str:
         v_title = v["short_name"] or v["company_name"] or f"Vendor #{v['id']}"
         vendor_options_html.append(f'<option value="{v["id"]}" {sel}>{escape(v_title)}</option>')
 
+    # 3-Tab Bar for Dashboard
+    tab_base_qs = f"fy={fy}&status={status_filter}&vendor_id={vendor_filter or ''}&q={urllib.parse.quote(q_filter)}"
+
+    def _tab_pill(t_code, t_name, t_icon):
+        is_sel = (billing_type == t_code)
+        if is_sel:
+            t_style = "background:#0f172a; color:#ffffff; font-weight:700; border-radius:6px; padding:7px 16px; font-size:13px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; box-shadow:0 1px 3px rgba(0,0,0,0.12);"
+        else:
+            t_style = "background:#ffffff; color:#475569; font-weight:600; border:1px solid #cbd5e1; border-radius:6px; padding:7px 16px; font-size:13px; text-decoration:none; display:inline-flex; align-items:center; gap:6px; transition:all 0.15s;"
+        return f'<a href="/payments?type={t_code}&{tab_base_qs}" style="{t_style}">{t_icon} {t_name}</a>'
+
+    tabs_bar_html = f"""
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin-bottom:16px; background:#f8fafc; padding:10px 14px; border-radius:8px; border:1px solid #e2e8f0;">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        {_tab_pill('tm', 'Time & Material (T&M)', '💵')}
+        {_tab_pill('fixed_price', 'Fixed Price (Milestones)', '🎯')}
+        {_tab_pill('recurring', 'Recurring Services (Internet / SaaS)', '🌐')}
+      </div>
+      <div>
+        <a href="{operational_url}" style="font-size:12px; font-weight:600; color:#4338ca; text-decoration:none; display:inline-flex; align-items:center; gap:4px; padding:6px 12px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:6px;" title="{operational_title}">
+          {operational_label}
+        </a>
+      </div>
+    </div>
+    """
+
     # Export URL
-    export_url = f"/attendance/cashout/export?fy={fy}&status={status_filter}&vendor_id={vendor_filter or ''}&q={urllib.parse.quote(q_filter)}"
+    export_url = f"/payments/export?type={billing_type}&fy={fy}&status={status_filter}&vendor_id={vendor_filter or ''}&q={urllib.parse.quote(q_filter)}"
 
     col_min_w = "145px" if status_filter in ("all_active", "all") else "120px"
     tbl_min_w = "2020px" if status_filter in ("all_active", "all") else "1650px"
@@ -3107,16 +3721,18 @@ def page_attendance_payout(filters: dict) -> str:
             if co_amt > 0 and cashout_breakdown:
                 if len(cashout_breakdown) == 1:
                     b = cashout_breakdown[0]
-                    co_title = (
-                        f"Cash-out: {b['amount_formatted']}&#10;"
-                        f"• Paying for Service Month: {b['service_month_formatted']}&#10;"
-                        f"• Payment Date: {b['cashout_date_formatted']}&#10;"
-                        f"• Basis: {b['basis']}"
-                    )
+                    co_title_lines = [f"Cash-out: {b['amount_formatted']}"]
+                    if b.get("service_month_formatted"):
+                        co_title_lines.append(f"• Paying for Service Month: {b['service_month_formatted']}")
+                    co_title_lines.append(f"• Payment Date: {b['cashout_date_formatted']}")
+                    if b.get("basis"):
+                        co_title_lines.append(f"• Basis: {b['basis']}")
+                    co_title = "&#10;".join(co_title_lines)
                 else:
                     lines = [f"Cash-out Total: {int(round(co_amt)):,} VND ({len(cashout_breakdown)} disbursements):"]
                     for idx_b, b in enumerate(cashout_breakdown, 1):
-                        lines.append(f"{idx_b}. For Month {b['service_month_formatted']}: {b['amount_formatted']} (Paid {b['cashout_date_formatted']} - {b['basis']})")
+                        m_part = f"For Month {b['service_month_formatted']}: " if b.get("service_month_formatted") else ""
+                        lines.append(f"{idx_b}. {m_part}{b['amount_formatted']} (Paid {b['cashout_date_formatted']} - {b.get('basis', '')})")
                     co_title = "&#10;".join(lines)
                 bd_json = escape(json.dumps(cashout_breakdown), quote=True)
                 hover_attrs = f'data-bd="{bd_json}" data-m="{escape(m_label)}" onmouseenter="showCoTip(this, event)" onmouseleave="hideCoTip()"'
@@ -3133,10 +3749,10 @@ def page_attendance_payout(filters: dict) -> str:
                 co_cursor = ""
                 co_border_style = ""
 
-            p_title = f"Locked Monthly Payroll for {escape(m_label)}: {p_str} VND" if p_amt > 0 else f"No locked payroll in {escape(m_label)}"
+            p_title = f"{l1_label} for {escape(m_label)}: {p_str} VND" if p_amt > 0 else f"No {l1_label.lower()} in {escape(m_label)}"
 
             if status_filter == "cashout_only":
-                # Hide Payroll completely
+                # Hide Payroll/Planned completely
                 if co_amt == 0:
                     cell_content = '<div style="text-align:right; color:#cbd5e1; font-weight:normal; white-space:nowrap;">-</div>'
                 else:
@@ -3156,20 +3772,20 @@ def page_attendance_payout(filters: dict) -> str:
                     cell_content = f"""
                     <div style="font-size:12px; line-height:1.4; white-space:nowrap;" title="{p_title}">
                       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;">
-                        <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+                        <span style="font-size:10px; color:#64748b; font-weight:600;">{l1_label}:</span>
                         <span style="font-family:monospace; font-weight:600; color:#1e293b;">{p_str}</span>
                       </div>
                     </div>
                     """
             else:
-                # Both: Line 1 Payroll, Line 2 Cash-out (strictly 2 lines, no wrapping, no cashout date text)
+                # Both: Line 1 Planned/Payroll, Line 2 Cash-out
                 if p_amt == 0 and co_amt == 0:
                     cell_content = '<div style="text-align:center; color:#cbd5e1; font-weight:normal; white-space:nowrap;">-</div>'
                 else:
                     cell_content = f"""
                     <div style="font-size:11.5px; line-height:1.4; white-space:nowrap;">
                       <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;" title="{p_title}">
-                        <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+                        <span style="font-size:10px; color:#64748b; font-weight:600;">{l1_label}:</span>
                         <span style="font-family:monospace; font-weight:600; color:{p_color};">{p_str}</span>
                       </div>
                       <div class="co-item" {hover_attrs} style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap; margin-top:3px; {co_cursor}">
@@ -3194,15 +3810,15 @@ def page_attendance_payout(filters: dict) -> str:
         elif status_filter == "payroll_only":
             row_total_content = f"""
             <div style="font-size:12px; line-height:1.4; white-space:nowrap; text-align:right;">
-              <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+              <span style="font-size:10px; color:#64748b; font-weight:600;">{l1_label}:</span>
               <b style="font-family:monospace; color:#1e293b; margin-left:4px;">{row_p_str}</b>
             </div>
             """
         else:
             row_total_content = f"""
             <div style="font-size:11.5px; line-height:1.4; white-space:nowrap;">
-              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;" title="Total FY Payroll">
-                <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;" title="Total FY {l1_label}">
+                <span style="font-size:10px; color:#64748b; font-weight:600;">{l1_label}:</span>
                 <b style="font-family:monospace; color:#1e293b;">{row_p_str}</b>
               </div>
               <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap; margin-top:3px;" title="Total FY Cash-out">
@@ -3231,7 +3847,7 @@ def page_attendance_payout(filters: dict) -> str:
         table_rows_html.append(f"""
         <tr>
           <td colspan="16" style="text-align:center; padding:36px; color:#64748b; font-size:14px;">
-            No annexes match the current filter in <b>{data['fy_name']}</b>.
+            No {empty_entity_desc} match the current filter in <b>{data['fy_name']}</b>.
           </td>
         </tr>
         """)
@@ -3259,16 +3875,16 @@ def page_attendance_payout(filters: dict) -> str:
             """
         elif status_filter == "payroll_only":
             footer_content = f"""
-            <div style="font-size:12px; text-align:right; white-space:nowrap;" title="Total Payroll for month {m}">
-              <span style="font-size:10px; color:#64748b; font-weight:600;">P:</span>
+            <div style="font-size:12px; text-align:right; white-space:nowrap;" title="Total {l1_label} for month {m}">
+              <span style="font-size:10px; color:#64748b; font-weight:600;">{l1_abbr}:</span>
               <b style="color:#1e293b; margin-left:4px;">{col_p_str}</b>
             </div>
             """
         else:
             footer_content = f"""
             <div style="font-size:11.5px; line-height:1.4; white-space:nowrap;">
-              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; color:#475569; white-space:nowrap;" title="Total Payroll for month {m}">
-                <span style="font-size:10px; color:#64748b; font-weight:600;">P:</span>
+              <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; color:#475569; white-space:nowrap;" title="Total {l1_label} for month {m}">
+                <span style="font-size:10px; color:#64748b; font-weight:600;">{l1_abbr}:</span>
                 <b>{col_p_str}</b>
               </div>
               <div style="display:flex; justify-content:space-between; align-items:center; gap:6px; color:#15803d; margin-top:3px; white-space:nowrap;" title="Total Cash-out for month {m}">
@@ -3292,8 +3908,8 @@ def page_attendance_payout(filters: dict) -> str:
         legend_html = f"""
         <div style="display:flex; align-items:center; flex-wrap:wrap; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
           <span style="font-size:9.5px; color:#166534; background:#dcfce7; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #bbf7d0;">Cash-out</span>
-          <span>Actual vendor disbursements (Payroll hidden)</span>
-          <span style="color:#64748b; margin-left:6px;">💡 <i>Hover Cash-out amounts to view service month & payment breakdown</i></span>
+          <span>Actual vendor disbursements ({l1_label} hidden)</span>
+          <span style="color:#64748b; margin-left:6px;">💡 <i>Hover Cash-out amounts to view breakdown</i></span>
         </div>
         """
         grand_total_content = f"""
@@ -3303,40 +3919,40 @@ def page_attendance_payout(filters: dict) -> str:
         </div>
         """
     elif status_filter == "payroll_only":
-        summary_banner = f"""Total FY Payroll: <span style="font-weight:bold; font-family:monospace; color:#0f172a; font-size:15px;">{grand_p_str}</span>"""
+        summary_banner = f"""Total FY {l1_label}: <span style="font-weight:bold; font-family:monospace; color:#0f172a; font-size:15px;">{grand_p_str}</span>"""
         legend_html = f"""
         <div style="display:flex; align-items:center; flex-wrap:wrap; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
-          <span style="font-size:9.5px; color:#64748b; background:#f1f5f9; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #cbd5e1;">Payroll</span>
-          <span>Locked monthly payroll accruals (Cash-out hidden)</span>
+          <span style="font-size:9.5px; color:#64748b; background:#f1f5f9; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #cbd5e1;">{l1_label}</span>
+          <span>{l1_desc} (Cash-out hidden)</span>
         </div>
         """
         grand_total_content = f"""
-        <div style="font-size:12px; text-align:right; white-space:nowrap;" title="Grand Total FY Payroll">
-          <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+        <div style="font-size:12px; text-align:right; white-space:nowrap;" title="Grand Total FY {l1_label}">
+          <span style="font-size:10px; color:#64748b; font-weight:600;">{l1_label}:</span>
           <b style="color:#1e293b; margin-left:4px; font-size:13px;">{grand_p_str}</b>
         </div>
         """
     else:
-        summary_banner = f"""Total FY Payroll: <span style="font-weight:bold; font-family:monospace; color:#0f172a; font-size:14px;">{grand_p_str}</span>
+        summary_banner = f"""Total FY {l1_label}: <span style="font-weight:bold; font-family:monospace; color:#0f172a; font-size:14px;">{grand_p_str}</span>
         &nbsp;&bull;&nbsp;
         Total FY Cash-out: <span style="font-weight:bold; font-family:monospace; color:#15803d; font-size:15px;">{grand_co_str}</span>"""
         legend_html = f"""
         <div style="display:flex; align-items:center; flex-wrap:wrap; gap:12px; font-size:11px; background:#f8fafc; padding:4px 10px; border-radius:6px; border:1px solid #e2e8f0;">
           <span style="display:inline-flex; align-items:center; gap:4px;">
-            <span style="font-size:9.5px; color:#64748b; background:#f1f5f9; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #cbd5e1;">Payroll</span>
-            <span>Locked accrual (Line 1)</span>
+            <span style="font-size:9.5px; color:#64748b; background:#f1f5f9; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #cbd5e1;">{l1_label}</span>
+            <span>{l1_desc} (Line 1)</span>
           </span>
           <span style="display:inline-flex; align-items:center; gap:4px;">
             <span style="font-size:9.5px; color:#166534; background:#dcfce7; padding:1px 4px; border-radius:3px; font-weight:600; border:1px solid #bbf7d0;">Cash-out</span>
             <span>Vendor payment (Line 2)</span>
           </span>
-          <span style="color:#64748b; margin-left:6px;">💡 <i>Hover Cash-out amounts to view service month & payment breakdown</i></span>
+          <span style="color:#64748b; margin-left:6px;">💡 <i>Hover Cash-out amounts to view breakdown</i></span>
         </div>
         """
         grand_total_content = f"""
         <div style="font-size:11.5px; line-height:1.4; white-space:nowrap;">
-          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;" title="Grand Total FY Payroll">
-            <span style="font-size:10px; color:#64748b; font-weight:600;">Payroll:</span>
+          <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap;" title="Grand Total FY {l1_label}">
+            <span style="font-size:10px; color:#64748b; font-weight:600;">{l1_label}:</span>
             <span style="font-weight:bold; color:#1e293b;">{grand_p_str}</span>
           </div>
           <div style="display:flex; justify-content:space-between; align-items:center; gap:8px; white-space:nowrap; margin-top:3px;" title="Grand Total FY Cash-out">
@@ -3349,10 +3965,14 @@ def page_attendance_payout(filters: dict) -> str:
     body = f"""
     {sub_nav}
 
+    <!-- 3 Payment Type Sub-tabs -->
+    {tabs_bar_html}
+
     <!-- Filters and Actions Card -->
     <div class="card" style="margin-bottom: 16px;">
       <div style="display:flex; justify-content:space-between; align-items:flex-end; flex-wrap:wrap; gap:16px;">
-        <form method="GET" action="/attendance/cashout" id="filterForm" class="filters" style="margin:0; display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end;">
+        <form method="GET" action="/payments" id="filterForm" class="filters" style="margin:0; display:flex; flex-wrap:wrap; gap:14px; align-items:flex-end;">
+          <input type="hidden" name="type" value="{billing_type}">
           <!-- Fiscal Year Calendar & Year Picker -->
           <div style="position:relative;">
             <div class="label" style="font-weight:600; font-size:12px; margin-bottom:4px;">Fiscal Year (FY)</div>
@@ -3398,7 +4018,7 @@ def page_attendance_payout(filters: dict) -> str:
           </div>
           <div>
             <div class="label" style="font-weight:600; font-size:12px; margin-bottom:4px;">Search</div>
-            <input type="text" name="q" value="{escape(q_filter)}" placeholder="Search vendor / annex..." style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; width:180px;">
+            <input type="text" name="q" value="{escape(q_filter)}" placeholder="Search vendor / contract..." style="padding:6px 10px; border:1px solid #cbd5e1; border-radius:6px; font-size:13px; width:180px;">
           </div>
           <div>
             <button type="submit" class="btn" style="padding:6px 14px; background:#4f46e5; color:#fff; border:none; border-radius:6px; font-size:13px; font-weight:600; cursor:pointer;">Filter</button>
@@ -3417,9 +4037,9 @@ def page_attendance_payout(filters: dict) -> str:
     <div class="card" style="padding: 0; overflow: hidden;">
       <div style="padding:16px 20px; border-bottom:1px solid #e2e8f0; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
         <div>
-          <h3 style="margin:0; font-size:16px; color:#0f172a;">Fiscal Year Cash-out Overview - {data['fy_name']}</h3>
+          <h3 style="margin:0; font-size:16px; color:#0f172a;">Fiscal Year Cash-out Overview - {data['fy_name']}{f' ({type_short_label})' if billing_type != 'tm' else ''}</h3>
           <p style="margin:4px 0 0; font-size:12px; color:#64748b;">
-            Period: 01/04/{fy} &rarr; 31/03/{fy+1} &bull; Ordered by Company Name &bull; Showing {len(data['rows'])} annexes
+            Period: 01/04/{fy} &rarr; 31/03/{fy+1} &bull; Ordered by Company Name &bull; Showing {len(data['rows'])} {empty_entity_desc}
           </p>
         </div>
         <div style="display:flex; align-items:center; gap:20px; flex-wrap:wrap;">
@@ -3436,7 +4056,7 @@ def page_attendance_payout(filters: dict) -> str:
             <tr style="background:#f1f5f9; border-bottom: 1px solid #cbd5e1;">
               <th rowspan="2" style="text-align:center; width:36px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">#</th>
               <th rowspan="2" style="text-align:left; min-width:190px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">Company (Vendor)</th>
-              <th rowspan="2" style="text-align:left; min-width:170px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">Framework / Annex</th>
+              <th rowspan="2" style="text-align:left; min-width:170px; vertical-align:middle; border-bottom: 2px solid #cbd5e1; white-space:nowrap;">{col3_title}</th>
               <th colspan="3" style="text-align:center; background:#e0f2fe; color:#0369a1; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; font-weight:700; padding:8px;">Quarter 1 (Q1)</th>
               <th colspan="3" style="text-align:center; background:#fef3c7; color:#b45309; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; font-weight:700; padding:8px;">Quarter 2 (Q2)</th>
               <th colspan="3" style="text-align:center; background:#ede9fe; color:#6d28d9; border-left:1px solid #cbd5e1; border-right:1px solid #cbd5e1; font-weight:700; padding:8px;">Quarter 3 (Q3)</th>
@@ -3594,11 +4214,12 @@ def page_attendance_payout(filters: dict) -> str:
         </div>`;
         
         items.forEach((it) => {{
-          html += `<div style="background:#1e293b; border-radius:6px; padding:7px 10px; margin-bottom:6px; border-left:3px solid #22c55e;">
-            <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
+          const monthLine = (it.service_month_formatted || it.service_month) ? `<div style="display:flex; justify-content:space-between; margin-bottom:3px;">
               <span style="color:#94a3b8; font-size:11px;">Paying for Month:</span>
               <b style="color:#38bdf8; font-family:monospace;">${{it.service_month_formatted || it.service_month}}</b>
-            </div>
+            </div>` : '';
+          html += `<div style="background:#1e293b; border-radius:6px; padding:7px 10px; margin-bottom:6px; border-left:3px solid #22c55e;">
+            ${{monthLine}}
             <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
               <span style="color:#94a3b8; font-size:11px;">Payment Date:</span>
               <span style="color:#f1f5f9; font-family:monospace;">${{it.cashout_date_formatted || it.cashout_date}}</span>
@@ -3656,7 +4277,8 @@ def page_attendance_payout(filters: dict) -> str:
     </script>
     """
 
-    return layout(f"Timesheet & Payroll - Cash-out {data['fy_name']}", body)
+    page_title = f"Timesheet & Payroll - Cash-out {data['fy_name']}" if billing_type == "tm" else f"Payments Dashboard - {type_title} - Cash-out {data['fy_name']}"
+    return layout(page_title, body)
 
 
 def handle_attendance_payout_export_get(handler):
@@ -3680,7 +4302,7 @@ def handle_attendance_payout_export_get(handler):
     status_raw = qs.get("status", ["all_active"])[0]
     if status_raw in ("cashed_out", "cashout_only"):
         status_filter = "cashout_only"
-    elif status_raw == "payroll_only":
+    elif status_raw in ("payroll_only", "planned_only", "fee_only"):
         status_filter = "payroll_only"
     elif status_raw == "all":
         status_filter = "all"
@@ -3690,22 +4312,44 @@ def handle_attendance_payout_export_get(handler):
     vendor_filter = parse_int_or_none(qs.get("vendor_id", [""])[0])
     q_filter = (qs.get("q", [""])[0] or "").strip()
 
+    billing_type_raw = qs.get("type", ["tm"])[0]
+    billing_type = (billing_type_raw or "tm").strip().lower()
+    if billing_type not in ("tm", "fixed_price", "recurring"):
+        billing_type = "tm"
+
     conn = db_connect()
     try:
-        data = get_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+        if billing_type == "fixed_price":
+            data = get_fixed_price_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+            type_title = "Fixed Price Milestones"
+            l1_header_name = "Planned"
+            col3_header = "Contract"
+            col4_header = "Project / Milestone"
+        elif billing_type == "recurring":
+            data = get_recurring_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+            type_title = "Recurring Services"
+            l1_header_name = "Monthly Fee"
+            col3_header = "Contract"
+            col4_header = "Service / Annex"
+        else:
+            data = get_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
+            type_title = "Time & Material"
+            l1_header_name = "Payroll"
+            col3_header = "Framework Contract"
+            col4_header = "Annex"
     finally:
         conn.close()
 
     output = io.StringIO()
     writer = csv.writer(output)
 
-    writer.writerow([f"Mizuho IT Outsourcing - Cash-out Report {data['fy_name']} (01/04/{fy} - 31/03/{fy+1})"])
+    writer.writerow([f"Mizuho IT Outsourcing - Cash-out Report {data['fy_name']} (01/04/{fy} - 31/03/{fy+1}) - {type_title}"])
     writer.writerow([f"Filter: {status_filter} | Exported At: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"])
     writer.writerow([])
 
     if status_filter == "cashout_only":
         csv_header = [
-            "No.", "Company", "Framework Contract", "Annex",
+            "No.", "Company", col3_header, col4_header,
             f"Q1 - Apr (04/{fy}) Cash-out", f"Q1 - May (05/{fy}) Cash-out", f"Q1 - Jun (06/{fy}) Cash-out", "Q1 Cash-out Subtotal",
             f"Q2 - Jul (07/{fy}) Cash-out", f"Q2 - Aug (08/{fy}) Cash-out", f"Q2 - Sep (09/{fy}) Cash-out", "Q2 Cash-out Subtotal",
             f"Q3 - Oct (10/{fy}) Cash-out", f"Q3 - Nov (11/{fy}) Cash-out", f"Q3 - Dec (12/{fy}) Cash-out", "Q3 Cash-out Subtotal",
@@ -3742,12 +4386,12 @@ def handle_attendance_payout_export_get(handler):
 
     elif status_filter == "payroll_only":
         csv_header = [
-            "No.", "Company", "Framework Contract", "Annex",
-            f"Q1 - Apr (04/{fy}) Payroll", f"Q1 - May (05/{fy}) Payroll", f"Q1 - Jun (06/{fy}) Payroll", "Q1 Payroll Subtotal",
-            f"Q2 - Jul (07/{fy}) Payroll", f"Q2 - Aug (08/{fy}) Payroll", f"Q2 - Sep (09/{fy}) Payroll", "Q2 Payroll Subtotal",
-            f"Q3 - Oct (10/{fy}) Payroll", f"Q3 - Nov (11/{fy}) Payroll", f"Q3 - Dec (12/{fy}) Payroll", "Q3 Payroll Subtotal",
-            f"Q4 - Jan (01/{fy+1}) Payroll", f"Q4 - Feb (02/{fy+1}) Payroll", f"Q4 - Mar (03/{fy+1}) Payroll", "Q4 Payroll Subtotal",
-            f"Total FY Payroll"
+            "No.", "Company", col3_header, col4_header,
+            f"Q1 - Apr (04/{fy}) {l1_header_name}", f"Q1 - May (05/{fy}) {l1_header_name}", f"Q1 - Jun (06/{fy}) {l1_header_name}", f"Q1 {l1_header_name} Subtotal",
+            f"Q2 - Jul (07/{fy}) {l1_header_name}", f"Q2 - Aug (08/{fy}) {l1_header_name}", f"Q2 - Sep (09/{fy}) {l1_header_name}", f"Q2 {l1_header_name} Subtotal",
+            f"Q3 - Oct (10/{fy}) {l1_header_name}", f"Q3 - Nov (11/{fy}) {l1_header_name}", f"Q3 - Dec (12/{fy}) {l1_header_name}", f"Q3 {l1_header_name} Subtotal",
+            f"Q4 - Jan (01/{fy+1}) {l1_header_name}", f"Q4 - Feb (02/{fy+1}) {l1_header_name}", f"Q4 - Mar (03/{fy+1}) {l1_header_name}", f"Q4 {l1_header_name} Subtotal",
+            f"Total FY {l1_header_name}"
         ]
         writer.writerow(csv_header)
         for idx, r in enumerate(data["rows"], 1):
@@ -3780,24 +4424,24 @@ def handle_attendance_payout_export_get(handler):
     else:
         # all_active or all
         csv_header = [
-            "No.", "Company", "Framework Contract", "Annex",
-            f"Q1 - Apr (04/{fy}) Payroll", f"Q1 - Apr (04/{fy}) Cash-out",
-            f"Q1 - May (05/{fy}) Payroll", f"Q1 - May (05/{fy}) Cash-out",
-            f"Q1 - Jun (06/{fy}) Payroll", f"Q1 - Jun (06/{fy}) Cash-out",
-            "Q1 Payroll Subtotal", "Q1 Cash-out Subtotal",
-            f"Q2 - Jul (07/{fy}) Payroll", f"Q2 - Jul (07/{fy}) Cash-out",
-            f"Q2 - Aug (08/{fy}) Payroll", f"Q2 - Aug (08/{fy}) Cash-out",
-            f"Q2 - Sep (09/{fy}) Payroll", f"Q2 - Sep (09/{fy}) Cash-out",
-            "Q2 Payroll Subtotal", "Q2 Cash-out Subtotal",
-            f"Q3 - Oct (10/{fy}) Payroll", f"Q3 - Oct (10/{fy}) Cash-out",
-            f"Q3 - Nov (11/{fy}) Payroll", f"Q3 - Nov (11/{fy}) Cash-out",
-            f"Q3 - Dec (12/{fy}) Payroll", f"Q3 - Dec (12/{fy}) Cash-out",
-            "Q3 Payroll Subtotal", "Q3 Cash-out Subtotal",
-            f"Q4 - Jan (01/{fy+1}) Payroll", f"Q4 - Jan (01/{fy+1}) Cash-out",
-            f"Q4 - Feb (02/{fy+1}) Payroll", f"Q4 - Feb (02/{fy+1}) Cash-out",
-            f"Q4 - Mar (03/{fy+1}) Payroll", f"Q4 - Mar (03/{fy+1}) Cash-out",
-            "Q4 Payroll Subtotal", "Q4 Cash-out Subtotal",
-            f"Total FY Payroll", f"Total FY Cash-out"
+            "No.", "Company", col3_header, col4_header,
+            f"Q1 - Apr (04/{fy}) {l1_header_name}", f"Q1 - Apr (04/{fy}) Cash-out",
+            f"Q1 - May (05/{fy}) {l1_header_name}", f"Q1 - May (05/{fy}) Cash-out",
+            f"Q1 - Jun (06/{fy}) {l1_header_name}", f"Q1 - Jun (06/{fy}) Cash-out",
+            f"Q1 {l1_header_name} Subtotal", "Q1 Cash-out Subtotal",
+            f"Q2 - Jul (07/{fy}) {l1_header_name}", f"Q2 - Jul (07/{fy}) Cash-out",
+            f"Q2 - Aug (08/{fy}) {l1_header_name}", f"Q2 - Aug (08/{fy}) Cash-out",
+            f"Q2 - Sep (09/{fy}) {l1_header_name}", f"Q2 - Sep (09/{fy}) Cash-out",
+            f"Q2 {l1_header_name} Subtotal", "Q2 Cash-out Subtotal",
+            f"Q3 - Oct (10/{fy}) {l1_header_name}", f"Q3 - Oct (10/{fy}) Cash-out",
+            f"Q3 - Nov (11/{fy}) {l1_header_name}", f"Q3 - Nov (11/{fy}) Cash-out",
+            f"Q3 - Dec (12/{fy}) {l1_header_name}", f"Q3 - Dec (12/{fy}) Cash-out",
+            f"Q3 {l1_header_name} Subtotal", "Q3 Cash-out Subtotal",
+            f"Q4 - Jan (01/{fy+1}) {l1_header_name}", f"Q4 - Jan (01/{fy+1}) Cash-out",
+            f"Q4 - Feb (02/{fy+1}) {l1_header_name}", f"Q4 - Feb (02/{fy+1}) Cash-out",
+            f"Q4 - Mar (03/{fy+1}) {l1_header_name}", f"Q4 - Mar (03/{fy+1}) Cash-out",
+            f"Q4 {l1_header_name} Subtotal", "Q4 Cash-out Subtotal",
+            f"Total FY {l1_header_name}", f"Total FY Cash-out"
         ]
         writer.writerow(csv_header)
 
@@ -3855,7 +4499,7 @@ def handle_attendance_payout_export_get(handler):
         writer.writerow(tot_row)
 
     csv_bytes = output.getvalue().encode("utf-8-sig")
-    fn = f"cashout_{data['fy_name']}.csv"
+    fn = f"cashout_{data['fy_name']}.csv" if billing_type == "tm" else f"cashout_{billing_type}_{data['fy_name']}.csv"
     handler.send_response(200)
     handler.send_header("Content-Type", "text/csv; charset=utf-8")
     handler.send_header("Content-Length", str(len(csv_bytes)))
