@@ -670,28 +670,53 @@ def layout(title: str, body_html: str):
     nav = """
     <div class="nav-container">
       <a href="/dashboard" class="nav-link">Dashboard</a>
-      <a href="/" class="nav-link">Invoices</a>
-      <a href="/vendors" class="nav-link">Vendors</a>
-      <a href="/contracts" class="nav-link">Contracts</a>
+
       <div class="nav-dropdown">
-        <a href="/staff" class="nav-link nav-dropdown-toggle">Staff <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
+        <a href="/contracts" class="nav-link nav-dropdown-toggle">Contracts & Vendors <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
         <div class="nav-dropdown-menu">
-          <a href="/projects/assign#add-staff-section" class="nav-dropdown-item">Assign Staff to Project</a>
+          <a href="/vendors" class="nav-dropdown-item">🏢 Vendors</a>
+          <a href="/contracts" class="nav-dropdown-item">📄 Contracts & Annexes</a>
+          <a href="/contracts/references" class="nav-dropdown-item">🏷️ Reference Numbers</a>
         </div>
       </div>
-      <a href="/projects" class="nav-link">Projects</a>
+
       <div class="nav-dropdown">
-        <a href="/payments" class="nav-link nav-dropdown-toggle">Payments <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
+        <a href="/projects" class="nav-link nav-dropdown-toggle">Projects & Resources <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
         <div class="nav-dropdown-menu">
-          <a href="/payments" class="nav-dropdown-item">Dashboard</a>
-          <a href="/attendance" class="nav-dropdown-item">Timesheet & Payroll (T&M)</a>
-          <a href="/payments/fixed-price" class="nav-dropdown-item">Fixed Price (Milestones)</a>
-          <a href="/payments/recurring" class="nav-dropdown-item">Recurring Services (Internet/SaaS)</a>
+          <a href="/projects" class="nav-dropdown-item">📁 Projects</a>
+          <a href="/projects/assign#add-staff-section" class="nav-dropdown-item">👤 Assign Staff to Project</a>
+          <a href="/staff" class="nav-dropdown-item">👥 Staff List</a>
+          <div style="border-top: 1px solid #f1f5f9; margin: 4px 0;"></div>
+          <a href="/attendance" class="nav-dropdown-item">📅 Monthly Timesheet</a>
+          <a href="/attendance/monthly" class="nav-dropdown-item">🔒 Monthly Payroll Lock</a>
+          <a href="/attendance/acceptance" class="nav-dropdown-item">📝 T&M Acceptance</a>
+          <div style="border-top: 1px solid #f1f5f9; margin: 4px 0;"></div>
+          <a href="/staff/shifts" class="nav-dropdown-item">⏰ Work Shifts Settings</a>
         </div>
       </div>
-      <a href="/audit-logs" class="nav-link">Audit Logs</a>
-      <a href="/playwright" class="nav-link">UAT Runner</a>
-      <a href="/unit-tests" class="nav-link">Unit Tests</a>
+
+      <div class="nav-dropdown">
+        <a href="/payments" class="nav-link nav-dropdown-toggle">Payments & Invoices <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
+        <div class="nav-dropdown-menu">
+          <a href="/payments" class="nav-dropdown-item">📊 Cash-out Dashboard</a>
+          <a href="/" class="nav-dropdown-item">🧾 Invoices & Reconciliation</a>
+          <div style="border-top: 1px solid #f1f5f9; margin: 4px 0;"></div>
+          <a href="/payments?type=tm" class="nav-dropdown-item">💵 Timesheet & Payroll (T&M)</a>
+          <a href="/payments/fixed-price" class="nav-dropdown-item">🎯 Fixed Price (Milestones)</a>
+          <a href="/payments/recurring" class="nav-dropdown-item">🌐 Recurring Services (Internet/SaaS)</a>
+          <div style="border-top: 1px solid #f1f5f9; margin: 4px 0;"></div>
+          <a href="/invoice/new" class="nav-dropdown-item">📥 Import Invoice</a>
+        </div>
+      </div>
+
+      <div class="nav-dropdown">
+        <a href="/audit-logs" class="nav-link nav-dropdown-toggle">System & Tools <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
+        <div class="nav-dropdown-menu">
+          <a href="/audit-logs" class="nav-dropdown-item">📋 Audit Logs</a>
+          <a href="/unit-tests" class="nav-dropdown-item">🧪 Unit Test Runner</a>
+          <a href="/playwright" class="nav-dropdown-item">🎭 UAT Playwright Runner</a>
+        </div>
+      </div>
     </div>
     """
     return f"""<!doctype html>
@@ -1153,11 +1178,29 @@ def layout(title: str, body_html: str):
   <script>
     window.addEventListener('DOMContentLoaded', () => {{
       // Auto-set active navigation links
-      document.querySelectorAll('.nav-link').forEach(link => {{
-        const path = window.location.pathname;
-        const href = link.getAttribute('href');
-        if (path === href || (href !== '/' && path.startsWith(href)) || (href === '/payments' && path.startsWith('/attendance')) || (href === '/attendance' && path.startsWith('/payments'))) {{
+      const path = window.location.pathname;
+      document.querySelectorAll('.nav-dropdown').forEach(dd => {{
+        const toggle = dd.querySelector('.nav-dropdown-toggle');
+        const items = Array.from(dd.querySelectorAll('.nav-dropdown-item')).map(a => a.getAttribute('href').split('#')[0].split('?')[0]);
+        const toggleHref = toggle ? toggle.getAttribute('href').split('?')[0] : '';
+        const isMatch = items.some(h => (h === '/' ? path === '/' : (path === h || (h !== '/' && path.startsWith(h))))) ||
+                        (toggleHref && (toggleHref === '/' ? path === '/' : (path === toggleHref || (toggleHref !== '/' && path.startsWith(toggleHref)))));
+        if (isMatch && toggle) {{
+          toggle.classList.add('active');
+        }}
+      }});
+      document.querySelectorAll('.nav-container > .nav-link').forEach(link => {{
+        const href = link.getAttribute('href').split('?')[0];
+        if (href === path || (href !== '/' && path.startsWith(href))) {{
           link.classList.add('active');
+        }}
+      }});
+      document.querySelectorAll('.nav-dropdown-item').forEach(item => {{
+        const href = item.getAttribute('href').split('#')[0].split('?')[0];
+        if (href === path || (href === '/' && path === '/') || (href !== '/' && path.startsWith(href))) {{
+          item.style.fontWeight = '700';
+          item.style.color = 'var(--primary)';
+          item.style.backgroundColor = '#f1f5f9';
         }}
       }});
 

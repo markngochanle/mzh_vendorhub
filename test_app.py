@@ -2565,12 +2565,20 @@ class TestProjects(BaseTestCase):
         self.assertIn("3,000,000", pdf_html)   # Staff 2 Man-day rate
 
     def test_staff_submenu_assign_to_project(self):
-        # 1. Verify layout contains Staff sub-menu link for Assign Staff to Project
+        # 1. Verify layout contains 5 structured navigation clusters (Option 1)
         html = common.layout("Test Title", "<p>Content</p>")
+        self.assertIn("Contracts & Vendors", html)
+        self.assertIn("Projects & Resources", html)
+        self.assertIn("Payments & Invoices", html)
+        self.assertIn("System & Tools", html)
         self.assertIn("Assign Staff to Project", html)
         self.assertIn("/projects/assign#add-staff-section", html)
-        self.assertIn('Timesheet & Payroll (T&M)', html)
-        self.assertIn('Payments', html)
+        self.assertIn("Timesheet & Payroll (T&M)", html)
+        self.assertIn("Payments", html)
+        self.assertIn("/contracts/references", html)
+        self.assertIn("/audit-logs", html)
+        self.assertIn("/unit-tests", html)
+        self.assertIn("/playwright", html)
 
         # 2. Verify /projects/assign page contains Add New Staff member to Project form with id="add-staff-section"
         cur = self.conn.cursor()
