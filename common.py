@@ -699,12 +699,12 @@ def layout(title: str, body_html: str):
         <a href="/payments" class="nav-link nav-dropdown-toggle">Payments & Invoices <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
         <div class="nav-dropdown-menu">
           <a href="/payments" class="nav-dropdown-item">📊 Cash-out Dashboard</a>
-          <a href="/" class="nav-dropdown-item">🧾 Invoices & Reconciliation</a>
           <div style="border-top: 1px solid #f1f5f9; margin: 4px 0;"></div>
           <a href="/payments?type=tm" class="nav-dropdown-item">💵 Timesheet & Payroll (T&M)</a>
           <a href="/payments/fixed-price" class="nav-dropdown-item">🎯 Fixed Price (Milestones)</a>
           <a href="/payments/recurring" class="nav-dropdown-item">🌐 Recurring Services (Internet/SaaS)</a>
           <div style="border-top: 1px solid #f1f5f9; margin: 4px 0;"></div>
+          <a href="/" class="nav-dropdown-item">🧾 Invoices & Reconciliation</a>
           <a href="/invoice/new" class="nav-dropdown-item">📥 Import Invoice</a>
         </div>
       </div>
