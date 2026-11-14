@@ -184,38 +184,44 @@ def run_playwright_tests():
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_dashboard.png"))
                 
-                # Navigate to Vendors
-                page.click("text=Vendors")
+                # Navigate to Vendors via Contracts & Vendors dropdown
+                page.hover(".nav-dropdown:has-text('Contracts & Vendors')")
+                page.click("a[href='/vendors']")
                 page.wait_for_selector("text=Search Vendor")
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_vendors.png"))
                 
-                # Navigate to Contracts
-                page.click("text=Contracts")
+                # Navigate to Contracts via Contracts & Vendors dropdown
+                page.hover(".nav-dropdown:has-text('Contracts & Vendors')")
+                page.click("a[href='/contracts']")
                 page.wait_for_selector("text=+ Add Contract")
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_contracts.png"))
                 
-                # Navigate to Staff
-                page.click("text=Staff")
+                # Navigate to Staff via Projects & Resources dropdown
+                page.hover(".nav-dropdown:has-text('Projects & Resources')")
+                page.click("a[href='/staff']")
                 page.wait_for_selector("text=+ Add Staff")
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_staff.png"))
                 
-                # Navigate to Attendance
+                # Navigate to Attendance via Projects & Resources dropdown
+                page.hover(".nav-dropdown:has-text('Projects & Resources')")
                 page.click("a[href='/attendance']")
                 page.wait_for_selector("text=Import attendance data")
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_attendance.png"))
                 
-                # Navigate to Invoices
-                page.click("text=Invoices")
+                # Navigate to Invoices via Payments & Invoices dropdown
+                page.hover(".nav-dropdown:has-text('Payments & Invoices')")
+                page.click("a[href='/']")
                 page.wait_for_selector("text=+ Import Invoice")
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_invoices.png"))
                 
-                # Navigate to Audit Logs
-                page.click("text=Audit Logs")
+                # Navigate to Audit Logs via System & Tools dropdown
+                page.hover(".nav-dropdown:has-text('System & Tools')")
+                page.click("a[href='/audit-logs']")
                 page.wait_for_selector("text=Search Details")
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_audit.png"))
@@ -362,7 +368,7 @@ def run_playwright_tests():
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat5_attendance_input_saved.png"))
                 
                 # Lock the attendance log of this staff
-                page.click("text=Lock")
+                page.click("a[href*='/attendance/lock']")
                 page.wait_for_timeout(300)
                 
                 # Verify it is locked (input should be disabled)
@@ -827,7 +833,7 @@ def run_playwright_tests():
                 if show:
                     print("\n[UAT 26] Unlocking Attendance Log...")
                 page.goto(f"{base_url}/attendance?month=2026-01")
-                page.click("text=Unlock")
+                page.click("a[href*='/attendance/unlock']")
                 page.wait_for_timeout(300)
                 att_input_selector = "input[name='w_1_2026-01-01']"
                 is_disabled = page.eval_on_selector(att_input_selector, "el => el.disabled")
