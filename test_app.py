@@ -3482,6 +3482,181 @@ Content-Disposition: form-data; name="xml_content"
             shutil.rmtree(temp_dir, ignore_errors=True)
 
 
+class TestContractRenewal(BaseTestCase):
+    def test_calculate_suggested_renewal_end_date(self):
+        # 1-year duration
+        sug1 = contracts.calculate_suggested_renewal_end_date("2025-01-01", "2025-12-31")
+        self.assertEqual(sug1, "2026-12-31")
+
+        # 6-month duration (~181 days)
+        sug2 = contracts.calculate_suggested_renewal_end_date("2026-01-01", "2026-06-30")
+        self.assertEqual(sug2, "2026-12-31")
+
+        # Explicit period months
+        sug3 = contracts.calculate_suggested_renewal_end_date("2026-01-01", "2026-03-31", period_months=3)
+        self.assertEqual(sug3, "2026-06-30")
+
+        # None or invalid input
+        self.assertEqual(contracts.calculate_suggested_renewal_end_date(None, None), "")
+        self.assertEqual(contracts.calculate_suggested_renewal_end_date("2025-01-01", ""), "")
+
+    def test_get_contract_renewal_status(self):
+        from datetime import date
+        today = date(2026, 6, 1)
+
+        # Active contract (> 60 days left)
+        r_active = {"end_date": "2026-12-31", "renewal_type": "MANUAL", "renewal_notice_days": 60}
+        st_active = contracts.get_contract_renewal_status(r_active, today_date=today)
+        self.assertEqual(st_active["status"], "ACTIVE")
+        self.assertGreater(st_active["days_left"], 60)
+
+        # Renewal Due contract (<= 60 days left, MANUAL)
+        r_due = {"end_date": "2026-07-15", "renewal_type": "MANUAL", "renewal_notice_days": 60}
+        st_due = contracts.get_contract_renewal_status(r_due, today_date=today)
+        self.assertEqual(st_due["status"], "RENEWAL_DUE")
+        self.assertEqual(st_due["days_left"], 44)
+        self.assertIn("Renewal Due", st_due["badge"])
+
+        # Expiring soon (<= 60 days left, NONE)
+        r_none = {"end_date": "2026-07-15", "renewal_type": "NONE", "renewal_notice_days": 60}
+        st_none = contracts.get_contract_renewal_status(r_none, today_date=today)
+        self.assertEqual(st_none["status"], "EXPIRING_SOON")
+        self.assertIn("Ending soon", st_none["badge"])
+
+        # Expired contract (< 0 days)
+        r_exp = {"end_date": "2026-05-15", "renewal_type": "MANUAL", "renewal_notice_days": 60}
+        st_exp = contracts.get_contract_renewal_status(r_exp, today_date=today)
+        self.assertEqual(st_exp["status"], "EXPIRED")
+        self.assertEqual(st_exp["days_left"], -17)
+
+        # No expiry contract
+        r_no_exp = {"end_date": None, "renewal_type": "MANUAL"}
+        st_no_exp = contracts.get_contract_renewal_status(r_no_exp, today_date=today)
+        self.assertEqual(st_no_exp["status"], "NO_EXPIRY")
+
+    def test_contract_creation_defaults_and_custom_renewal(self):
+        # 1. Create with defaults
+        body_default = (
+            f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/DEF/01&framework_name=Default+Renewal&start_date=2026-01-01&end_date=2026-12-31"
+        ).encode()
+        h_def = MockHandler(body=body_default, headers={"content-length": str(len(body_default))})
+        contracts.handle_contract_create_post(h_def)
+        self.assertEqual(h_def.response_status, 302)
+
+        c_def = self.conn.execute("SELECT * FROM contracts WHERE framework_no='MHB/DEF/01'").fetchone()
+        self.assertIsNotNone(c_def)
+        self.assertEqual(c_def["renewal_type"], "MANUAL")
+        self.assertEqual(c_def["renewal_notice_days"], 60)
+
+        # 2. Create with custom renewal policy
+        body_custom = (
+            f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/AUTO/02&framework_name=Auto+Renewal&start_date=2026-01-01&end_date=2026-12-31&"
+            f"renewal_type=AUTO&renewal_notice_days=45&renewal_period_months=12&renewal_note=Automatic+annual+extension"
+        ).encode()
+        h_custom = MockHandler(body=body_custom, headers={"content-length": str(len(body_custom))})
+        contracts.handle_contract_create_post(h_custom)
+        self.assertEqual(h_custom.response_status, 302)
+
+        c_custom = self.conn.execute("SELECT * FROM contracts WHERE framework_no='MHB/AUTO/02'").fetchone()
+        self.assertIsNotNone(c_custom)
+        self.assertEqual(c_custom["renewal_type"], "AUTO")
+        self.assertEqual(c_custom["renewal_notice_days"], 45)
+        self.assertEqual(c_custom["renewal_period_months"], 12)
+        self.assertEqual(c_custom["renewal_note"], "Automatic annual extension")
+
+    def test_contract_update_renewal_policy(self):
+        body_update = (
+            f"id={self.contract_id}&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&"
+            f"framework_no=MHB/FPT/2025/001&framework_name=Updated+Policy&start_date=2025-01-01&end_date=2026-12-31&"
+            f"renewal_type=AUTO&renewal_notice_days=90&renewal_period_months=6&renewal_note=Updated+terms"
+        ).encode()
+        h_up = MockHandler(body=body_update, headers={"content-length": str(len(body_update))})
+        contracts.handle_contract_update_post(h_up)
+        self.assertEqual(h_up.response_status, 302)
+
+        c = self.conn.execute("SELECT * FROM contracts WHERE id=?", (self.contract_id,)).fetchone()
+        self.assertEqual(c["renewal_type"], "AUTO")
+        self.assertEqual(c["renewal_notice_days"], 90)
+        self.assertEqual(c["renewal_period_months"], 6)
+        self.assertEqual(c["renewal_note"], "Updated terms")
+
+    def test_handle_contract_renew_post(self):
+        # Initial end_date is 2026-12-31
+        body_renew = (
+            f"id={self.contract_id}&new_end_date=2027-12-31&renewal_note=Extension+Annex+02&return_to=/contracts"
+        ).encode()
+        h_renew = MockHandler(body=body_renew, headers={"content-length": str(len(body_renew))})
+        contracts.handle_contract_renew_post(h_renew)
+        self.assertEqual(h_renew.response_status, 302)
+
+        c = self.conn.execute("SELECT * FROM contracts WHERE id=?", (self.contract_id,)).fetchone()
+        self.assertEqual(c["end_date"], "2027-12-31")
+        self.assertIsNotNone(c["last_renewed_at"])
+        self.assertIn("Extension Annex 02", c["renewal_note"])
+        self.assertIn("Renewed to 2027-12-31", c["renewal_note"])
+
+        # Check audit log
+        audit = self.conn.execute("SELECT * FROM audit_logs WHERE record_id=? AND action='RENEW_CONTRACT'", (self.contract_id,)).fetchone()
+        self.assertIsNotNone(audit)
+        self.assertIn("Renewed contract", audit["description"])
+
+    def test_handle_contract_renew_validation(self):
+        # Missing new_end_date
+        body_bad = f"id={self.contract_id}&new_end_date=&renewal_note=Test".encode()
+        h_bad = MockHandler(body=body_bad, headers={"content-length": str(len(body_bad))})
+        contracts.handle_contract_renew_post(h_bad)
+        self.assertEqual(h_bad.response_status, 400)
+
+        # Invalid ID
+        body_invalid_id = b"id=abc&new_end_date=2027-12-31"
+        h_inv = MockHandler(body=body_invalid_id, headers={"content-length": str(len(body_invalid_id))})
+        contracts.handle_contract_renew_post(h_inv)
+        self.assertEqual(h_inv.response_status, 400)
+
+        # Non-existent ID
+        body_not_found = b"id=999999&new_end_date=2027-12-31"
+        h_nf = MockHandler(body=body_not_found, headers={"content-length": str(len(body_not_found))})
+        contracts.handle_contract_renew_post(h_nf)
+        self.assertEqual(h_nf.response_status, 404)
+
+    def test_contract_list_and_renewal_ui(self):
+        # Set contract to expire in 10 days to trigger renewal due
+        from datetime import date, timedelta
+        soon = (date.today() + timedelta(days=10)).isoformat()
+        self.conn.execute("UPDATE contracts SET end_date=?, renewal_type='MANUAL', renewal_notice_days=60 WHERE id=?", (soon, self.contract_id))
+        self.conn.commit()
+
+        # View contracts list
+        html_list = contracts.page_contracts_list(return_to="/contracts")
+        self.assertIn("Manual-Renew", html_list)
+        self.assertIn("Renewal Due", html_list)
+        self.assertIn("openRenewalModal", html_list)
+
+        # View contract edit form
+        c_row = self.conn.execute("SELECT * FROM contracts WHERE id=?", (self.contract_id,)).fetchone()
+        html_edit = contracts.page_contract_form("edit", c_row, [])
+        self.assertIn("Contract Renewal & Validity", html_edit)
+        self.assertIn("Renewal Policy", html_edit)
+        self.assertIn("Renewal Notice Period", html_edit)
+
+        # Check server route GET /contracts with renewal filter
+        stub = StubHandler("/contracts?renewal_type=MANUAL&renewal_due=1", method="GET")
+        stub.do_GET()
+        self.assertEqual(stub.response_status, 200)
+        self.assertIn("MHB/FPT/2025/001", stub.get_output_text())
+
+        # Check server route POST /contract/renew
+        body_post = f"id={self.contract_id}&new_end_date=2028-06-30&renewal_note=Via+Server+Route".encode()
+        stub_post = StubHandler("/contract/renew", method="POST", headers={"content-length": str(len(body_post))}, body=body_post)
+        stub_post.do_POST()
+        self.assertEqual(stub_post.response_status, 302)
+
+        c_updated = self.conn.execute("SELECT end_date FROM contracts WHERE id=?", (self.contract_id,)).fetchone()
+        self.assertEqual(c_updated["end_date"], "2028-06-30")
+
+
 if __name__ == "__main__":
     unittest.main()
 

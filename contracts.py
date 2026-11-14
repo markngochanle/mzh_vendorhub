@@ -27,11 +27,131 @@ def load_vendor_options(purchasing: int):
     finally:
         conn.close()
 
-def page_contracts_list(q: str, status: str, *, return_to: str):
+def calculate_suggested_renewal_end_date(start_date_str: str | None, end_date_str: str | None, period_months: int | None = None) -> str:
+    """
+    Calculates suggested new end date based on original contract duration or period_months.
+    """
+    if not end_date_str:
+        return ""
+    from datetime import datetime, timedelta, date
+    import calendar
+    try:
+        cur_end = datetime.strptime(str(end_date_str)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return ""
+
+    if period_months and period_months > 0:
+        m = cur_end.month - 1 + period_months
+        y = cur_end.year + m // 12
+        mo = m % 12 + 1
+        is_last_day = (cur_end.day == calendar.monthrange(cur_end.year, cur_end.month)[1])
+        d = calendar.monthrange(y, mo)[1] if is_last_day else min(cur_end.day, calendar.monthrange(y, mo)[1])
+        return datetime(y, mo, d).strftime("%Y-%m-%d")
+
+    if start_date_str:
+        try:
+            cur_start = datetime.strptime(str(start_date_str)[:10], "%Y-%m-%d").date()
+            if cur_end > cur_start:
+                days = (cur_end - cur_start).days
+                if 350 <= days <= 370:
+                    try:
+                        return cur_end.replace(year=cur_end.year + 1).strftime("%Y-%m-%d")
+                    except ValueError:
+                        return (cur_end + timedelta(days=365)).strftime("%Y-%m-%d")
+                elif 170 <= days <= 190:
+                    m = cur_end.month - 1 + 6
+                    y = cur_end.year + m // 12
+                    mo = m % 12 + 1
+                    is_last_day = (cur_end.day == calendar.monthrange(cur_end.year, cur_end.month)[1])
+                    d = calendar.monthrange(y, mo)[1] if is_last_day else min(cur_end.day, calendar.monthrange(y, mo)[1])
+                    return datetime(y, mo, d).strftime("%Y-%m-%d")
+                else:
+                    return (cur_end + timedelta(days=days)).strftime("%Y-%m-%d")
+        except Exception:
+            pass
+
+    try:
+        return cur_end.replace(year=cur_end.year + 1).strftime("%Y-%m-%d")
+    except ValueError:
+        return (cur_end + timedelta(days=365)).strftime("%Y-%m-%d")
+
+
+def get_contract_renewal_status(r, today_date=None):
+    from datetime import datetime, date
+    if today_date is None:
+        today_date = date.today()
+
+    r_dict = dict(r) if hasattr(r, "keys") else (r if isinstance(r, dict) else {})
+    end_date_str = r_dict.get("end_date")
+    renewal_type = (r_dict.get("renewal_type") or "MANUAL").upper()
+    notice_days = r_dict.get("renewal_notice_days")
+    if notice_days is None:
+        notice_days = 60
+    else:
+        try:
+            notice_days = int(notice_days)
+        except ValueError:
+            notice_days = 60
+
+    if not end_date_str:
+        return {
+            "status": "NO_EXPIRY",
+            "label": "No Expiry",
+            "days_left": None,
+            "badge": '<span class="tag" style="background:#f1f5f9; color:#64748b;">No Expiry</span>'
+        }
+
+    try:
+        end_d = datetime.strptime(str(end_date_str)[:10], "%Y-%m-%d").date()
+    except Exception:
+        return {
+            "status": "INVALID",
+            "label": "Invalid Date",
+            "days_left": None,
+            "badge": '<span class="tag tag-deactive">Invalid Date</span>'
+        }
+
+    days_left = (end_d - today_date).days
+
+    if days_left < 0:
+        return {
+            "status": "EXPIRED",
+            "label": f"Expired ({abs(days_left)}d ago)",
+            "days_left": days_left,
+            "badge": f'<span class="tag tag-deactive">Expired ({abs(days_left)}d ago)</span>'
+        }
+    elif days_left <= notice_days:
+        if renewal_type == "NONE":
+            return {
+                "status": "EXPIRING_SOON",
+                "label": f"Ending soon ({days_left}d left)",
+                "days_left": days_left,
+                "badge": f'<span class="tag tag-warning">Ending soon ({days_left}d left)</span>'
+            }
+        else:
+            return {
+                "status": "RENEWAL_DUE",
+                "label": f"Renewal Due ({days_left}d left)",
+                "days_left": days_left,
+                "badge": f'<span class="tag" style="background:#fef3c7; color:#92400e; border:1px solid #fde68a; font-weight:600;">⚠️ Renewal Due ({days_left}d left)</span>'
+            }
+    else:
+        return {
+            "status": "ACTIVE",
+            "label": f"Active ({days_left}d left)",
+            "days_left": days_left,
+            "badge": '<span class="tag tag-active">Active</span>'
+        }
+
+
+def page_contracts_list(q: str = "", status: str = "active", renewal_type: str = "all", renewal_due: str = "", *, return_to: str):
     q = (q or "").strip()
     status = (status or "active").strip().lower()  # active|deleted|all
     if status not in ("active", "deleted", "all"):
         status = "active"
+
+    renewal_type = (renewal_type or "all").strip().upper()
+    renewal_due = (renewal_due or "").strip().lower()
 
     where = []
     params = []
@@ -40,6 +160,13 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
         where.append("c.is_active = 1")
     elif status == "deleted":
         where.append("c.is_active = 0")
+
+    if renewal_type in ("MANUAL", "AUTO", "NONE"):
+        where.append("c.renewal_type = ?")
+        params.append(renewal_type)
+
+    if renewal_due in ("1", "true", "yes", "due"):
+        where.append("c.end_date IS NOT NULL AND c.end_date != '' AND c.end_date <= date('now', '+' || COALESCE(c.renewal_notice_days, 60) || ' days')")
 
     if q:
         where.append("""(
@@ -77,7 +204,7 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
     filter_html = f"""
     <div class="card">
       <form class="filters" method="GET" action="/contracts">
-        <div style="min-width:320px;">
+        <div style="min-width:260px;">
           <div class="label">Search</div>
           <input type="text" name="q" placeholder="Contract No / Name / Tax ID..." value="{escape(q)}" style="width:100%;">
         </div>
@@ -88,6 +215,21 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
             <option value="deleted" {"selected" if status=="deleted" else ""}>Deleted</option>
             <option value="all" {"selected" if status=="all" else ""}>All</option>
           </select>
+        </div>
+        <div>
+          <div class="label">Renewal Policy</div>
+          <select name="renewal_type">
+            <option value="all" {"selected" if renewal_type=="ALL" else ""}>All Policies</option>
+            <option value="MANUAL" {"selected" if renewal_type=="MANUAL" else ""}>Manual Renewal</option>
+            <option value="AUTO" {"selected" if renewal_type=="AUTO" else ""}>Auto Renewal</option>
+            <option value="NONE" {"selected" if renewal_type=="NONE" else ""}>Non-Renewable</option>
+          </select>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px; padding-top:20px;">
+          <label style="cursor:pointer; display:inline-flex; align-items:center; gap:6px; font-size:13px; font-weight:500;">
+            <input type="checkbox" name="renewal_due" value="1" {"checked" if renewal_due in ('1', 'true', 'yes', 'due') else ""} style="cursor:pointer;">
+            <span>⚠️ Sắp đến hạn gia hạn (Renewal Due)</span>
+          </label>
         </div>
         <div class="actions">
           <button type="submit">Filter</button>
@@ -137,7 +279,31 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
         else:
             annex_display = f"{r['annex_count']} annex(es)"
 
+        # Renewal info & badge
+        ren_type = (r["renewal_type"] or "MANUAL").upper()
+        ren_status = get_contract_renewal_status(r)
+        if ren_type == "AUTO":
+            ren_badge = '<span class="tag tag-purple">Auto-Renew</span>'
+        elif ren_type == "MANUAL":
+            ren_badge = '<span class="tag tag-info">Manual-Renew</span>'
+        else:
+            ren_badge = '<span class="tag" style="background:#f1f5f9; color:#64748b;">Non-Renewable</span>'
+
+        suggested_end = calculate_suggested_renewal_end_date(r["start_date"], r["end_date"], r["renewal_period_months"])
+
+        renew_btn = ""
+        if int(r["is_active"]) == 1 and ren_type != "NONE":
+            renew_btn = f"""
+            <button type="button" class="btn-secondary"
+                    style="font-size:11px; padding: 4px 8px; margin-top:2px; color:var(--success); border-color:var(--success); font-weight:600;"
+                    onclick="openRenewalModal('{r['id']}', '{escape(r['framework_no'] or '')}', '{escape(r['framework_name'] or '')}', '{r['start_date'] or ''}', '{r['end_date'] or ''}', '{suggested_end}')">
+              🔄 Renew
+            </button>
+            """
+
         actions = f'<a href="/contract/edit?id={r["id"]}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>'
+        if renew_btn:
+            actions += renew_btn
 
         if int(r["is_active"]) == 1:
             actions += f"""
@@ -172,7 +338,13 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
           </td>
           <td>{escape(buyer)}</td>
           <td>{escape(seller)}</td>
-          <td>{escape(r["start_date"] or "")} → {escape(r["end_date"] or "")}</td>
+          <td>
+            <div style="font-family:monospace; font-size:12px; font-weight:600;">{escape(r["start_date"] or "")} → {escape(r["end_date"] or "")}</div>
+            <div style="margin-top:4px; display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
+              {ren_badge}
+              {ren_status["badge"]}
+            </div>
+          </td>
           <td style="text-align:right; font-family:monospace;">{val_display}</td>
           <td>{annex_display}</td>
           <td>
@@ -200,7 +372,7 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
           <th>Contract / Framework</th>
           <th>Purchasing (Buyer)</th>
           <th>Vendor (Seller)</th>
-          <th>Contract Period</th>
+          <th>Contract Period & Status</th>
           <th style="text-align:right;">Value (VND)</th>
           <th>Annexes / Milestones</th>
           <th>Actions</th>
@@ -210,8 +382,80 @@ def page_contracts_list(q: str, status: str, *, return_to: str):
         {''.join(trs) if trs else '<tr><td colspan="8" class="muted">No contracts</td></tr>'}
       </tbody>
     </table>
+    {render_renewal_modal_html()}
     """
     return layout("Contract Management", body)
+
+
+def render_renewal_modal_html():
+    return """
+    <!-- Renewal Modal -->
+    <div id="renewal_modal" style="display:none; position:fixed; z-index:99999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); overflow:auto;">
+      <div style="background:#fff; margin:8% auto; padding:24px; border-radius:10px; width:520px; max-width:92%; box-shadow:0 10px 25px rgba(0,0,0,0.2);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:14px; border-bottom:1px solid #e2e8f0; padding-bottom:10px;">
+          <b style="font-size:16px; color:var(--text-primary);">🔄 Renew Contract (Gia hạn hợp đồng)</b>
+          <button type="button" style="background:none; border:none; font-size:18px; cursor:pointer;" onclick="closeRenewalModal()">✕</button>
+        </div>
+        
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:12px; margin-bottom:16px; font-size:13px;">
+          <div>Contract: <b id="renew_modal_contract_title">-</b></div>
+          <div style="margin-top:4px;">Current Period: <span id="renew_modal_current_period" style="font-family:monospace; font-weight:600; color:#0b57d0;">-</span></div>
+        </div>
+
+        <form method="POST" action="/contract/renew">
+          <input type="hidden" name="id" id="renew_modal_contract_id" value="">
+          <input type="hidden" name="return_to" id="renew_modal_return_to" value="">
+
+          <div style="margin-bottom:14px;">
+            <div class="label" style="font-weight:600;">New End Date (Ngày kết thúc mới) *</div>
+            <input type="date" name="new_end_date" id="renew_modal_new_end_date" value="" style="width:100%; font-size:14px; padding:8px;" required>
+            <div class="muted" style="font-size:11px; margin-top:5px; line-height:1.4;">
+              💡 <b>Gợi ý:</b> Mặc định được tính bằng ngày kết thúc cũ cộng thêm đúng kỳ hạn của hợp đồng. Bạn có thể tự do điều chỉnh ngày này theo thỏa thuận thực tế.
+            </div>
+          </div>
+
+          <div style="margin-bottom:14px;">
+            <div class="label">Renewal Note / Amendment Reference (Ghi chú / Số phụ lục gia hạn)</div>
+            <input type="text" name="renewal_note" id="renew_modal_note" placeholder="VD: Phụ lục gia hạn số 02 ký ngày 2026-11-15..." style="width:100%; font-size:13px; padding:8px;">
+          </div>
+
+          <div style="text-align:right; margin-top:20px; display:flex; justify-content:flex-end; gap:10px;">
+            <button type="button" class="btn-secondary" onclick="closeRenewalModal()">Cancel</button>
+            <button type="submit" class="btn" style="background:var(--success); color:#fff; font-weight:600;">✓ Confirm Renewal</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+    function openRenewalModal(id, no, name, startDate, endDate, suggestedEndDate) {
+      var cid = document.getElementById('renew_modal_contract_id');
+      if (cid) cid.value = id;
+      var ret = document.getElementById('renew_modal_return_to');
+      if (ret) ret.value = window.location.pathname + window.location.search;
+      var title = document.getElementById('renew_modal_contract_title');
+      if (title) title.innerText = (no ? no + ' - ' : '') + (name || 'Contract #' + id);
+      var per = document.getElementById('renew_modal_current_period');
+      if (per) per.innerText = (startDate || '...') + ' → ' + (endDate || '...');
+      var ned = document.getElementById('renew_modal_new_end_date');
+      if (ned) ned.value = suggestedEndDate || '';
+      var note = document.getElementById('renew_modal_note');
+      if (note) note.value = '';
+      var modal = document.getElementById('renewal_modal');
+      if (modal) modal.style.display = 'block';
+    }
+    function closeRenewalModal() {
+      var modal = document.getElementById('renewal_modal');
+      if (modal) modal.style.display = 'none';
+    }
+    window.addEventListener('click', function(event) {
+      var m = document.getElementById('renewal_modal');
+      if (m && event.target === m) {
+        m.style.display = "none";
+      }
+    });
+    </script>
+    """
 
 
 def render_milestones_card(contract_id: int, annex_id: int | None, milestones: list, total_target_value: float | None, return_to: str) -> str:
@@ -615,6 +859,48 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
     b_type_val = gv("billing_type") or "TM"
     rec_fee_val = gv("recurring_fee")
     rec_period_val = gv("recurring_period") or "MONTHLY"
+    ren_type_val = gv("renewal_type") or "MANUAL"
+    ren_notice_days_val = gv("renewal_notice_days") or "60"
+    ren_period_months_val = gv("renewal_period_months") or ""
+    ren_note_val = gv("renewal_note") or ""
+    last_renewed_val = gv("last_renewed_at") or ""
+
+    renewal_card_html = ""
+    suggested_end_date = ""
+    if mode == "edit" and contract_row:
+        p_m = int(ren_period_months_val) if ren_period_months_val.isdigit() else None
+        suggested_end_date = calculate_suggested_renewal_end_date(contract_row["start_date"], contract_row["end_date"], p_m)
+        ren_status = get_contract_renewal_status(dict(contract_row))
+        if ren_type_val == "AUTO":
+            ren_badge = '<span class="tag tag-purple">Auto-Renew</span>'
+        elif ren_type_val == "MANUAL":
+            ren_badge = '<span class="tag tag-info">Manual-Renew</span>'
+        else:
+            ren_badge = '<span class="tag" style="background:#f1f5f9; color:#64748b;">Non-Renewable</span>'
+
+        renewal_card_html = f"""
+        <div class="card" style="margin-bottom:18px; border-left:4px solid var(--primary); background:#f8fafc; padding:16px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;">
+            <div>
+              <div style="font-size:15px; font-weight:700; color:var(--text-primary); display:flex; align-items:center; gap:8px;">
+                🔄 Contract Renewal & Validity
+                {ren_status["badge"]}
+              </div>
+              <div style="margin-top:6px; font-size:13px; display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+                <span>Renewal Policy: {ren_badge}</span>
+                <span>Notice Period: <b>{ren_notice_days_val} days</b></span>
+                {f'<span class="muted" style="font-size:11px;">(Last renewed: <b>{escape(last_renewed_val[:10])}</b>)</span>' if last_renewed_val else ''}
+              </div>
+              {f'<div class="muted" style="font-size:12px; margin-top:6px; white-space:pre-wrap;">📝 <b>Notes:</b> {escape(ren_note_val)}</div>' if ren_note_val else ''}
+            </div>
+            <div>
+              <button type="button" class="btn" style="background:var(--success); color:#fff; font-weight:600; padding:8px 16px;" onclick="openRenewalModal('{contract_row['id']}', '{escape(contract_row['framework_no'] or '')}', '{escape(contract_row['framework_name'] or '')}', '{contract_row['start_date'] or ''}', '{contract_row['end_date'] or ''}', '{suggested_end_date}')">
+                🔄 Renew Contract
+              </button>
+            </div>
+          </div>
+        </div>
+        """
 
     milestones_html = ""
     if mode == "edit" and contract_row:
@@ -812,6 +1098,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
 
     body = f"""
     {error_html}
+    {renewal_card_html}
 
     <div class="card">
       <div class="actions" style="margin-bottom:10px;">
@@ -881,6 +1168,32 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
             <input type="date" name="end_date" value="{escape(gv("end_date"))}" style="width:100%;">
           </div>
 
+          <div>
+            <div class="label">Renewal Policy</div>
+            <select name="renewal_type" id="renewal_type" style="width:100%;" onchange="var rf=document.getElementById('renewal_period_block'); if(rf) rf.style.display=(this.value==='AUTO'?'block':'none');">
+              <option value="MANUAL" {"selected" if ren_type_val=="MANUAL" else ""}>Manual Renewal (Gia hạn thủ công)</option>
+              <option value="AUTO" {"selected" if ren_type_val=="AUTO" else ""}>Auto Renewal (Tự động gia hạn theo kỳ hạn)</option>
+              <option value="NONE" {"selected" if ren_type_val=="NONE" else ""}>Non-Renewable (Hợp đồng 1 lần / Không gia hạn)</option>
+            </select>
+          </div>
+
+          <div>
+            <div class="label">Renewal Notice Period (Days)</div>
+            <input type="number" name="renewal_notice_days" value="{escape(ren_notice_days_val)}" style="width:100%;" min="1" placeholder="Mặc định: 60 ngày">
+            <div class="muted" style="font-size:11px; margin-top:2px;">Số ngày báo trước khi hết hạn (Mặc định: 60 ngày).</div>
+          </div>
+
+          <div id="renewal_period_block" style="display:{'block' if ren_type_val=='AUTO' else 'none'};">
+            <div class="label">Auto-Renew Term (Months)</div>
+            <input type="number" name="renewal_period_months" value="{escape(ren_period_months_val)}" style="width:100%;" min="1" placeholder="Mặc định: Theo kỳ hạn gốc">
+            <div class="muted" style="font-size:11px; margin-top:2px;">Số tháng gia hạn mỗi chu kỳ (để trống sẽ tự tính theo kỳ hạn gốc).</div>
+          </div>
+
+          <div style="grid-column: span 2;">
+            <div class="label">Renewal Notes / Ghi chú điều khoản gia hạn</div>
+            <input type="text" name="renewal_note" value="{escape(ren_note_val)}" style="width:100%;" placeholder="VD: Báo trước 60 ngày bằng văn bản, gia hạn thêm 12 tháng...">
+          </div>
+
           <div id="contract_recurring_fields" style="display:{'block' if b_type_val=='RECURRING' else 'none'}; grid-column:span 2; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px;">
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
               <div>
@@ -916,6 +1229,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
     </div>
     """}
     {staff_block_html if c_type_val != "STANDALONE" else ""}
+    {render_renewal_modal_html()}
     """
     return layout(title, body)
 
@@ -1052,6 +1366,25 @@ def handle_contract_create_post(handler):
         except ValueError:
             pass
 
+    renewal_type = (form.get("renewal_type", ["MANUAL"])[0] or "MANUAL").strip().upper()
+    if renewal_type not in ("MANUAL", "AUTO", "NONE"):
+        renewal_type = "MANUAL"
+
+    renewal_notice_days_raw = (form.get("renewal_notice_days", ["60"])[0] or "60").strip()
+    try:
+        renewal_notice_days = int(renewal_notice_days_raw)
+        if renewal_notice_days <= 0:
+            renewal_notice_days = 60
+    except ValueError:
+        renewal_notice_days = 60
+
+    renewal_period_months_raw = (form.get("renewal_period_months", [""])[0] or "").strip()
+    renewal_period_months = None
+    if renewal_period_months_raw.isdigit():
+        renewal_period_months = int(renewal_period_months_raw)
+
+    renewal_note = (form.get("renewal_note", [""])[0] or "").strip() or None
+
     if not buyer_id.isdigit() or not seller_id.isdigit():
         send_html(handler, layout("Error", "<div class='card danger'>Invalid Buyer/Seller Vendor ID</div>"), status=400)
         return
@@ -1072,12 +1405,13 @@ def handle_contract_create_post(handler):
               buyer_vendor_id, seller_vendor_id,
               framework_no, framework_name, contract_value,
               start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period,
+              renewal_type, renewal_notice_days, renewal_period_months, renewal_note,
               is_active, deleted_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, now_iso(), now_iso()))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), now_iso()))
         new_id = cur.lastrowid
-        log_action(cur, "CREATE_CONTRACT", "contracts", new_id, f"Created new contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type})")
+        log_action(cur, "CREATE_CONTRACT", "contracts", new_id, f"Created new contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type}, Renewal: {renewal_type})")
         conn.commit()
     finally:
         conn.close()
@@ -1118,6 +1452,25 @@ def handle_contract_update_post(handler):
         except ValueError:
             pass
 
+    renewal_type = (form.get("renewal_type", ["MANUAL"])[0] or "MANUAL").strip().upper()
+    if renewal_type not in ("MANUAL", "AUTO", "NONE"):
+        renewal_type = "MANUAL"
+
+    renewal_notice_days_raw = (form.get("renewal_notice_days", ["60"])[0] or "60").strip()
+    try:
+        renewal_notice_days = int(renewal_notice_days_raw)
+        if renewal_notice_days <= 0:
+            renewal_notice_days = 60
+    except ValueError:
+        renewal_notice_days = 60
+
+    renewal_period_months_raw = (form.get("renewal_period_months", [""])[0] or "").strip()
+    renewal_period_months = None
+    if renewal_period_months_raw.isdigit():
+        renewal_period_months = int(renewal_period_months_raw)
+
+    renewal_note = (form.get("renewal_note", [""])[0] or "").strip() or None
+
     if not buyer_id.isdigit() or not seller_id.isdigit():
         send_html(handler, layout("Error", "<div class='card danger'>Invalid Buyer/Seller Vendor ID</div>"), status=400)
         return
@@ -1150,15 +1503,68 @@ def handle_contract_update_post(handler):
                 billing_type=?,
                 recurring_fee=?,
                 recurring_period=?,
+                renewal_type=?,
+                renewal_notice_days=?,
+                renewal_period_months=?,
+                renewal_note=?,
                 updated_at=?
             WHERE id=?
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, now_iso(), int(cid)))
-        log_action(cur, "UPDATE_CONTRACT", "contracts", int(cid), f"Updated contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type})")
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), int(cid)))
+        log_action(cur, "UPDATE_CONTRACT", "contracts", int(cid), f"Updated contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type}, Renewal: {renewal_type})")
         conn.commit()
     finally:
         conn.close()
 
     redirect(handler, f"/contract/edit?id={cid}")
+
+
+def handle_contract_renew_post(handler):
+    form = read_post_form(handler)
+    cid = (form.get("id", [""])[0] or "").strip()
+    return_to = safe_return_to((form.get("return_to", [""])[0] or "").strip() or "/contracts")
+    new_end_date = (form.get("new_end_date", [""])[0] or "").strip()
+    note_input = (form.get("renewal_note", [""])[0] or "").strip()
+
+    if not cid.isdigit():
+        send_html(handler, layout("Error", "<div class='card danger'>Invalid Contract ID</div>"), status=400)
+        return
+
+    if not new_end_date:
+        send_html(handler, layout("Error", "<div class='card danger'>New end date is required for contract renewal.</div>"), status=400)
+        return
+
+    conn = db_connect()
+    try:
+        cur = conn.cursor()
+        row = cur.execute("SELECT id, framework_no, framework_name, start_date, end_date, renewal_note FROM contracts WHERE id=?", (int(cid),)).fetchone()
+        if not row:
+            send_html(handler, layout("Not Found", f"<div class='card'>Contract ID={cid} not found</div>"), status=404)
+            return
+
+        old_end_date = row["end_date"] or "None"
+        c_name = row["framework_no"] or row["framework_name"] or f"ID {cid}"
+
+        # Build updated renewal note history
+        existing_note = (row["renewal_note"] or "").strip()
+        stamp = now_iso()[:10]
+        ren_entry = f"[{stamp} Renewed to {new_end_date}" + (f": {note_input}" if note_input else "") + "]"
+        updated_note = f"{ren_entry}\n{existing_note}" if existing_note else ren_entry
+
+        cur.execute("""
+            UPDATE contracts
+            SET end_date = ?,
+                last_renewed_at = ?,
+                renewal_note = ?,
+                updated_at = ?
+            WHERE id = ?
+        """, (new_end_date, now_iso(), updated_note, now_iso(), int(cid)))
+
+        log_action(cur, "RENEW_CONTRACT", "contracts", int(cid), f"Renewed contract '{c_name}' to {new_end_date} (was {old_end_date})")
+        conn.commit()
+    finally:
+        conn.close()
+
+    redirect(handler, return_to)
 
 
 def handle_contract_delete_post(handler):

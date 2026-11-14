@@ -63,6 +63,7 @@ from contracts import (
     page_annex_form,
     handle_contract_create_post,
     handle_contract_update_post,
+    handle_contract_renew_post,
     handle_contract_delete_post,
     handle_contract_restore_post,
     handle_annex_create_post,
@@ -352,7 +353,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/contracts":
                 q = qs.get("q", [""])[0]
                 status = qs.get("status", ["active"])[0]
-                send_html(self, page_contracts_list(q=q, status=status, return_to=self.path))
+                renewal_type = qs.get("renewal_type", ["all"])[0]
+                renewal_due = qs.get("renewal_due", [""])[0]
+                send_html(self, page_contracts_list(q=q, status=status, renewal_type=renewal_type, renewal_due=renewal_due, return_to=self.path))
                 return
 
             if path == "/contracts/references":
@@ -701,6 +704,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/contract/update":
                 handle_contract_update_post(self)
+                return
+
+            if path == "/contract/renew":
+                handle_contract_renew_post(self)
                 return
 
             if path == "/contract/delete":

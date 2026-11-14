@@ -178,8 +178,13 @@ def page_dashboard(handler):
         today = date.today()
         expiring_contracts = []
         
-        # Load active contracts expiring within 30 days
-        all_contracts = conn.execute("SELECT id, framework_no, framework_name, end_date, seller_vendor_id FROM contracts WHERE is_active = 1").fetchall()
+        # Load active contracts expiring within notice window / 30 days
+        all_contracts = conn.execute("""
+            SELECT id, framework_no, framework_name, start_date, end_date, seller_vendor_id,
+                   renewal_type, renewal_notice_days, renewal_period_months
+            FROM contracts
+            WHERE is_active = 1
+        """).fetchall()
         for c in all_contracts:
             if vendor_id and str(c["seller_vendor_id"]) != vendor_id:
                 continue
@@ -197,16 +202,22 @@ def page_dashboard(handler):
                 try:
                     ed = datetime.strptime(c["end_date"].strip(), "%Y-%m-%d").date()
                     delta = (ed - today).days
-                    if delta <= 30:
+                    notice_days = c["renewal_notice_days"] if (c["renewal_notice_days"] is not None and c["renewal_notice_days"] > 0) else 60
+                    threshold = max(30, notice_days)
+                    if delta <= threshold:
                         expiring_contracts.append({
                             "id": c["id"],
                             "framework_no": c["framework_no"],
                             "framework_name": c["framework_name"],
+                            "start_date": c["start_date"],
                             "end_date": c["end_date"],
                             "days_left": delta,
                             "display_no": c["framework_no"],
                             "display_name": c["framework_name"] or "Framework Contract",
-                            "type": "contract"
+                            "type": "contract",
+                            "renewal_type": (c["renewal_type"] or "MANUAL").upper(),
+                            "renewal_notice_days": notice_days,
+                            "renewal_period_months": c["renewal_period_months"]
                         })
                 except Exception:
                     pass
@@ -510,22 +521,45 @@ def page_dashboard(handler):
     exp_rows_html = []
     if expiring_contracts:
         for ec in expiring_contracts:
-            status_style = "color:#dc2626; font-weight:bold;" if ec["days_left"] < 0 else "color:#ea580c; font-weight:bold;"
-            status_text = f"Expired ({abs(ec['days_left'])} days ago)" if ec["days_left"] < 0 else f"Expiring in {ec['days_left']} days"
+            days_left = ec["days_left"]
+            status_style = "color:#dc2626; font-weight:bold;" if days_left < 0 else "color:#ea580c; font-weight:bold;"
+            if days_left < 0:
+                status_text = f"Expired ({abs(days_left)} days ago)"
+            else:
+                status_text = f"Expiring in {days_left} days"
+
+            badge_html = ""
+            action_html = ""
+            if ec.get("type") == "contract":
+                ren_type = ec.get("renewal_type", "MANUAL")
+                if ren_type == "AUTO":
+                    badge_html = '<span class="tag tag-purple" style="font-size:10px; margin-left:4px;">Auto-Renew</span>'
+                elif ren_type == "MANUAL":
+                    badge_html = '<span class="tag tag-info" style="font-size:10px; margin-left:4px;">Manual-Renew</span>'
+                else:
+                    badge_html = '<span class="tag" style="background:#f1f5f9; color:#64748b; font-size:10px; margin-left:4px;">Non-Renewable</span>'
+
+                if ren_type != "NONE" and days_left >= 0:
+                    status_text = f"⚠️ Renewal Due ({days_left}d)"
+                    status_style = "color:#b45309; font-weight:600;"
+
+                action_html = f'<a href="/contract/edit?id={ec["id"]}" style="font-size:11px; color:var(--primary); font-weight:600; text-decoration:none; margin-left:6px;" title="Review & Renew">Renew ↗</a>'
+
             exp_rows_html.append(f"""
             <div style="padding:10px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; font-size:13px;">
               <div>
                 <a href="/contract/edit?id={ec['id']}"><strong>{escape(ec['display_no'])}</strong></a>
+                {badge_html}
                 <div class="muted" style="font-size:11px;">{escape(ec['display_name'])}</div>
               </div>
               <div style="text-align:right;">
-                <div style="font-size:11px; color:var(--text-muted);">End: {escape(ec['end_date'])}</div>
+                <div style="font-size:11px; color:var(--text-muted);">End: {escape(ec['end_date'])} {action_html}</div>
                 <span style="{status_style}">{status_text}</span>
               </div>
             </div>
             """)
     else:
-        exp_rows_html.append('<div class="muted" style="padding:20px; text-align:center; font-size:13px;">✓ No contracts or annexes expiring in the next 30 days.</div>')
+        exp_rows_html.append('<div class="muted" style="padding:20px; text-align:center; font-size:13px;">✓ No upcoming contract or annex expirations.</div>')
 
     # Filter section HTML
     filter_html = f"""
