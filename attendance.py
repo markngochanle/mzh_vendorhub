@@ -2890,7 +2890,7 @@ def page_attendance_punctuality(filters: dict, error_msg: str | None = None, suc
                 total_absent += 1
                 total_absent_all += 1
                 bg_style = "background: #cbd5e1; border-color: #94a3b8;"
-                tooltip = f"{s_name} | {d_str} ({dow_name})\nStatus: Absent / Day off (Không đi làm)"
+                tooltip = f"{s_name} | {d_str} ({dow_name})\nStatus: Absent / Day off"
             else:
                 ci = att_rec["check_in"] or ""
                 co = att_rec["check_out"] or ""
@@ -2900,7 +2900,7 @@ def page_attendance_punctuality(filters: dict, error_msg: str | None = None, suc
                     total_absent += 1
                     total_absent_all += 1
                     bg_style = "background: #cbd5e1; border-color: #94a3b8;"
-                    tooltip = f"{s_name} | {d_str} ({dow_name})\nStatus: Absent / Day off (Không đi làm)"
+                    tooltip = f"{s_name} | {d_str} ({dow_name})\nStatus: Absent / Day off"
                 elif (not ci and not co) and w > 0:
                     total_present += 1
                     total_punctual_all += 1
@@ -2929,7 +2929,7 @@ def page_attendance_punctuality(filters: dict, error_msg: str | None = None, suc
 
                     ci_desc = f"{ci} (Late: {late_mins}m)" if is_late else f"{ci or 'N/A'} (On-time)"
                     co_desc = f"{co} (Early: {early_mins}m)" if is_early else f"{co or 'N/A'} (On-time)"
-                    tooltip = f"{s_name} | {d_str} ({dow_name})\nCa làm việc: {s_shift}\nVào: {ci_desc}\nRa: {co_desc}\nSố giờ: {w:.1f}h"
+                    tooltip = f"{s_name} | {d_str} ({dow_name})\nWork Shift: {s_shift}\nCheck-in: {ci_desc}\nCheck-out: {co_desc}\nWork Hours: {w:.1f}h"
 
                     if is_late and is_early:
                         bg_style = "background: linear-gradient(135deg, #facc15 50%, #ef4444 50%); border-color: #cbd5e1;"
@@ -3078,22 +3078,22 @@ def page_attendance_punctuality(filters: dict, error_msg: str | None = None, suc
       <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #16a34a; background: #f0fdf4;">
         <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #15803d;">Punctual Attendances</div>
         <div style="font-size: 24px; font-weight: 700; color: #14532d; margin-top: 4px;">{total_punctual_all}</div>
-        <div style="font-size: 11px; color: #16a34a; margin-top: 2px;">On-time in & out (Trắng)</div>
+        <div style="font-size: 11px; color: #16a34a; margin-top: 2px;">On-time in & out (Full white)</div>
       </div>
       <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #eab308; background: #fefce8;">
         <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #a16207;">Late Arrivals</div>
         <div style="font-size: 24px; font-weight: 700; color: #713f12; margin-top: 4px;">{total_late_all}</div>
-        <div style="font-size: 11px; color: #ca8a04; margin-top: 2px;">Đi làm trễ (Nửa vàng)</div>
+        <div style="font-size: 11px; color: #ca8a04; margin-top: 2px;">Late check-in (Top-left yellow)</div>
       </div>
       <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #dc2626; background: #fef2f2;">
         <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #b91c1c;">Early Departures</div>
         <div style="font-size: 24px; font-weight: 700; color: #7f1d1d; margin-top: 4px;">{total_early_all}</div>
-        <div style="font-size: 11px; color: #dc2626; margin-top: 2px;">Về sớm (Nửa đỏ)</div>
+        <div style="font-size: 11px; color: #dc2626; margin-top: 2px;">Early departure (Bottom-right red)</div>
       </div>
       <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #64748b; background: #f8fafc;">
         <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #475569;">Absent / Off Days</div>
         <div style="font-size: 24px; font-weight: 700; color: #1e293b; margin-top: 4px;">{total_absent_all}</div>
-        <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Không đi làm (Xám cả ô)</div>
+        <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Absent / Day off (Full gray)</div>
       </div>
     </div>
 
@@ -3138,23 +3138,23 @@ def page_attendance_punctuality(filters: dict, error_msg: str | None = None, suc
       <span style="font-weight: 600; font-size: 12px; color: #334155; text-transform: uppercase; letter-spacing: 0.5px;">Matrix Legend:</span>
       <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155;">
         <div style="width: 20px; height: 20px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 3px;"></div>
-        <span>Đúng giờ (On-time in & out)</span>
+        <span>On-time (Full white)</span>
       </div>
       <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155;">
         <div style="width: 20px; height: 20px; background: linear-gradient(135deg, #facc15 50%, #ffffff 50%); border: 1px solid #cbd5e1; border-radius: 3px;"></div>
-        <span>Đi làm trễ (Nửa trên vàng)</span>
+        <span>Late Arrival (Top-left yellow)</span>
       </div>
       <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155;">
         <div style="width: 20px; height: 20px; background: linear-gradient(135deg, #ffffff 50%, #ef4444 50%); border: 1px solid #cbd5e1; border-radius: 3px;"></div>
-        <span>Về sớm (Nửa dưới đỏ)</span>
+        <span>Early Departure (Bottom-right red)</span>
       </div>
       <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155;">
         <div style="width: 20px; height: 20px; background: linear-gradient(135deg, #facc15 50%, #ef4444 50%); border: 1px solid #cbd5e1; border-radius: 3px;"></div>
-        <span>Trễ & Về sớm (Nửa vàng + nửa đỏ)</span>
+        <span>Late & Early (Top-left yellow + Bottom-right red)</span>
       </div>
       <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155;">
         <div style="width: 20px; height: 20px; background: #cbd5e1; border: 1px solid #94a3b8; border-radius: 3px;"></div>
-        <span>Không đi làm (Cả ô xám)</span>
+        <span>Absent / Day Off (Full gray)</span>
       </div>
     </div>
 
