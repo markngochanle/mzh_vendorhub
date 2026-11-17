@@ -214,6 +214,8 @@ def run_playwright_tests():
                 mon_active = page.locator("a.nav-dropdown-item[href='/attendance/monthly'].active").count()
                 assert att_active == 1, "Expected /attendance to be active in dropdown"
                 assert mon_active == 0, "Expected /attendance/monthly to NOT be active in dropdown"
+                # Verify Cash-out tab is removed from attendance sub-nav
+                assert page.locator(".actions a:has-text('Cash-out')").count() == 0, "Expected Cash-out tab to be removed from /attendance"
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_attendance.png"))
 
@@ -226,8 +228,38 @@ def run_playwright_tests():
                 mon_active2 = page.locator("a.nav-dropdown-item[href='/attendance/monthly'].active").count()
                 assert att_active2 == 0, "Expected /attendance to NOT be active in dropdown when on /attendance/monthly"
                 assert mon_active2 == 1, "Expected /attendance/monthly to be active in dropdown when on /attendance/monthly"
+                # Verify Cash-out tab is removed from monthly payroll sub-nav
+                assert page.locator(".actions a:has-text('Cash-out')").count() == 0, "Expected Cash-out tab to be removed from /attendance/monthly"
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_attendance_monthly.png"))
+
+                # Navigate to T&M Acceptance via Projects & Resources dropdown
+                page.hover(".nav-dropdown:has-text('Projects & Resources')")
+                page.click("a[href='/attendance/acceptance']")
+                page.wait_for_selector(".actions:has-text('Attendance Acceptance')")
+                acc_active = page.locator("a.nav-dropdown-item[href='/attendance/acceptance'].active").count()
+                att_active3 = page.locator("a.nav-dropdown-item[href='/attendance'].active").count()
+                assert acc_active == 1, "Expected /attendance/acceptance to be active in dropdown"
+                assert att_active3 == 0, "Expected /attendance to NOT be active in dropdown when on /attendance/acceptance"
+                assert page.locator(".actions a:has-text('Cash-out')").count() == 0, "Expected Cash-out tab to be removed from /attendance/acceptance"
+                if show:
+                    page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_attendance_acceptance.png"))
+
+                # Navigate to Cash-out Dashboard via Payments & Invoices dropdown
+                page.hover(".nav-dropdown:has-text('Payments & Invoices')")
+                page.click("a[href='/payments']")
+                page.wait_for_selector("#fyPickerBtn")
+                pay_active = page.locator("a.nav-dropdown-item[href='/payments'].active").count()
+                assert pay_active == 1, "Expected /payments to be active in dropdown"
+                # Verify single row of tabs (no duplicate 📊 Dashboard tab)
+                dash_tab_count = page.locator("a:has-text('📊 Dashboard')").count()
+                assert dash_tab_count == 1, f"Expected exactly 1 Dashboard tab, found {dash_tab_count}"
+                assert page.locator("a:has-text('📥 Import Invoice')").count() >= 1, "Expected Import Invoice in payments tab bar"
+                assert page.locator("a:has-text('Time & Material (T&M)')").count() >= 1, "Expected T&M tab in payments"
+                assert page.locator("a:has-text('Fixed Price (Milestones)')").count() >= 1, "Expected Fixed Price tab in payments"
+                assert page.locator("a:has-text('Recurring Services (Internet / SaaS)')").count() >= 1, "Expected Recurring tab in payments"
+                if show:
+                    page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_payments_dashboard.png"))
                 
                 # Navigate to Invoices via Payments & Invoices dropdown
                 page.hover(".nav-dropdown:has-text('Payments & Invoices')")

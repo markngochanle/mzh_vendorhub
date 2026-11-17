@@ -18,7 +18,7 @@ def render_payments_tabs(active_tab: str) -> str:
     """Renders the top navigation sub-bar for Payments."""
     tabs = [
         ("/payments", "📊 Dashboard", active_tab == "dashboard"),
-        ("/attendance", "💵 Time & Material (T&M)", active_tab == "tm"),
+        ("/payments?type=tm", "💵 Time & Material (T&M)", active_tab == "tm"),
         ("/payments/fixed-price", "🎯 Fixed Price (Milestones)", active_tab == "fixed_price"),
         ("/payments/recurring", "🌐 Recurring Services (Internet / SaaS)", active_tab == "recurring"),
     ]

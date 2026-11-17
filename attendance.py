@@ -593,7 +593,6 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
       <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
-      <a href="/attendance/cashout" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💰 Cash-out</a>
     </div>
     """
 
@@ -1877,7 +1876,6 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
       <a href="/attendance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
-      <a href="/attendance/cashout" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💰 Cash-out</a>
     </div>
     """
 
@@ -2525,7 +2523,6 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
       <a href="/attendance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📜 Attendance Acceptance</a>
-      <a href="/attendance/cashout" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💰 Cash-out</a>
     </div>
     """
 
@@ -3528,7 +3525,6 @@ def _render_payments_overview_dashboard(
     fy: int,
     vendor_filter: int | None,
     q_filter: str,
-    sub_nav: str,
     tabs_bar_html: str,
     vendor_options_html: list,
     default_fy: int
@@ -3754,8 +3750,6 @@ def _render_payments_overview_dashboard(
     js_vend_data = json.dumps(vend_data)
 
     body = f"""
-    {sub_nav}
-
     <!-- 4 Payment Type Sub-tabs -->
     {tabs_bar_html}
 
@@ -4402,10 +4396,6 @@ def page_attendance_payout(filters: dict) -> str:
         ]
         empty_entity_desc = "annexes"
 
-    # Sub-nav (top level Payments navigation)
-    from payments import render_payments_tabs
-    sub_nav = render_payments_tabs("dashboard")
-
     # Status options
     status_options_html = [
         f'<option value="{val}" {"selected" if status_filter == val else ""}>{escape(lbl)}</option>'
@@ -4431,10 +4421,11 @@ def page_attendance_payout(filters: dict) -> str:
         {_tab_pill('fixed_price', 'Fixed Price (Milestones)', '🎯')}
         {_tab_pill('recurring', 'Recurring Services (Internet / SaaS)', '🌐')}
       </div>
-      <div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <a href="{operational_url}" style="font-size:12px; font-weight:600; color:#4338ca; text-decoration:none; display:inline-flex; align-items:center; gap:4px; padding:6px 12px; background:#eef2ff; border:1px solid #c7d2fe; border-radius:6px;" title="{operational_title}">
           {operational_label}
         </a>
+        <a href="/invoice/new" style="font-size:12px; font-weight:600; color:#0b57d0; text-decoration:none; display:inline-flex; align-items:center; gap:4px; padding:6px 12px; background:#eff6ff; border:1px solid #bfdbfe; border-radius:6px;" title="Import Invoice for any model">📥 Import Invoice</a>
       </div>
     </div>
     """
@@ -4452,7 +4443,7 @@ def page_attendance_payout(filters: dict) -> str:
 
         if billing_type == "dashboard":
             return _render_payments_overview_dashboard(
-                conn, fy, vendor_filter, q_filter, sub_nav, tabs_bar_html, vendor_options_html, default_fy
+                conn, fy, vendor_filter, q_filter, tabs_bar_html, vendor_options_html, default_fy
             )
         elif billing_type == "fixed_price":
             data = get_fixed_price_payout_data(conn, fy, status_filter, vendor_filter, q_filter)
@@ -4748,9 +4739,7 @@ def page_attendance_payout(filters: dict) -> str:
         """
 
     body = f"""
-    {sub_nav}
-
-    <!-- 3 Payment Type Sub-tabs -->
+    <!-- Payment Type Sub-tabs -->
     {tabs_bar_html}
 
     <!-- Filters and Actions Card -->

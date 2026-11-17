@@ -3026,16 +3026,19 @@ class TestProjects(BaseTestCase):
         self.assertIn("💰 Cash-out", html_after_clear)
 
     def test_attendance_payout_tab_and_csv_export(self):
-        # 1. Verify sub-nav contains Cash-out tab on all attendance views
+        # 1. Verify sub-nav contains only 3 attendance tabs (Cash-out tab removed from attendance)
         daily_html = attendance.page_attendance({"month": "2026-08"})
-        self.assertIn("💰 Cash-out", daily_html)
-        self.assertIn('/attendance/cashout', daily_html)
+        self.assertNotIn('/attendance/cashout', daily_html)
+        self.assertIn("📅 Daily Attendance", daily_html)
+        self.assertIn("💵 Monthly Payroll", daily_html)
 
         monthly_html = attendance.page_monthly_attendance({"month": "2026-08"})
-        self.assertIn("💰 Cash-out", monthly_html)
+        self.assertNotIn('/attendance/cashout', monthly_html)
+        self.assertIn("💵 Monthly Payroll", monthly_html)
 
         acceptance_html = attendance.page_attendance_acceptance({"month": "2026-08"})
-        self.assertIn("💰 Cash-out", acceptance_html)
+        self.assertNotIn('/attendance/cashout', acceptance_html)
+        self.assertIn("📜 Attendance Acceptance", acceptance_html)
 
         # 2. Setup test data for FY26:
         # Create a vendor, contract, and annex with cashout in FY26 (2026-04 to 2027-03)
@@ -3648,6 +3651,9 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         self.assertIn("💵 Time & Material (T&M)", out_pay)
         self.assertIn("/payments/fixed-price", out_pay)
         self.assertIn("/payments/recurring", out_pay)
+        self.assertIn("📥 Import Invoice", out_pay)
+        # Verify single tab bar (no duplicate sub-nav on /payments)
+        self.assertEqual(out_pay.count(">📊 Dashboard<"), 1)
 
         # Test GET /payments/fixed-price via server Handler
         stub_fp = StubHandler("/payments/fixed-price", method="GET")
@@ -3657,6 +3663,7 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         self.assertIn("Milestones Committed", out_fp)
         self.assertIn("📊 Dashboard", out_fp)
         self.assertIn("💵 Time & Material (T&M)", out_fp)
+        self.assertIn("/payments?type=tm", out_fp)
 
         # Test GET /payments/recurring via server Handler
         stub_rec = StubHandler("/payments/recurring", method="GET")
@@ -3666,6 +3673,7 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         self.assertIn("Commitment for", out_rec)
         self.assertIn("📊 Dashboard", out_rec)
         self.assertIn("💵 Time & Material (T&M)", out_rec)
+        self.assertIn("/payments?type=tm", out_rec)
 
         # Test GET /attendance does not render Payments sub-bar (it belongs under Payments & Invoices)
         stub_att = StubHandler("/attendance", method="GET")
