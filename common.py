@@ -1229,22 +1229,117 @@ def layout(title: str, body_html: str):
   <!-- jsPDF Local Library (Offline Closed Environment) -->
   <script src="/static/js/jspdf.umd.min.js"></script>
 
-  <!-- MGS Invoice Modal -->
-  <div id="mgs-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.5); align-items:center; justify-content:center;">
-    <div style="background:#fff; padding:24px; border-radius:12px; max-width:600px; width:90%; box-shadow:var(--shadow-md); position:relative;">
-      <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px; border-bottom:1px solid var(--border); padding-bottom:10px;">
-        <h3 style="margin:0; color:var(--text-primary); font-size:16px;">MGS Invoice Processing Request</h3>
+  <!-- MGS Invoice Modal with Live PDF Preview -->
+  <div id="mgs-modal" style="display:none; position:fixed; z-index:9999; left:0; top:0; width:100%; height:100%; background:rgba(0,0,0,0.6); align-items:center; justify-content:center; padding:20px; box-sizing:border-box;">
+    <div style="background:#fff; border-radius:12px; max-width:880px; width:100%; max-height:92vh; display:flex; flex-direction:column; box-shadow:0 20px 25px -5px rgba(0,0,0,0.2), 0 10px 10px -5px rgba(0,0,0,0.04); position:relative; overflow:hidden;">
+      
+      <!-- Modal Header -->
+      <div style="display:flex; align-items:center; justify-content:space-between; padding:14px 20px; border-bottom:1px solid var(--border); background:#f8fafc;">
+        <div style="display:flex; align-items:center; gap:8px;">
+          <span style="font-size:18px;">📧</span>
+          <h3 style="margin:0; color:var(--text-primary); font-size:16px; font-weight:700;">MGS Invoice Processing & Document Preview</h3>
+        </div>
+        <button type="button" onclick="closeMgsModal()" style="background:none; border:none; font-size:20px; cursor:pointer; color:var(--text-muted); padding:0 4px; line-height:1;">✕</button>
       </div>
-      <textarea id="mgs-text" style="width:100%; height:180px; font-family:monospace; font-size:13px; margin-bottom:16px; padding:10px; border:1px solid var(--border); border-radius:6px; resize:none;" readonly></textarea>
-      <div style="display:flex; align-items:center; gap:8px; margin-bottom:16px;">
-        <input type="checkbox" id="mgs-sent-checkbox" style="width:16px; height:16px; min-width:auto; cursor:pointer;" onchange="toggleMgsSentState()">
-        <label for="mgs-sent-checkbox" style="font-size:13px; color:var(--text-secondary); cursor:pointer; user-select:none;">I have sent this request to MGS (ticking will disable & color button green)</label>
+
+      <!-- Modal Body (Scrollable) -->
+      <div style="padding:18px 20px; overflow-y:auto; flex:1;">
+        
+        <!-- Section 1: Email Notification Content -->
+        <div style="margin-bottom:20px; background:#f8fafc; border:1px solid var(--border); border-radius:8px; padding:14px;">
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+            <label style="font-weight:700; font-size:13px; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+              <span>✉️ Email Content (To MGS Team)</span>
+            </label>
+            <button type="button" onclick="copyMgsText()" class="btn-secondary" style="font-size:11px; padding:3px 10px; display:inline-flex; align-items:center; gap:4px; font-weight:600;">
+              📋 Copy Email Content
+            </button>
+          </div>
+          <textarea id="mgs-text" style="width:100%; height:130px; font-family:monospace; font-size:12px; padding:10px; border:1px solid var(--border); border-radius:6px; resize:vertical; background:#fff; color:#1e293b; line-height:1.45; box-sizing:border-box;" readonly></textarea>
+          
+          <div style="display:flex; align-items:center; gap:8px; margin-top:10px;">
+            <input type="checkbox" id="mgs-sent-checkbox" style="width:16px; height:16px; min-width:auto; cursor:pointer;" onchange="toggleMgsSentState()">
+            <label for="mgs-sent-checkbox" style="font-size:13px; color:var(--text-secondary); cursor:pointer; user-select:none; font-weight:500;">I have sent this request to MGS (ticking will disable & color button green)</label>
+          </div>
+        </div>
+
+        <!-- Section 2: PDF Document Live Preview -->
+        <div>
+          <style>
+            .mgs-editable {{
+              cursor: text;
+              border-radius: 3px;
+              padding: 1px 4px;
+              transition: background 0.15s, outline 0.15s;
+              outline: 1px dashed transparent;
+            }}
+            .mgs-editable:hover {{
+              background-color: #f1f5f9;
+              outline: 1px dashed #64748b;
+            }}
+            .mgs-editable:focus {{
+              background-color: #eff6ff;
+              outline: 2px solid #2563eb;
+              box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+            }}
+            @media print {{
+              .mgs-editable {{
+                outline: none !important;
+                background: transparent !important;
+              }}
+            }}
+          </style>
+
+          <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; padding:0 2px;">
+            <div>
+              <span style="font-weight:700; font-size:14px; color:var(--text-primary); display:flex; align-items:center; gap:6px;">
+                <span>📄 Request For Payment Cover Sheet (Live Document Preview)</span>
+              </span>
+              <div class="muted" style="font-size:12px;">Pre-rendering exact document layout. Verify all details below before downloading PDF.</div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              <button type="button" onclick="printMgsPreview()" class="btn-secondary" style="font-size:11px; padding:4px 10px; display:inline-flex; align-items:center; gap:4px;">
+                🖨️ Print Preview
+              </button>
+              <button type="button" onclick="downloadMgsPdf()" style="background:#0284c7; color:#fff; border-color:#0284c7; font-size:11px; padding:4px 12px; display:inline-flex; align-items:center; gap:4px; font-weight:600;">
+                📥 Download PDF
+              </button>
+            </div>
+          </div>
+
+          <!-- Banner with instruction and Reset button -->
+          <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:6px 12px; margin-bottom:10px; display:flex; align-items:center; justify-content:space-between; font-size:12px; color:#166534;">
+            <div style="display:flex; align-items:center; gap:6px;">
+              <span>✏️</span>
+              <span><b>Interactive Preview:</b> Click directly on any text below to edit. Changes apply only to exported PDF / Print without altering database records.</span>
+            </div>
+            <button type="button" onclick="resetMgsPreview()" class="btn-secondary" style="font-size:11px; padding:2px 8px; background:#fff; color:#1e293b; border-color:#cbd5e1; white-space:nowrap; cursor:pointer;" title="Revert all edits back to original database values">
+              ↺ Reset to Original
+            </button>
+          </div>
+
+          <!-- A4 Paper Visual Preview Container -->
+          <div id="mgs-pdf-preview" style="background:#fff; border:1px solid #cbd5e1; border-radius:6px; box-shadow:0 4px 6px -1px rgba(0,0,0,0.06); padding:28px 32px; font-family:'Times New Roman', Times, Georgia, serif; color:#0f172a; font-size:13px; line-height:1.45;">
+            <!-- Rendered dynamically by renderMgsPdfPreview(data) -->
+          </div>
+        </div>
+
       </div>
-      <div style="display:flex; justify-content:flex-end; gap:10px;">
-        <button onclick="downloadMgsPdf()" style="background:#0284c7; color:#fff; border-color:#0284c7;">Download PDF</button>
-        <button onclick="copyMgsText()" style="background:var(--primary); color:#fff; border-color:var(--primary);">Copy to Clipboard</button>
-        <button onclick="closeMgsModal()" class="btn-secondary">Close</button>
+
+      <!-- Modal Footer -->
+      <div style="display:flex; justify-content:space-between; align-items:center; padding:12px 20px; border-top:1px solid var(--border); background:#f8fafc;">
+        <span class="muted" style="font-size:11px;">⚠️ Check recipient bank and remittance details carefully before approval.</span>
+        <div style="display:flex; gap:8px;">
+          <button type="button" onclick="downloadMgsPdf()" style="background:#0284c7; color:#fff; border-color:#0284c7; font-weight:600; display:inline-flex; align-items:center; gap:5px; font-size:12px; padding:5px 14px;">
+            📥 Download PDF
+          </button>
+          <button type="button" onclick="copyMgsText()" style="background:var(--primary); color:#fff; border-color:var(--primary); font-weight:600; font-size:12px; padding:5px 14px;">
+            📋 Copy Email
+          </button>
+          <button type="button" onclick="closeMgsModal()" class="btn-secondary" style="font-size:12px; padding:5px 14px;">Close</button>
+        </div>
       </div>
+
     </div>
   </div>
 
@@ -1269,8 +1364,53 @@ def layout(title: str, body_html: str):
 
     let currentMgsData = null;
 
+    function getEditedMgsData() {{
+      if (!currentMgsData) return null;
+      const getText = (id, fallback) => {{
+        const el = document.getElementById(id);
+        if (!el) return (fallback || "");
+        const txt = el.innerText !== undefined ? el.innerText : el.textContent;
+        const res = (txt || "").trim();
+        return (res === "-" && fallback && fallback !== "-") ? fallback : res;
+      }};
+      
+      const v = currentMgsData.vendor || {{}};
+      const b = currentMgsData.buyer || {{}};
+      
+      return Object.assign({{}}, currentMgsData, {{
+        contract_no: getText('mgs-val-contract-no', currentMgsData.contract_no),
+        ref_num: getText('mgs-val-ref-num', currentMgsData.ref_num),
+        service_period: getText('mgs-val-service-period', currentMgsData.service_period),
+        content_of_work: getText('mgs-val-content-of-work', currentMgsData.content_of_work),
+        currency: getText('mgs-val-currency', currentMgsData.currency),
+        invoice_no: getText('mgs-val-invoice-no', currentMgsData.invoice_no),
+        invoice_date: getText('mgs-val-invoice-date', currentMgsData.invoice_date) || getText('mgs-val-date', currentMgsData.invoice_date),
+        invoice_amount: getText('mgs-val-invoice-amount', currentMgsData.invoice_amount),
+        invoice_vat_rate: getText('mgs-val-invoice-vat-rate', currentMgsData.invoice_vat_rate),
+        invoice_vat_amount: getText('mgs-val-invoice-vat-amount', currentMgsData.invoice_vat_amount),
+        total_amount: getText('mgs-val-total-amount', currentMgsData.total_amount),
+        vendor: Object.assign({{}}, v, {{
+          company_name: getText('mgs-val-v-company', v.company_name),
+          tax_id: getText('mgs-val-v-taxid', v.tax_id),
+          tel: getText('mgs-val-v-tel', v.tel),
+          bank_name: getText('mgs-val-bank-name', v.bank_name),
+          bank_address: getText('mgs-val-bank-address', v.bank_address),
+          address: getText('mgs-val-remit-address', v.address) || getText('mgs-val-v-address', v.address),
+          account_name: getText('mgs-val-account-name', v.account_name),
+          account_number: getText('mgs-val-account-number', v.account_number),
+          account_currency: getText('mgs-val-account-currency', v.account_currency || currentMgsData.currency)
+        }}),
+        buyer: Object.assign({{}}, b, {{
+          company_name: getText('mgs-val-b-company', b.company_name),
+          address: getText('mgs-val-b-address', b.address),
+          tax_id: getText('mgs-val-b-taxid', b.tax_id)
+        }})
+      }});
+    }}
+
     function downloadMgsPdf() {{
       if (!currentMgsData) return;
+      const activeData = getEditedMgsData() || currentMgsData;
       
       const {{ jsPDF }} = window.jspdf;
       const doc = new jsPDF({{
@@ -1279,149 +1419,404 @@ def layout(title: str, body_html: str):
         format: "a4"
       }});
       
-      doc.setFont("times", "normal");
+      const v = activeData.vendor || {{}};
+      const b = activeData.buyer || {{}};
       
       // Top Left Vendor Info
+      doc.setFont("times", "normal");
       doc.setFontSize(9);
-      let y = 15;
+      let y = 14;
       
       doc.text("Company Name:", 20, y);
-      doc.text(currentMgsData.vendor.company_name, 50, y);
-      y += 5;
+      const vCompLines = doc.splitTextToSize(v.company_name || "-", 135);
+      doc.text(vCompLines, 50, y);
+      y += 4.5 * Math.max(1, vCompLines.length);
       
       doc.text("Tax ID:", 20, y);
-      doc.text(currentMgsData.vendor.tax_id, 50, y);
-      y += 5;
+      doc.text(v.tax_id || "-", 50, y);
+      y += 4.5;
       
       doc.text("Address:", 20, y);
-      const vAddrLines = doc.splitTextToSize(currentMgsData.vendor.address, 135);
+      const vAddrLines = doc.splitTextToSize(v.address || "-", 135);
       doc.text(vAddrLines, 50, y);
-      y += 5 * vAddrLines.length;
+      y += 4.5 * Math.max(1, vAddrLines.length);
       
       doc.text("TEL:", 20, y);
-      doc.text(currentMgsData.vendor.tel || "", 50, y);
+      doc.text(v.tel || "-", 50, y);
+      y += 4.5;
       
       // Title
       doc.setFont("times", "bolditalic");
       doc.setFontSize(16);
-      doc.text("REQUEST FOR PAYMENT", 105, 45, {{ align: "center" }});
+      let titleY = Math.max(y + 7, 42);
+      doc.text("REQUEST FOR PAYMENT", 105, titleY, {{ align: "center" }});
       
       // Date
       doc.setFont("times", "normal");
       doc.setFontSize(10);
-      doc.text(`Date:  ${{currentMgsData.invoice_date}}`, 190, 58, {{ align: "right" }});
+      let dateY = titleY + 8;
+      doc.text(`Date:  ${{activeData.invoice_date || "-"}}`, 190, dateY, {{ align: "right" }});
       
       // Buyer Info
-      let bY = 66;
+      let bY = dateY + 6;
+      doc.setFont("times", "normal");
+      doc.setFontSize(9);
+      
       doc.text("To:", 20, bY);
       doc.setFont("times", "bold");
-      doc.text(currentMgsData.buyer.company_name, 50, bY);
-      bY += 5;
+      const bCompLines = doc.splitTextToSize(b.company_name || "-", 135);
+      doc.text(bCompLines, 50, bY);
+      bY += 4.5 * Math.max(1, bCompLines.length);
       
       doc.setFont("times", "normal");
       doc.text("To Address:", 20, bY);
       doc.setFont("times", "bold");
-      const bAddrLines = doc.splitTextToSize(currentMgsData.buyer.address, 135);
+      const bAddrLines = doc.splitTextToSize(b.address || "-", 135);
       doc.text(bAddrLines, 50, bY);
-      bY += 5 * bAddrLines.length;
+      bY += 4.5 * Math.max(1, bAddrLines.length);
       
       doc.setFont("times", "normal");
       doc.text("Mizuho Tax ID:", 20, bY);
       doc.setFont("times", "bold");
-      doc.text(currentMgsData.buyer.tax_id, 50, bY);
+      doc.text(b.tax_id || "-", 50, bY);
+      bY += 4.5;
       
       // Intro
       doc.setFont("times", "normal");
-      let introY = bY + 10;
+      let introY = bY + 7;
       doc.text("We would like to request for payment as follows:", 20, introY);
       
-      // Table starts
-      let tableY = introY + 5;
+      let tableY = introY + 4;
       
-      const rows = [
-        ["Contract Number", currentMgsData.contract_no, false, 8],
-        ["Reference Number", currentMgsData.ref_num, false, 8],
-        ["Service Period", currentMgsData.service_period, false, 8],
-        ["Content of Work", currentMgsData.content_of_work, false, 14],
-        ["Payment Currency", currentMgsData.currency, false, 8],
-        ["Invoice Number", currentMgsData.invoice_no, true, 8],
-        ["Invoice Date", currentMgsData.invoice_date, true, 8],
-        ["Invoice Amount", currentMgsData.invoice_amount, true, 8],
-        ["Invoice VAT", currentMgsData.invoice_vat_rate, true, 8],
-        ["Invoice VAT Amount", currentMgsData.invoice_vat_amount, true, 8],
-        ["Total Invoice Amount", currentMgsData.total_amount, true, 8],
-        ["Remittance Detail", "", false, 42]
+      // Prepare remittance detail items and split lines with max width 130mm
+      const curr = v.account_currency || activeData.currency || "-";
+      const remitSections = [
+        {{ text: "Transfer to:", bold: true }},
+        {{ text: `Bank Name: ${{v.bank_name || "-"}}`, bold: false }},
+        {{ text: `Bank Address: ${{v.bank_address || "-"}}`, bold: false }},
+        {{ text: `Vendor Remit Address: ${{v.address || "-"}}`, bold: false }},
+        {{ text: `Account Name: ${{v.account_name || "-"}}`, bold: false }},
+        {{ text: `Account number: ${{v.account_number || "-"}}`, bold: false }},
+        {{ text: `Account Currency: ${{curr}}`, bold: false }}
       ];
       
-      let currentY = tableY;
+      let remitLines = [];
+      remitSections.forEach(sec => {{
+        if (sec.bold) {{
+          remitLines.push({{ text: sec.text, bold: true }});
+        }} else {{
+          const splitted = doc.splitTextToSize(sec.text, 130);
+          splitted.forEach(l => {{
+            remitLines.push({{ text: l, bold: false }});
+          }});
+        }}
+      }});
+      
+      const remitH = Math.max(38, (remitLines.length * 4.3) + 4);
+      
+      // Rows definition
+      const rawRows = [
+        {{ label: "Contract Number", val: activeData.contract_no, rightAlign: false, bold: false }},
+        {{ label: "Reference Number", val: activeData.ref_num, rightAlign: false, bold: false }},
+        {{ label: "Service Period", val: activeData.service_period, rightAlign: false, bold: false }},
+        {{ label: "Content of Work", val: activeData.content_of_work, rightAlign: false, bold: false }},
+        {{ label: "Payment Currency", val: activeData.currency, rightAlign: false, bold: false }},
+        {{ label: "Invoice Number", val: activeData.invoice_no, rightAlign: true, bold: false }},
+        {{ label: "Invoice Date", val: activeData.invoice_date, rightAlign: true, bold: false }},
+        {{ label: "Invoice Amount", val: activeData.invoice_amount, rightAlign: true, bold: false }},
+        {{ label: "Invoice VAT", val: activeData.invoice_vat_rate, rightAlign: true, bold: false }},
+        {{ label: "Invoice VAT Amount", val: activeData.invoice_vat_amount, rightAlign: true, bold: false }},
+        {{ label: "Total Invoice Amount", val: activeData.total_amount, rightAlign: true, bold: true }},
+        {{ label: "Remittance Detail", val: null, rightAlign: false, isRemittance: true }}
+      ];
+      
+      const processedRows = rawRows.map(r => {{
+        if (r.isRemittance) {{
+          return Object.assign({{}}, r, {{ h: remitH }});
+        }}
+        const valStr = String(r.val || "-");
+        let lines = [];
+        if (r.rightAlign) {{
+          lines = [valStr];
+        }} else {{
+          lines = doc.splitTextToSize(valStr, 130);
+        }}
+        const h = Math.max(7.5, (lines.length * 4.3) + 3.2);
+        return Object.assign({{}}, r, {{ lines: lines, h: h }});
+      }});
+      
       doc.setLineWidth(0.3);
-      
-      let totalTableHeight = rows.reduce((sum, row) => sum + row[3], 0);
-      doc.line(20, tableY, 20, tableY + totalTableHeight); // Left border
-      doc.line(55, tableY, 55, tableY + totalTableHeight); // Middle border
-      doc.line(190, tableY, 190, tableY + totalTableHeight); // Right border
-      
       doc.line(20, tableY, 190, tableY); // Top horizontal border
       
-      rows.forEach((row, index) => {{
-        const label = row[0];
-        const val = row[1];
-        const rightAlign = row[2];
-        const h = row[3];
+      let currentY = tableY;
+      
+      processedRows.forEach(r => {{
+        const nextY = currentY + r.h;
+        doc.line(20, nextY, 190, nextY); // Row bottom border
         
-        doc.line(20, currentY + h, 190, currentY + h);
-        
-        doc.setFont("times", "normal");
+        doc.setFont("times", r.bold ? "bold" : "normal");
         doc.setFontSize(9);
-        let textY = currentY + (h / 2) + 1;
-        if (label === "Remittance Detail") {{
-          textY = currentY + 5;
-        }}
-        doc.text(label, 22, textY);
         
-        if (label === "Remittance Detail") {{
-          doc.setFont("times", "normal");
-          let rY = currentY + 5;
-          doc.text("Transfer to:", 57, rY);
-          rY += 5;
-          doc.text(`Bank Name: ${{currentMgsData.vendor.bank_name}}`, 57, rY);
-          rY += 5;
-          doc.text(`Bank Address: ${{currentMgsData.vendor.bank_address}}`, 57, rY);
-          rY += 5;
-          doc.text(`Vendor Remit Adderss: ${{currentMgsData.vendor.address}}`, 57, rY);
-          rY += 5;
-          doc.text(`Account Name: ${{currentMgsData.vendor.account_name}}`, 57, rY);
-          rY += 5;
-          doc.text(`Account number: ${{currentMgsData.vendor.account_number}}`, 57, rY);
-          rY += 5;
-          doc.text(`Account Currency: ${{currentMgsData.vendor.account_currency || currentMgsData.currency}}`, 57, rY);
+        let labelY = (r.h > 8) ? (currentY + 4.5) : (currentY + (r.h / 2) + 1.2);
+        doc.text(r.label, 22, labelY);
+        
+        if (r.isRemittance) {{
+          let rY = currentY + 4.5;
+          remitLines.forEach(rl => {{
+            doc.setFont("times", rl.bold ? "bold" : "normal");
+            doc.text(rl.text, 57, rY);
+            rY += 4.3;
+          }});
         }} else {{
-          if (rightAlign) {{
-            doc.text(val || "-", 188, textY, {{ align: "right" }});
+          if (r.rightAlign) {{
+            let numY = currentY + (r.h / 2) + 1.2;
+            doc.text(r.lines[0], 188, numY, {{ align: "right" }});
           }} else {{
-            const valLines = doc.splitTextToSize(val || "", 131);
-            let valY = currentY + (h / 2) - ((valLines.length - 1) * 2.5) + 1;
-            if (h === 14) valY = currentY + 5;
-            doc.text(valLines, 57, valY);
+            let valY = (r.lines.length > 1) ? (currentY + 4.5) : (currentY + (r.h / 2) + 1.2);
+            r.lines.forEach(l => {{
+              doc.text(l, 57, valY);
+              valY += 4.3;
+            }});
           }}
         }}
         
-        currentY += h;
+        currentY = nextY;
       }});
       
-      doc.setLineWidth(0.5);
-      doc.line(20, currentY + 3, 190, currentY + 3);
-      doc.line(20, currentY + 4, 190, currentY + 4);
+      // Vertical borders
+      doc.line(20, tableY, 20, currentY); // Left border
+      doc.line(55, tableY, 55, currentY); // Middle divider
+      doc.line(190, tableY, 190, currentY); // Right border
       
-      let filename = "mgs_request.pdf";
-      if (currentMgsData.ref_num || currentMgsData.vendor.short_name || currentMgsData.mmyyyy) {{
-        const refClean = (currentMgsData.ref_num || 'noref').trim().replace(/\\s+/g, '_').replace(/[^a-zA-Z0-9-_]/g, '');
-        const snClean = (currentMgsData.vendor.short_name || 'nocop').trim().replace(/\\s+/g, '_').replace(/[^a-zA-Z0-9-_]/g, '');
-        const dateClean = (currentMgsData.mmyyyy || 'nodate').trim().replace(/[^0-9]/g, '');
-        filename = `invoice_${{refClean}}_${{snClean}}_${{dateClean}}.pdf`;
+      // Double bottom border
+      doc.setLineWidth(0.5);
+      doc.line(20, currentY + 2.5, 190, currentY + 2.5);
+      doc.line(20, currentY + 3.5, 190, currentY + 3.5);
+      
+      function cleanFilenamePart(s) {{
+        if (!s) return "";
+        return String(s).trim()
+          .replace(/[\\\\/]+/g, "-")
+          .replace(/\\s+/g, "_")
+          .replace(/[:*?"<>|]/g, "")
+          .replace(/_+/g, "_")
+          .replace(/^[-_]+|[-_]+$/g, "");
       }}
+
+      const refClean = cleanFilenamePart(activeData.ref_num) || 'noref';
+      const snClean = cleanFilenamePart(v.short_name) || 'nocop';
+
+      let contractPart = '';
+      let annexPart = '';
+
+      if (activeData.contract_no && activeData.contract_no !== (currentMgsData && currentMgsData.contract_no)) {{
+        // User edited the contract number directly on the popup preview
+        contractPart = cleanFilenamePart(activeData.contract_no);
+      }} else {{
+        const fNo = activeData.framework_no || activeData.contract_no || '';
+        const aName = activeData.annex_name || '';
+        contractPart = cleanFilenamePart(fNo);
+        if (aName && aName.trim().toLowerCase() !== fNo.trim().toLowerCase()) {{
+          annexPart = cleanFilenamePart(aName);
+        }}
+      }}
+
+      if (!contractPart) {{
+        contractPart = 'nocontract';
+      }}
+
+      const dateClean = (activeData.mmyyyy || '').trim().replace(/[^0-9]/g, '');
+
+      // Formula: invoice_[refClean]_[snClean]_[ten hop dong khung]_[ten phu luc neu co]_[thang dich vu neu co].pdf
+      const filenameParts = ['invoice', refClean, snClean, contractPart];
+      if (annexPart) {{
+        filenameParts.push(annexPart);
+      }}
+      if (dateClean) {{
+        filenameParts.push(dateClean);
+      }}
+      const filename = filenameParts.join('_') + '.pdf';
       
       doc.save(filename);
+    }}
+
+    function escapeHtml(str) {{
+      if (str === null || str === undefined) return '';
+      return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }}
+
+    function resetMgsPreview() {{
+      if (currentMgsData) {{
+        renderMgsPdfPreview(currentMgsData);
+      }}
+    }}
+
+    function renderMgsPdfPreview(data) {{
+      const v = data.vendor || {{}};
+      const b = data.buyer || {{}};
+      const container = document.getElementById('mgs-pdf-preview');
+      if (!container) return;
+
+      container.innerHTML = `
+        <div style="font-family:'Times New Roman', Times, Georgia, serif; color:#000; line-height:1.45; font-size:13px;">
+          <!-- Top Left Vendor Details -->
+          <div style="margin-bottom:18px;">
+            <table style="width:100%; border:none; border-collapse:collapse; margin:0 0 10px 0; font-size:12px;">
+              <tr>
+                <td style="width:115px; border:none; padding:1px 0; color:#475569;">Company Name:</td>
+                <td style="border:none; padding:1px 0;"><span id="mgs-val-v-company" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="font-weight:600; color:#0f172a;">${{escapeHtml(v.company_name || '-')}}</span></td>
+              </tr>
+              <tr>
+                <td style="width:115px; border:none; padding:1px 0; color:#475569;">Tax ID:</td>
+                <td style="border:none; padding:1px 0;"><span id="mgs-val-v-taxid" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="color:#0f172a;">${{escapeHtml(v.tax_id || '-')}}</span></td>
+              </tr>
+              <tr>
+                <td style="border:none; padding:1px 0; color:#475569; vertical-align:top;">Address:</td>
+                <td style="border:none; padding:1px 0;"><span id="mgs-val-v-address" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="color:#0f172a;">${{escapeHtml(v.address || '-')}}</span></td>
+              </tr>
+              <tr>
+                <td style="border:none; padding:1px 0; color:#475569;">TEL:</td>
+                <td style="border:none; padding:1px 0;"><span id="mgs-val-v-tel" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="color:#0f172a;">${{escapeHtml(v.tel || '-')}}</span></td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Document Title -->
+          <div style="text-align:center; margin:22px 0 16px 0;">
+            <div style="font-size:19px; font-weight:bold; font-style:italic; letter-spacing:0.5px; text-transform:uppercase;">REQUEST FOR PAYMENT</div>
+          </div>
+
+          <!-- Date -->
+          <div style="text-align:right; margin-bottom:14px; font-size:13px;">
+            <b>Date:</b> &nbsp; <span id="mgs-val-date" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit">${{escapeHtml(data.invoice_date || '-')}}</span>
+          </div>
+
+          <!-- Buyer Details -->
+          <div style="margin-bottom:16px;">
+            <table style="width:100%; border:none; border-collapse:collapse; margin:0 0 10px 0; font-size:13px;">
+              <tr>
+                <td style="width:115px; border:none; padding:2px 0; color:#475569;">To:</td>
+                <td style="border:none; padding:2px 0;"><span id="mgs-val-b-company" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="font-weight:bold; color:#0f172a;">${{escapeHtml(b.company_name || '-')}}</span></td>
+              </tr>
+              <tr>
+                <td style="border:none; padding:2px 0; color:#475569; vertical-align:top;">To Address:</td>
+                <td style="border:none; padding:2px 0;"><span id="mgs-val-b-address" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="font-weight:bold; color:#0f172a;">${{escapeHtml(b.address || '-')}}</span></td>
+              </tr>
+              <tr>
+                <td style="border:none; padding:2px 0; color:#475569;">Mizuho Tax ID:</td>
+                <td style="border:none; padding:2px 0;"><span id="mgs-val-b-taxid" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="font-weight:bold; color:#0f172a;">${{escapeHtml(b.tax_id || '-')}}</span></td>
+              </tr>
+            </table>
+          </div>
+
+          <!-- Intro statement -->
+          <div style="margin-bottom:10px; font-size:13px;">
+            We would like to request for payment as follows:
+          </div>
+
+          <!-- Main Table -->
+          <table style="width:100%; border-collapse:collapse; border:1px solid #000; margin:0 0 4px 0; font-size:12.5px;">
+            <tbody>
+              <tr>
+                <td style="width:34%; border:1px solid #000; padding:6px 10px;">Contract Number</td>
+                <td id="mgs-val-contract-no" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:6px 10px;">${{escapeHtml(data.contract_no || '-')}}</td>
+              </tr>
+              <tr>
+                <td style="width:34%; border:1px solid #000; padding:6px 10px;">Reference Number</td>
+                <td id="mgs-val-ref-num" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:6px 10px;">${{escapeHtml(data.ref_num || '-')}}</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #000; padding:6px 10px;">Service Period</td>
+                <td id="mgs-val-service-period" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:6px 10px;">${{escapeHtml(data.service_period || '-')}}</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #000; padding:6px 10px;">Content of Work</td>
+                <td id="mgs-val-content-of-work" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:6px 10px;">${{escapeHtml(data.content_of_work || '-')}}</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #000; padding:6px 10px;">Payment Currency</td>
+                <td id="mgs-val-currency" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:6px 10px;">${{escapeHtml(data.currency || '-')}}</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #000; padding:6px 10px;">Invoice Number</td>
+                <td id="mgs-val-invoice-no" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:6px 10px; text-align:right; font-family:monospace; font-size:13px;">${{escapeHtml(data.invoice_no || '-')}}</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #000; padding:6px 10px;">Invoice Date</td>
+                <td id="mgs-val-invoice-date" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:6px 10px; text-align:right;">${{escapeHtml(data.invoice_date || '-')}}</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #000; padding:6px 10px;">Invoice Amount</td>
+                <td id="mgs-val-invoice-amount" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:6px 10px; text-align:right; font-family:monospace; font-size:13px;">${{escapeHtml(data.invoice_amount || '-')}}</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #000; padding:6px 10px;">Invoice VAT</td>
+                <td id="mgs-val-invoice-vat-rate" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:6px 10px; text-align:right;">${{escapeHtml(data.invoice_vat_rate || '-')}}</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #000; padding:6px 10px;">Invoice VAT Amount</td>
+                <td id="mgs-val-invoice-vat-amount" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:6px 10px; text-align:right; font-family:monospace; font-size:13px;">${{escapeHtml(data.invoice_vat_amount || '-')}}</td>
+              </tr>
+              <tr style="background:#f8fafc;">
+                <td style="border:1px solid #000; padding:7px 10px; font-weight:bold;">Total Invoice Amount</td>
+                <td id="mgs-val-total-amount" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit" style="border:1px solid #000; padding:7px 10px; text-align:right; font-weight:bold; font-family:monospace; font-size:13.5px;">${{escapeHtml(data.total_amount || '-')}}</td>
+              </tr>
+              <tr>
+                <td style="border:1px solid #000; padding:8px 10px; vertical-align:top;">Remittance Detail</td>
+                <td style="border:1px solid #000; padding:8px 10px; line-height:1.6;">
+                  <div style="font-weight:600; margin-bottom:3px;">Transfer to:</div>
+                  <div>Bank Name: <b id="mgs-val-bank-name" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit">${{escapeHtml(v.bank_name || '-')}}</b></div>
+                  <div>Bank Address: <span id="mgs-val-bank-address" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit">${{escapeHtml(v.bank_address || '-')}}</span></div>
+                  <div>Vendor Remit Address: <span id="mgs-val-remit-address" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit">${{escapeHtml(v.address || '-')}}</span></div>
+                  <div>Account Name: <b id="mgs-val-account-name" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit">${{escapeHtml(v.account_name || '-')}}</b></div>
+                  <div>Account number: <b id="mgs-val-account-number" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit">${{escapeHtml(v.account_number || '-')}}</b></div>
+                  <div>Account Currency: <span id="mgs-val-account-currency" class="mgs-editable" contenteditable="true" spellcheck="false" title="Click to edit">${{escapeHtml(v.account_currency || data.currency || '-')}}</span></div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+          <!-- Double border line under table -->
+          <div style="border-top:1px solid #000; border-bottom:1px solid #000; height:2px; margin-top:3px;"></div>
+        </div>
+      `;
+    }}
+
+    function printMgsPreview() {{
+      const previewEl = document.getElementById('mgs-pdf-preview');
+      if (!previewEl) return;
+      const printWindow = window.open('', '_blank', 'width=850,height=1000');
+      if (!printWindow) {{
+        alert('Please allow popups to print the preview document.');
+        return;
+      }}
+      printWindow.document.write(`<!doctype html>
+<html>
+<head>
+  <title>MGS Payment Request Preview</title>
+  <style>
+    body {{ font-family: 'Times New Roman', Times, Georgia, serif; padding: 40px; color: #000; font-size: 13px; line-height: 1.45; }}
+    table {{ border-collapse: collapse; width: 100%; }}
+    .mgs-editable {{ outline: none !important; background: transparent !important; }}
+    @media print {{
+      body {{ padding: 0; }}
+      .mgs-editable {{ outline: none !important; background: transparent !important; }}
+    }}
+  </style>
+</head>
+<body>
+  ${{previewEl.innerHTML}}
+</body>
+</html>`);
+      printWindow.document.close();
+      printWindow.focus();
+      setTimeout(function() {{
+        printWindow.print();
+      }}, 300);
     }}
 
     function showMgsModal(dataJson) {{
@@ -1442,6 +1837,7 @@ Requesting you to kindly process the Invoice with below details
 [Invoice Number]: ${{data.invoice_no}}`;
       document.getElementById('mgs-text').value = text;
       document.getElementById('mgs-sent-checkbox').checked = (data.sent_to_mgs === 1);
+      renderMgsPdfPreview(data);
       document.getElementById('mgs-modal').style.display = 'flex';
     }}
     function closeMgsModal() {{

@@ -916,13 +916,325 @@ Content-Disposition: form-data; name="xml_content"
         mgs_data = invoices.get_mgs_data_dict(self.conn, inv)
         self.assertEqual(mgs_data["contract_no"], "MHB/FPT/2025/001-Phụ lục 1")
         
-        # 3. Test HTML page list contains To MGS button
+        # 3. Test HTML page list contains To MGS button and enhanced preview modal
         html_list = invoices.page_invoices_list({}, return_to="/")
         self.assertIn("To MGS", html_list)
+        self.assertIn('id="mgs-modal"', html_list)
+        self.assertIn('id="mgs-pdf-preview"', html_list)
+        self.assertIn('renderMgsPdfPreview', html_list)
+        self.assertIn('printMgsPreview', html_list)
+        self.assertIn('Download PDF', html_list)
+        self.assertIn('Print Preview', html_list)
         
-        # 4. Test HTML page detail contains To MGS button
+        # 4. Test HTML page detail contains To MGS button and enhanced preview modal
         html_detail = invoices.page_invoice_detail(invoice_id)
         self.assertIn("To MGS", html_detail)
+        self.assertIn('id="mgs-modal"', html_detail)
+        self.assertIn('id="mgs-pdf-preview"', html_detail)
+        self.assertIn('renderMgsPdfPreview', html_detail)
+        self.assertIn('printMgsPreview', html_detail)
+
+    def test_mgs_editable_preview_layout_and_fields(self):
+        html = common.layout("Test", "<div>body</div>")
+        
+        # 1. Verify CSS styles for .mgs-editable
+        self.assertIn(".mgs-editable", html)
+        self.assertIn("outline: 1px dashed transparent", html)
+        self.assertIn(".mgs-editable:hover", html)
+        self.assertIn(".mgs-editable:focus", html)
+        self.assertIn("@media print", html)
+        
+        # 2. Verify banner, reset button and modal elements
+        self.assertIn("Interactive Preview:", html)
+        self.assertIn("resetMgsPreview()", html)
+        self.assertIn("Reset to Original", html)
+        self.assertIn('id="mgs-modal"', html)
+        self.assertIn('id="mgs-pdf-preview"', html)
+        
+        # 3. Verify JavaScript core functions
+        self.assertIn("function getEditedMgsData()", html)
+        self.assertIn("function resetMgsPreview()", html)
+        self.assertIn("function downloadMgsPdf()", html)
+        self.assertIn("function printMgsPreview()", html)
+        self.assertIn("function renderMgsPdfPreview(data)", html)
+        
+        # 4. Verify all field IDs exist in renderMgsPdfPreview template
+        expected_field_ids = [
+            "mgs-val-contract-no",
+            "mgs-val-ref-num",
+            "mgs-val-service-period",
+            "mgs-val-content-of-work",
+            "mgs-val-currency",
+            "mgs-val-invoice-no",
+            "mgs-val-invoice-date",
+            "mgs-val-invoice-amount",
+            "mgs-val-invoice-vat-rate",
+            "mgs-val-invoice-vat-amount",
+            "mgs-val-total-amount",
+            "mgs-val-bank-name",
+            "mgs-val-bank-address",
+            "mgs-val-remit-address",
+            "mgs-val-account-name",
+            "mgs-val-account-number",
+            "mgs-val-account-currency",
+            "mgs-val-v-company",
+            "mgs-val-v-taxid",
+            "mgs-val-v-address",
+            "mgs-val-v-tel",
+            "mgs-val-date",
+            "mgs-val-b-company",
+            "mgs-val-b-address",
+            "mgs-val-b-taxid"
+        ]
+        for fid in expected_field_ids:
+            self.assertIn(f'id="{fid}"', html, f"Field ID {fid} must be present in layout template")
+        self.assertIn('class="mgs-editable"', html)
+        self.assertIn('contenteditable="true"', html)
+
+    def test_mgs_contract_resolution_unicode_and_standalone(self):
+        cur = self.conn.cursor()
+        
+        # Create a vendor for GMO
+        cur.execute("""
+            INSERT INTO vendors (short_name, company_name, tax_id, address, tel, bank_name, bank_address, account_name, account_number, account_currency, purchasing, is_active)
+            VALUES ('GMO', 'Công ty Cổ phần GMO-Z.com RUNSYSTEM', '0101659906', 'Đào Duy Anh, Hà Nội', '0241234567', 'Vietcombank', 'Trần Quang Khải', 'GMO RUNSYSTEM', '0011001234567', 'VND', 0, 1)
+        """)
+        gmo_vendor_id = cur.lastrowid
+        
+        # Create a contract with Vietnamese characters (HĐDV with 'Đ')
+        contract_code = "SSD07032025/HĐDV/MIZUHO.HN-GMO"
+        cur.execute("""
+            INSERT INTO contracts (buyer_vendor_id, seller_vendor_id, framework_no, framework_name, is_active)
+            VALUES (1, ?, ?, 'Dịch vụ eID', 1)
+        """, (gmo_vendor_id, contract_code))
+        
+        # Insert invoice for GMO with this contract_code
+        cur.execute("""
+            INSERT INTO invoices (
+                service_year, service_month, service_day, contract_no,
+                khhdon, shdon, nlap, dvtte,
+                seller_name, seller_mst, seller_address,
+                buyer_name, buyer_mst, buyer_address,
+                tg_tcthue, tg_tthue, tg_tttbso
+            ) VALUES (
+                2026, 9, 30, ?,
+                'C26TAA', '00020756', '2026-10-22', 'VND',
+                'Công ty Cổ phần GMO-Z.com RUNSYSTEM', '0101659906', 'Đào Duy Anh, Hà Nội',
+                'NGÂN HÀNG MIZUHO', '0100112148', '63 Lý Thái Tổ, Hà Nội',
+                2522800.0, 1824.0, 2524624.0
+            )
+        """, (contract_code,))
+        inv_id = cur.lastrowid
+        self.conn.commit()
+        
+        inv = self.conn.execute("SELECT * FROM invoices WHERE id=?", (inv_id,)).fetchone()
+        mgs_data = invoices.get_mgs_data_dict(self.conn, inv)
+        
+        # Verify contract_no is cleanly matched and NOT duplicated with hyphen
+        self.assertEqual(mgs_data["contract_no"], contract_code)
+        self.assertNotIn(f"{contract_code}-{contract_code}", mgs_data["contract_no"])
+        self.assertIn(f"According to Contract Number: {contract_code}", mgs_data["content_of_work"])
+        self.assertEqual(mgs_data["invoice_no"], "00020756")
+        self.assertEqual(mgs_data["vendor"]["company_name"], "Công ty Cổ phần GMO-Z.com RUNSYSTEM")
+        self.assertEqual(mgs_data["vendor"]["tax_id"], "0101659906")
+        self.assertEqual(mgs_data["vendor"]["bank_name"], "Vietcombank")
+
+    def test_mgs_interactive_edit_flow_and_no_db_mutation(self):
+        import subprocess, json
+        
+        # 1. Insert a test invoice into DB
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO invoices (
+                service_year, service_month, service_day, contract_no,
+                khhdon, shdon, nlap, dvtte,
+                seller_name, seller_mst, seller_address,
+                buyer_name, buyer_mst, buyer_address,
+                tg_tcthue, tg_tthue, tg_tttbso
+            ) VALUES (
+                2026, 6, 30, 'CTR-ORIGINAL-001',
+                '1C26TAA', '0000002', '2026-06-01', 'VND',
+                'CÔNG TY TNHH PHẦN MỀM FPT', '0102135934', 'Hà Nội',
+                'NGÂN HÀNG MIZUHO', '0100234567', '16 Phan Chu Trinh, Hà Nội',
+                10000000.0, 1000000.0, 11000000.0
+            )
+        """)
+        inv_id = cur.lastrowid
+        self.conn.commit()
+
+        row_before = self.conn.execute("SELECT id, contract_no, tg_tttbso FROM invoices WHERE id=?", (inv_id,)).fetchone()
+        self.assertIsNotNone(row_before)
+        contract_no_before = row_before["contract_no"]
+        total_amount_before = row_before["tg_tttbso"]
+        
+        # 2. Extract Javascript from layout
+        html = common.layout("Test", "<div>body</div>")
+        start_tag = "function getEditedMgsData() {"
+        idx = html.find(start_tag)
+        end_tag = "function showMgsModal"
+        end_idx = html.find(end_tag, idx)
+        self.assertNotEqual(idx, -1)
+        self.assertNotEqual(end_idx, -1)
+        js_code = html[idx:end_idx]
+        
+        # 3. Execute JS simulation in Node.js
+        node_script = f"""
+class MockJsPDF {{
+  constructor(opts) {{
+    this.textDrawn = [];
+  }}
+  setFont() {{}}
+  setFontSize() {{}}
+  setLineWidth() {{}}
+  text(str, x, y, opts) {{
+    this.textDrawn.push({{ str, x, y, opts }});
+  }}
+  line() {{}}
+  splitTextToSize(text, maxW) {{
+    if (!text) return [];
+    return [text];
+  }}
+  save(filename) {{
+    this.savedFilename = filename;
+    global.lastSavedFilename = filename;
+  }}
+}}
+
+global.window = {{
+  jspdf: {{ jsPDF: MockJsPDF }}
+}};
+
+// Simulated DOM elements
+const mockElements = {{}};
+global.document = {{
+  getElementById: (id) => mockElements[id] || null
+}};
+
+// Original data from DB
+global.currentMgsData = {{
+  ref_num: 'REF-ORIGINAL-001',
+  framework_no: 'CTR-ORIGINAL-001',
+  annex_name: '',
+  contract_no: 'CTR-ORIGINAL-001',
+  service_period: '01/01/2026 - 31/01/2026',
+  content_of_work: 'Original Maintenance Services',
+  currency: 'VND',
+  invoice_no: 'INV-ORIG-001',
+  invoice_date: '2026-01-31',
+  invoice_amount: '100,000,000',
+  invoice_vat_rate: '10%',
+  invoice_vat_amount: '10,000,000',
+  total_amount: '110,000,000',
+  mmyyyy: '012026',
+  vendor: {{
+    short_name: 'ORIGINAL_VEND',
+    company_name: 'Original Vendor Co',
+    tax_id: '0101234567',
+    address: 'Original Address',
+    tel: '0123456789',
+    bank_name: 'Original Bank',
+    bank_address: 'Original Bank Address',
+    account_name: 'Original Acc Name',
+    account_number: '1234567890',
+    account_currency: 'VND'
+  }},
+  buyer: {{
+    company_name: 'Mizuho Bank',
+    address: '63 Ly Thai To',
+    tax_id: '0100112148'
+  }}
+}};
+
+{js_code}
+
+// Test A: Before editing, getEditedMgsData returns original data
+let dataInitial = getEditedMgsData();
+if (dataInitial.contract_no !== 'CTR-ORIGINAL-001') {{
+  throw new Error('Initial contract_no should match original');
+}}
+
+// Test Formula Scenario 1: Initial unedited download with single contract & month
+downloadMgsPdf();
+if (global.lastSavedFilename !== 'invoice_REF-ORIGINAL-001_ORIGINAL_VEND_CTR-ORIGINAL-001_012026.pdf') {{
+  throw new Error('Filename mismatch for Scenario 1: ' + global.lastSavedFilename);
+}}
+
+// Test Formula Scenario 2: With Annex and month
+global.currentMgsData.framework_no = '34766/2025/MSA/Mizuho-FSOFT';
+global.currentMgsData.annex_name = 'Appendix 1';
+global.currentMgsData.contract_no = '34766/2025/MSA/Mizuho-FSOFT-Appendix 1';
+global.currentMgsData.ref_num = 'REF-FPT-001';
+global.currentMgsData.mmyyyy = '052026';
+global.currentMgsData.vendor.short_name = 'FPT';
+downloadMgsPdf();
+if (global.lastSavedFilename !== 'invoice_REF-FPT-001_FPT_34766-2025-MSA-Mizuho-FSOFT_Appendix_1_052026.pdf') {{
+  throw new Error('Filename mismatch for Scenario 2 (with Annex): ' + global.lastSavedFilename);
+}}
+
+// Test Formula Scenario 3: Without service month (mmyyyy empty)
+global.currentMgsData.mmyyyy = '';
+downloadMgsPdf();
+if (global.lastSavedFilename !== 'invoice_REF-FPT-001_FPT_34766-2025-MSA-Mizuho-FSOFT_Appendix_1.pdf') {{
+  throw new Error('Filename mismatch for Scenario 3 (no month): ' + global.lastSavedFilename);
+}}
+
+// Test Formula Scenario 4: GMO contract with Vietnamese unicode and no annex
+global.currentMgsData.framework_no = 'SSD07032025/HĐDV/MIZUHO.HN-GMO';
+global.currentMgsData.annex_name = '';
+global.currentMgsData.contract_no = 'SSD07032025/HĐDV/MIZUHO.HN-GMO';
+global.currentMgsData.ref_num = 'REF-GMO-01';
+global.currentMgsData.mmyyyy = '092026';
+global.currentMgsData.vendor.short_name = 'GMO';
+downloadMgsPdf();
+if (global.lastSavedFilename !== 'invoice_REF-GMO-01_GMO_SSD07032025-HĐDV-MIZUHO.HN-GMO_092026.pdf') {{
+  throw new Error('Filename mismatch for Scenario 4 (GMO Unicode): ' + global.lastSavedFilename);
+}}
+
+// Test B: User edits fields directly on the popup preview
+mockElements['mgs-val-contract-no'] = {{ innerText: 'EDITED-CTR-CUSTOM-999' }};
+mockElements['mgs-val-content-of-work'] = {{ innerText: 'Custom Edited Content For MGS Approval' }};
+mockElements['mgs-val-bank-name'] = {{ innerText: 'Custom Bank Branch Hanoi' }};
+mockElements['mgs-val-total-amount'] = {{ innerText: '115,000,000' }};
+
+// Test C: getEditedMgsData reflects the modified values
+let dataEdited = getEditedMgsData();
+if (dataEdited.contract_no !== 'EDITED-CTR-CUSTOM-999') {{
+  throw new Error('Edited contract_no not captured');
+}}
+if (dataEdited.content_of_work !== 'Custom Edited Content For MGS Approval') {{
+  throw new Error('Edited content_of_work not captured');
+}}
+if (dataEdited.vendor.bank_name !== 'Custom Bank Branch Hanoi') {{
+  throw new Error('Edited bank_name not captured');
+}}
+if (dataEdited.total_amount !== '115,000,000') {{
+  throw new Error('Edited total_amount not captured');
+}}
+
+// Test D: downloadMgsPdf runs with edited contract_no and reflects in filename
+downloadMgsPdf();
+if (global.lastSavedFilename !== 'invoice_REF-GMO-01_GMO_EDITED-CTR-CUSTOM-999_092026.pdf') {{
+  throw new Error('Filename mismatch for Scenario 5 (Edited Contract): ' + global.lastSavedFilename);
+}}
+
+// Test E: resetMgsPreview exists
+if (typeof resetMgsPreview !== 'function') {{
+  throw new Error('resetMgsPreview function missing');
+}}
+
+console.log(JSON.stringify({{ status: 'ok', edited_contract: dataEdited.contract_no, last_filename: global.lastSavedFilename }}));
+"""
+        
+        res = subprocess.run(["node", "-e", node_script], capture_output=True, text=True)
+        self.assertEqual(res.returncode, 0, f"Node script error: {res.stderr}")
+        out = json.loads(res.stdout)
+        self.assertEqual(out["status"], "ok")
+        self.assertEqual(out["edited_contract"], "EDITED-CTR-CUSTOM-999")
+        
+        # 4. Verify that the database row is completely unchanged (no DB mutation)
+        row_after = self.conn.execute("SELECT id, contract_no, tg_tttbso FROM invoices WHERE id=?", (inv_id,)).fetchone()
+        self.assertEqual(row_after["contract_no"], contract_no_before)
+        self.assertEqual(row_after["tg_tttbso"], total_amount_before)
 
     def test_force_match(self):
         cur = self.conn.cursor()
