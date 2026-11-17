@@ -1,0 +1,928 @@
+<mxfile host="Electron" modified="2026-11-18T03:30:00.000Z" agent="Mozilla/5.0" version="24.6.4" type="device" pages="2">
+  <diagram id="VMSBigPicture" name="1. Big Picture - End-to-End Journey">
+    <mxGraphModel dx="2800" dy="1600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="4200" pageHeight="1500" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+    <mxCell id="main_title" value="&lt;span style=&quot;font-size: 24px; font-weight: 800;&quot;&gt;HÀNH TRÌNH TỔNG THỂ HỆ THỐNG MIZUHO VMS (END-TO-END VENDOR &amp; WORKFORCE GOVERNANCE JOURNEY)&lt;/span&gt;&lt;br&gt;&lt;span style=&quot;font-size: 13px; font-weight: 500; color: #475569;&quot;&gt;Bức tranh lớn: Từ Lập kế hoạch Ngân sách Đầu nguồn, Quản trị Hợp đồng, Chấm công Kỷ luật, Đối soát Hóa đơn đến Giải ngân Thực chi (Cash-out) &amp; Tái ký Hợp đồng&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#183181;strokeWidth=2;align=left;spacingLeft=24;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="10" y="10" width="4160" height="65" as="geometry" />
+    </mxCell>
+    <mxCell id="journey_label" value="&lt;b&gt;H&lt;br&gt;À&lt;br&gt;N&lt;br&gt;H&lt;br&gt;&lt;br&gt;T&lt;br&gt;R&lt;br&gt;Ì&lt;br&gt;N&lt;br&gt;H&lt;br&gt;&lt;br&gt;V&lt;br&gt;M&lt;br&gt;S&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontStyle=1;fontSize=18;fillColor=#183181;strokeColor=#0f1f54;fontColor=#ffffff;align=center;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="10" y="85" width="45" height="1390" as="geometry" />
+    </mxCell>
+    <mxCell id="actor_header_box" value="&lt;b&gt;CHỦ THỂ&lt;br&gt;&amp; VAI TRÒ&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; color:#64748b;&quot;&gt;(Actors / Lanes)&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#cbd5e1;fontSize=12;align=center;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="65" y="85" width="145" height="75" as="geometry" />
+    </mxCell>
+    
+
+        <mxCell id="stage_arrow_0" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(1) Lập Kế hoạch &amp; Ngân sách Đầu nguồn&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;Upstream Budgeting &amp; Cap Allocation&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=0;fillColor=#183181;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="220" y="85" width="460" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="stage_arrow_1" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(2) Mua sắm &amp; Ký kết Hợp đồng&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;Vendor Sourcing &amp; Contracts&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#0284c7;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="700" y="85" width="460" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="stage_arrow_2" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(3) Tiếp nhận &amp; Phân bổ Nguồn lực&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;Resource Onboarding &amp; Allocation&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#6366f1;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1180" y="85" width="480" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="stage_arrow_3" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(4) Chấm công &amp; Kỷ luật Giờ giấc&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;Daily Attendance &amp; Punctuality&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#d97706;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1680" y="85" width="480" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="stage_arrow_4" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(5) Khóa công &amp; Nghiệm thu Cột mốc&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;Monthly Lock &amp; Acceptance&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#2563eb;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="2180" y="85" width="480" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="stage_arrow_5" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(6) Hóa đơn XML &amp; Đối soát 3 Chiều&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;E-Invoice &amp; 3-Way Auto Match&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#7c3aed;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="2680" y="85" width="480" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="stage_arrow_6" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(7) Lệnh MGS &amp; Thực chi Dòng tiền&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;MGS &amp; Cash-Out Execution&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#10b981;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="3180" y="85" width="480" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="stage_arrow_7" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(8) Quyết toán, Kiểm toán &amp; Tái ký&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;Burn-Rate, Audit &amp; Renewal&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#ed1a3a;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="3680" y="85" width="460" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="lane_hdr_L1" value="&lt;b&gt;Ban Giám Đốc
+&amp; PMO
+(Budget Owners)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#183181;strokeColor=#0f172a;strokeWidth=1.5;fontStyle=1;fontSize=12;fontColor=#ffffff;align=center;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="65" y="180" width="145" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_div_L1" value="" style="endArrow=none;html=1;rounded=0;strokeColor=#cbd5e1;strokeWidth=1.5;dashed=1;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="65" y="410" as="sourcePoint" />
+            <mxPoint x="4170" y="410" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+
+        <mxCell id="lane_hdr_L2" value="&lt;b&gt;Quản Lý Dự Án
+&amp; Vận Hành (PM)
+(IT Operations)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0284c7;strokeColor=#0f172a;strokeWidth=1.5;fontStyle=1;fontSize=12;fontColor=#ffffff;align=center;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="65" y="420" width="145" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_div_L2" value="" style="endArrow=none;html=1;rounded=0;strokeColor=#cbd5e1;strokeWidth=1.5;dashed=1;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="65" y="670" as="sourcePoint" />
+            <mxPoint x="4170" y="670" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+
+        <mxCell id="lane_hdr_L3" value="&lt;b&gt;Đối Tác &amp; Nhân Sự
+Gia Công (Vendors)
+(External Workforce)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6366f1;strokeColor=#0f172a;strokeWidth=1.5;fontStyle=1;fontSize=12;fontColor=#ffffff;align=center;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="65" y="680" width="145" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_div_L3" value="" style="endArrow=none;html=1;rounded=0;strokeColor=#cbd5e1;strokeWidth=1.5;dashed=1;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="65" y="930" as="sourcePoint" />
+            <mxPoint x="4170" y="930" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+
+        <mxCell id="lane_hdr_L4" value="&lt;b&gt;Kế Toán &amp;
+Mua Sắm
+(Finance &amp; Procurement)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#10b981;strokeColor=#0f172a;strokeWidth=1.5;fontStyle=1;fontSize=12;fontColor=#ffffff;align=center;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="65" y="940" width="145" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_div_L4" value="" style="endArrow=none;html=1;rounded=0;strokeColor=#cbd5e1;strokeWidth=1.5;dashed=1;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="65" y="1190" as="sourcePoint" />
+            <mxPoint x="4170" y="1190" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+
+        <mxCell id="lane_hdr_L5" value="&lt;b&gt;Nền Tảng
+Mizuho VMS Core
+&amp; Banking Gateways&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f59e0b;strokeColor=#0f172a;strokeWidth=1.5;fontStyle=1;fontSize=12;fontColor=#000000;align=center;shadow=1;" vertex="1" parent="1">
+          <mxGeometry x="65" y="1200" width="145" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="lane_div_L5" value="" style="endArrow=none;html=1;rounded=0;strokeColor=#cbd5e1;strokeWidth=1.5;dashed=1;" edge="1" parent="1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="65" y="1450" as="sourcePoint" />
+            <mxPoint x="4170" y="1450" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+
+    <!-- Task Container T1_1 -->
+    <mxCell id="T1_1" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#183181;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="240" y="200" width="210" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T1_1_h" value="&lt;b&gt;Ban Giám Đốc / PMO&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#183181;strokeWidth=1;fillColor=#dbeafe;fontColor=#0f172a;" vertex="1" parent="T1_1">
+      <mxGeometry width="210" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T1_1_b" value="Lập dự toán ngân sách IT toàn diện cho năm tài khóa (FY); phê duyệt trần ngân sách gia công (Budget Cap) theo từng khối dự án." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#183181;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T1_1">
+      <mxGeometry y="22" width="210" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T1_1_f" value="📱 Kế hoạch tài chính nội bộ Mizuho" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#183181;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T1_1">
+      <mxGeometry y="91" width="210" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T1_2 -->
+    <mxCell id="T1_2" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#183181;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="470" y="200" width="190" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T1_2_h" value="&lt;b&gt;PMO / Trưởng Dự Án&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#183181;strokeWidth=1;fillColor=#dbeafe;fontColor=#0f172a;" vertex="1" parent="T1_2">
+      <mxGeometry width="190" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T1_2_b" value="Phân rã ngân sách IT Outsourcing cho các dự án thành phần (Core Banking, AML, Treasury, E-Banking,...)." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#183181;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T1_2">
+      <mxGeometry y="22" width="190" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T1_2_f" value="📱 Hồ sơ phê duyệt dự án nội bộ" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#183181;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T1_2">
+      <mxGeometry y="91" width="190" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T1_3 -->
+    <mxCell id="T1_3" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="240" y="1220" width="420" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="T1_3_h" value="&lt;b&gt;Mizuho VMS Core&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="T1_3">
+      <mxGeometry width="420" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T1_3_b" value="Khởi tạo dự án mới trên hệ thống, nhập hạn mức &#x27;IT Outsourcing Budget&#x27;, kích hoạt theo dõi số dư thực tế và cấu hình ngưỡng cảnh báo cạn ngân sách (&gt;75%, &gt;90%, &gt;100%)." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T1_3">
+      <mxGeometry y="22" width="420" height="64" as="geometry" />
+    </mxCell>
+    <mxCell id="T1_3_f" value="📱 Mizuho VMS: /projects &amp; /dashboard" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T1_3">
+      <mxGeometry y="86" width="420" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T2_1 -->
+    <mxCell id="T2_1" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#10b981;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="720" y="960" width="200" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T2_1_h" value="&lt;b&gt;Mua Sắm (Procurement)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#d1fae5;fontColor=#0f172a;" vertex="1" parent="T2_1">
+      <mxGeometry width="200" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T2_1_b" value="Đấu thầu, thẩm định năng lực nhà cung cấp; đàm phán khung đơn giá (Rate Card) và cam kết chất lượng dịch vụ SLA." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T2_1">
+      <mxGeometry y="22" width="200" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T2_1_f" value="📱 Hồ sơ thầu &amp; Vendor Portal" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#10b981;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T2_1">
+      <mxGeometry y="91" width="200" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T2_2 -->
+    <mxCell id="T2_2" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#6366f1;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="940" y="700" width="200" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T2_2_h" value="&lt;b&gt;Đối Tác CNTT (Vendor Lead)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ede9fe;fontColor=#0f172a;" vertex="1" parent="T2_2">
+      <mxGeometry width="200" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T2_2_b" value="Thống nhất điều khoản, ký kết Hợp đồng khung (Framework) và các Phụ lục (Annexes) quy định phạm vi, hạn mức giá trị và thời hạn." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T2_2">
+      <mxGeometry y="22" width="200" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T2_2_f" value="📱 Ký kết pháp lý &amp; Văn bản số" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#6366f1;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T2_2">
+      <mxGeometry y="91" width="200" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T2_3 -->
+    <mxCell id="T2_3" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="720" y="1220" width="420" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T2_3_h" value="&lt;b&gt;Mizuho VMS Core&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="T2_3">
+      <mxGeometry width="420" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T2_3_b" value="Lưu trữ hợp đồng &amp; phụ lục, sinh mã thanh toán tham chiếu (Payment References), thiết lập mô hình thanh toán (T&amp;M, Fixed Price, Recurring) và cài đặt chính sách tái ký (Auto-Renew / Manual-Renew notice 30-60d)." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T2_3">
+      <mxGeometry y="22" width="420" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T2_3_f" value="📱 Mizuho VMS: /contracts &amp; /vendors" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T2_3">
+      <mxGeometry y="91" width="420" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T3_1 -->
+    <mxCell id="T3_1" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#6366f1;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="1200" y="700" width="210" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T3_1_h" value="&lt;b&gt;Đối Tác CNTT (Vendor)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ede9fe;fontColor=#0f172a;" vertex="1" parent="T3_1">
+      <mxGeometry width="210" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T3_1_b" value="Đề xuất danh sách nhân sự tham gia dự án (CV, chức danh Developer/Tester/BA, ngày bắt đầu làm việc dự kiến)." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T3_1">
+      <mxGeometry y="22" width="210" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T3_1_f" value="📱 Vendor Onboarding Form" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#6366f1;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T3_1">
+      <mxGeometry y="91" width="210" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T3_2 -->
+    <mxCell id="T3_2" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#0284c7;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="1430" y="440" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T3_2_h" value="&lt;b&gt;Quản Lý Dự Án (PM)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#e0f2fe;fontColor=#0f172a;" vertex="1" parent="T3_2">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T3_2_b" value="Phỏng vấn duyệt chuyên môn; gán nhân sự vào Phụ lục hợp đồng còn hiệu lực (Ràng buộc 100% Active Annex Coverage)." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T3_2">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T3_2_f" value="📱 Mizuho VMS: /staff &amp; Annex Link" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#0284c7;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T3_2">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T3_3 -->
+    <mxCell id="T3_3" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#0284c7;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="1200" y="440" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T3_3_h" value="&lt;b&gt;Quản Lý Dự Án (PM)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#e0f2fe;fontColor=#0f172a;" vertex="1" parent="T3_3">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T3_3_b" value="Phân bổ nhân sự vào dự án theo Ma trận % (Project Assignment Matrix) và thiết lập Ca làm việc chuẩn (Work Shift: 08:00-17:00 / 08:30-17:30)." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T3_3">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T3_3_f" value="📱 Mizuho VMS: /projects &amp; /staff/shifts" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#0284c7;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T3_3">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T4_1 -->
+    <mxCell id="T4_1" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#6366f1;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="1700" y="700" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T4_1_h" value="&lt;b&gt;Nhân Sự Gia Công (Contractor)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ede9fe;fontColor=#0f172a;" vertex="1" parent="T4_1">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T4_1_b" value="Chấm công hàng ngày: Check-in giờ vào, Check-out giờ ra, ghi nhận thời gian làm tiêu chuẩn và giờ làm thêm ngoài giờ (OT)." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T4_1">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T4_1_f" value="📱 Thẻ chấm công / Máy quét vân tay" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#6366f1;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T4_1">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T4_2 -->
+    <mxCell id="T4_2" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="1700" y="1220" width="440" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T4_2_h" value="&lt;b&gt;Mizuho VMS Core&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="T4_2">
+      <mxGeometry width="440" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T4_2_b" value="Tự động tính toán vi phạm giờ giấc dựa trên ca làm việc chuẩn; kết xuất &#x27;Ma trận chấm công &amp; kỷ luật&#x27; với ô vuông chia đường chéo 2 nửa màu (Vàng = Trễ, Đỏ = Sớm, Trắng = Chuẩn, Xám = Vắng)." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T4_2">
+      <mxGeometry y="22" width="440" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T4_2_f" value="📱 Mizuho VMS: /attendance/punctuality" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T4_2">
+      <mxGeometry y="91" width="440" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T4_3 -->
+    <mxCell id="T4_3" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#0284c7;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="1930" y="440" width="210" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T4_3_h" value="&lt;b&gt;Quản Lý Dự Án (PM)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#e0f2fe;fontColor=#0f172a;" vertex="1" parent="T4_3">
+      <mxGeometry width="210" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T4_3_b" value="Giám sát kỷ luật giờ giấc thời gian thực trên Dashboard (% On-Time Rate); yêu cầu giải trình đối với các trường hợp đi trễ hoặc về sớm bất thường." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T4_3">
+      <mxGeometry y="22" width="210" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T4_3_f" value="📱 Mizuho VMS: Dashboard KPI &amp; Matrix" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#0284c7;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T4_3">
+      <mxGeometry y="91" width="210" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T5_1 -->
+    <mxCell id="T5_1" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#0284c7;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="2200" y="440" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T5_1_h" value="&lt;b&gt;Quản Trị Viên (IT Admin)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#e0f2fe;fontColor=#0f172a;" vertex="1" parent="T5_1">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T5_1_b" value="Vào ngày chốt tháng (Cut-off date), kích hoạt chức năng Khóa Bảng Công (Attendance Lock) để bảo toàn dữ liệu, chống can thiệp sau chốt." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T5_1">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T5_1_f" value="📱 Mizuho VMS: /attendance Lock API" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#0284c7;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T5_1">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T5_2 -->
+    <mxCell id="T5_2" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="2200" y="1220" width="440" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T5_2_h" value="&lt;b&gt;Mizuho VMS Core&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="T5_2">
+      <mxGeometry width="440" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T5_2_b" value="Tự động tính toán Bảng lương tháng (Monthly Attendance Summary): công chuẩn, công thực tế, phép năm, OT quy đổi và nhân đơn giá ngày thành chi phí T&amp;M; quản lý cột mốc Fixed Price &amp; Payout định kỳ." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T5_2">
+      <mxGeometry y="22" width="440" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T5_2_f" value="📱 Mizuho VMS: /attendance/monthly &amp; /payments" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T5_2">
+      <mxGeometry y="91" width="440" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T5_3 -->
+    <mxCell id="T5_3" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#0284c7;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="2430" y="440" width="210" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T5_3_h" value="&lt;b&gt;PM &amp; Vendor Lead&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#e0f2fe;fontColor=#0f172a;" vertex="1" parent="T5_3">
+      <mxGeometry width="210" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T5_3_b" value="Ký kết Biên bản nghiệm thu chấm công (Attendance Acceptance Certificate) hoặc nghiệm thu cột mốc chuyển giao phần mềm (Milestone Acceptance)." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T5_3">
+      <mxGeometry y="22" width="210" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T5_3_f" value="📱 Mizuho VMS: /attendance/acceptance" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#0284c7;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T5_3">
+      <mxGeometry y="91" width="210" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T6_1 -->
+    <mxCell id="T6_1" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#6366f1;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="2700" y="700" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T6_1_h" value="&lt;b&gt;Đối Tác CNTT (Vendor)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ede9fe;fontColor=#0f172a;" vertex="1" parent="T6_1">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T6_1_b" value="Phát hành Hóa đơn điện tử XML (chuẩn Thông tư 78/Nghị định 123) gửi cho Ngân hàng Mizuho căn cứ trên biên bản nghiệm thu." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T6_1">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T6_1_f" value="📱 Cổng hóa đơn điện tử / Email" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#6366f1;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T6_1">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T6_2 -->
+    <mxCell id="T6_2" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#10b981;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="2700" y="960" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T6_2_h" value="&lt;b&gt;Kế Toán Thanh Toán&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#d1fae5;fontColor=#0f172a;" vertex="1" parent="T6_2">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T6_2_b" value="Tải file XML hóa đơn lên Mizuho VMS để hệ thống bóc tách dữ liệu số hóa đơn, ngày lập, MST bên bán, MST Mizuho và tiền thuế VAT." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T6_2">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T6_2_f" value="📱 Mizuho VMS: / (Invoices Upload)" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#10b981;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T6_2">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T6_3 -->
+    <mxCell id="T6_3" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="2930" y="1220" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T6_3_h" value="&lt;b&gt;Mizuho VMS Core&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="T6_3">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T6_3_b" value="Động cơ đối soát tự động 3 chiều (Hóa đơn XML ⟷ Hợp đồng ⟷ Bảng công/Nghiệm thu) tự động phân loại: &#x27;Matched&#x27; (100% hợp lệ), &#x27;Mismatch&#x27;, &#x27;No Payroll&#x27;, &#x27;No Contract&#x27;." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T6_3">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T6_3_f" value="📱 Mizuho VMS 3-Way Match Engine" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T6_3">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T7_1 -->
+    <mxCell id="T7_1" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="3200" y="1220" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_1_h" value="&lt;b&gt;Mizuho VMS Core&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="T7_1">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_1_b" value="Với hóa đơn &#x27;Matched&#x27;, hệ thống tự động sinh Biểu mẫu yêu cầu thanh toán Mizuho Global Services (MGS Form) kèm chức năng in PDF và sao chép nội dung email." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T7_1">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_1_f" value="📱 Mizuho VMS: MGS Request Generator" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T7_1">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T7_2 -->
+    <mxCell id="T7_2" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#10b981;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="3200" y="960" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_2_h" value="&lt;b&gt;Kế Toán Thanh Toán&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#d1fae5;fontColor=#0f172a;" vertex="1" parent="T7_2">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_2_b" value="Kiểm tra, ký duyệt biểu mẫu MGS, chuyển lệnh chi tiền qua cổng thanh toán quốc tế MGS Gateway; đánh dấu &#x27;Sent to MGS&#x27;." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T7_2">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_2_f" value="📱 MGS Gateway &amp; Cổng duyệt thanh toán" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#10b981;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T7_2">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T7_3 -->
+    <mxCell id="T7_3" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#10b981;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="3430" y="960" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_3_h" value="&lt;b&gt;Kế Toán Thanh Toán&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#d1fae5;fontColor=#0f172a;" vertex="1" parent="T7_3">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_3_b" value="Ghi nhận ngày tiền thực chi (Cashout Date) vào Ma trận Năm tài khóa (FY Cash-Out Matrix: 01/04 - 31/03) để tách biệt chi phí sổ sách và tiền ra thực tế." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T7_3">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_3_f" value="📱 Mizuho VMS: /payments &amp; /attendance/cashout" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#10b981;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T7_3">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T7_4 -->
+    <mxCell id="T7_4" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#6366f1;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="3430" y="700" width="215" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_4_h" value="&lt;b&gt;Đối Tác CNTT (Vendor)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ede9fe;fontColor=#0f172a;" vertex="1" parent="T7_4">
+      <mxGeometry width="215" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_4_b" value="Nhận tiền giải ngân về tài khoản doanh nghiệp; xác nhận hoàn tất thanh toán dịch vụ CNTT." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T7_4">
+      <mxGeometry y="22" width="215" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T7_4_f" value="📱 Tài khoản Ngân hàng Doanh nghiệp" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#6366f1;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T7_4">
+      <mxGeometry y="91" width="215" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T8_1 -->
+    <mxCell id="T8_1" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#183181;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="3700" y="200" width="420" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T8_1_h" value="&lt;b&gt;Ban Giám Đốc / PMO&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#183181;strokeWidth=1;fillColor=#dbeafe;fontColor=#0f172a;" vertex="1" parent="T8_1">
+      <mxGeometry width="420" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T8_1_b" value="Xem Executive Dashboard thời gian thực: Phân tích cơ cấu chi tiêu 3 mô hình (T&amp;M, Fixed Price, Recurring), tỷ lệ giải ngân so với ngân sách dự án (Burn-rate), và xu hướng chi phí." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#183181;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T8_1">
+      <mxGeometry y="22" width="420" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T8_1_f" value="📱 Mizuho VMS: /dashboard Executive KPIs" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#183181;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T8_1">
+      <mxGeometry y="91" width="420" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T8_2 -->
+    <mxCell id="T8_2" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="3700" y="1220" width="420" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T8_2_h" value="&lt;b&gt;Mizuho VMS Core&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="T8_2">
+      <mxGeometry width="420" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T8_2_b" value="Tự động rà quét các hợp đồng trong cửa sổ cảnh báo (Notice Window); kích hoạt cảnh báo &#x27;Auto-Renew&#x27; đối với dịch vụ định kỳ hoặc nhắc nhở &#x27;Manual-Renew&#x27; để đàm phán lại." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T8_2">
+      <mxGeometry y="22" width="420" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T8_2_f" value="📱 Mizuho VMS Smart Renewal Engine" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T8_2">
+      <mxGeometry y="91" width="420" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container T8_3 -->
+    <mxCell id="T8_3" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#10b981;strokeWidth=1.5;shadow=1;" vertex="1" parent="1">
+      <mxGeometry x="3700" y="960" width="420" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="T8_3_h" value="&lt;b&gt;Kiểm Toán &amp; Tuân Thủ&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#d1fae5;fontColor=#0f172a;" vertex="1" parent="T8_3">
+      <mxGeometry width="420" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="T8_3_b" value="Tra soát Nhật ký kiểm toán bất biến (Immutable Audit Trail) ghi vết đầy đủ thao tác thêm/sửa/xóa/giải ngân phục vụ kiểm toán nội bộ và J-SOX." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="T8_3">
+      <mxGeometry y="22" width="420" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="T8_3_f" value="📱 Mizuho VMS: /audit-logs &amp; Export CSV" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#10b981;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="T8_3">
+      <mxGeometry y="91" width="420" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E1" value="Phê duyệt ngân sách" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T1_1" target="T1_2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E2" value="Cấu hình trần dự án" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T1_2" target="T1_3">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E3" value="Yêu cầu mua sắm" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T1_3" target="T2_1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E4" value="Đàm phán &amp; ký kết" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T2_1" target="T2_2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E5" value="Nhập hợp đồng &amp; phụ lục" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T2_2" target="T2_3">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E6" value="Kích hoạt tiếp nhận nhân sự" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T2_3" target="T3_1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E7" value="Đề xuất nhân sự" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T3_1" target="T3_2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E8" value="Gán phụ lục &amp; phân bổ ma trận" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T3_2" target="T3_3">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E9" value="Thiết lập ca làm việc" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T3_3" target="T4_1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E10" value="Dữ liệu quẹt thẻ thực tế" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T4_1" target="T4_2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E11" value="Tính toán kỷ luật ô chéo" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T4_2" target="T4_3">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E12" value="Đến ngày chốt tháng (Cut-off)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T4_3" target="T5_1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E13" value="Khóa công &amp; đóng băng dữ liệu" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T5_1" target="T5_2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E14" value="Tính bảng lương &amp; nghiệm thu" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T5_2" target="T5_3">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E15" value="Biên bản nghiệm thu hợp lệ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T5_3" target="T6_1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E16" value="Xuất hóa đơn XML" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T6_1" target="T6_2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E17" value="Tải XML đối soát 3 chiều" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T6_2" target="T6_3">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E18" value="Trạng thái Matched (Hợp lệ)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T6_3" target="T7_1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E19" value="Tạo biểu mẫu MGS" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T7_1" target="T7_2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E20" value="Đẩy lệnh chi MGS Gateway" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T7_2" target="T7_3">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E21" value="Giải ngân thực chi tài khoản" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T7_3" target="T7_4">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E22" value="Cập nhật thực chi FY &amp; Burn-rate" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T7_3" target="T8_1">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E23" value="Giám sát cảnh báo cạn ngân sách" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T8_1" target="T8_2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="E24" value="Cảnh báo tái ký hợp đồng &amp; kiểm toán" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="1" source="T8_2" target="T8_3">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+      </root>
+    </mxGraphModel>
+  </diagram>
+  <diagram id="VMSDeepDive" name="2. Deep-Dive - Punctuality &amp; 3-Way Reconciliation">
+    <mxGraphModel dx="2400" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2900" pageHeight="1180" math="0" shadow="0">
+      <root>
+        <mxCell id="p2_0" />
+        <mxCell id="p2_1" parent="p2_0" />
+
+    <mxCell id="p2_main_title" value="&lt;span style=&quot;font-size: 22px; font-weight: 800;&quot;&gt;QUY TRÌNH CHUYÊN SÂU: CHẤM CÔNG KỶ LUẬT Ô CHÉO &amp; ĐỐI SOÁT HÓA ĐƠN 3 CHIỀU MGS&lt;/span&gt;&lt;br&gt;&lt;span style=&quot;font-size: 13px; font-weight: 500; color: #475569;&quot;&gt;Deep-Dive: Luồng tương tác chi tiết giữa Nhân sự, Quản lý dự án, Kế toán và Động cơ đối soát tự động của Mizuho VMS&lt;/span&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8fafc;strokeColor=#183181;strokeWidth=2;align=left;spacingLeft=24;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="10" y="10" width="2860" height="65" as="geometry" />
+    </mxCell>
+    <mxCell id="p2_journey_label" value="&lt;b&gt;D&lt;br&gt;E&lt;br&gt;E&lt;br&gt;P&lt;br&gt;&lt;br&gt;D&lt;br&gt;I&lt;br&gt;V&lt;br&gt;E&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontStyle=1;fontSize=18;fillColor=#0284c7;strokeColor=#0369a1;fontColor=#ffffff;align=center;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="10" y="85" width="45" height="1070" as="geometry" />
+    </mxCell>
+    <mxCell id="p2_actor_box" value="&lt;b&gt;CHỦ THỂ&lt;br&gt;&amp; VAI TRÒ&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f1f5f9;strokeColor=#cbd5e1;fontSize=12;align=center;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="65" y="85" width="145" height="75" as="geometry" />
+    </mxCell>
+    
+
+        <mxCell id="p2_stage_arrow_0" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(A) Thiết lập Ca &amp; Chấm công Hàng ngày&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;Shift Setup &amp; Daily Punch In/Out&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=0;fillColor=#183181;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="p2_1">
+          <mxGeometry x="220" y="85" width="480" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="p2_stage_arrow_1" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(B) Phân tích Kỷ luật &amp; Ma trận Ô chéo&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;Punctuality Matrix &amp; Discipline&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#0284c7;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="p2_1">
+          <mxGeometry x="720" y="85" width="500" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="p2_stage_arrow_2" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(C) Khóa công &amp; Tổng hợp Bảng lương T&amp;M&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;Cut-off Lock &amp; Payroll Sign-off&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#6366f1;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="p2_1">
+          <mxGeometry x="1240" y="85" width="500" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="p2_stage_arrow_3" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(D) Bóc tách XML &amp; Đối soát Hóa đơn 3 Chiều&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;Decree 123 XML &amp; 3-Way Match&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#10b981;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="p2_1">
+          <mxGeometry x="1760" y="85" width="520" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="p2_stage_arrow_4" value="&lt;font color=&quot;#ffffff&quot;&gt;&lt;b&gt;(E) Lập Lệnh MGS &amp; Giải ngân Năm tài khóa&lt;/b&gt;&lt;br&gt;&lt;span style=&quot;font-size:10px; opacity:0.9;&quot;&gt;MGS Form &amp; Fiscal Year Cash-out&lt;/span&gt;&lt;/font&gt;" style="html=1;shadow=1;dashed=0;align=center;verticalAlign=middle;shape=mxgraph.arrows2.arrow;dy=0;dx=12;notch=10;fillColor=#ed1a3a;strokeColor=#000000;strokeWidth=1;fontSize=13;fontStyle=1;" vertex="1" parent="p2_1">
+          <mxGeometry x="2300" y="85" width="500" height="75" as="geometry" />
+        </mxCell>
+        
+
+        <mxCell id="p2_lane_hdr_PL1" value="&lt;b&gt;Nhân Sự Gia Công
+(Contractor Staff)&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#6366f1;strokeColor=#0f172a;strokeWidth=1.5;fontStyle=1;fontSize=12;fontColor=#ffffff;align=center;shadow=1;" vertex="1" parent="p2_1">
+          <mxGeometry x="65" y="180" width="145" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_lane_div_PL1" value="" style="endArrow=none;html=1;rounded=0;strokeColor=#cbd5e1;strokeWidth=1.5;dashed=1;" edge="1" parent="p2_1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="65" y="390" as="sourcePoint" />
+            <mxPoint x="2870" y="390" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+
+        <mxCell id="p2_lane_hdr_PL2" value="&lt;b&gt;Quản Lý Dự Án (PM)
+&amp; IT Admin&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#0284c7;strokeColor=#0f172a;strokeWidth=1.5;fontStyle=1;fontSize=12;fontColor=#ffffff;align=center;shadow=1;" vertex="1" parent="p2_1">
+          <mxGeometry x="65" y="400" width="145" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_lane_div_PL2" value="" style="endArrow=none;html=1;rounded=0;strokeColor=#cbd5e1;strokeWidth=1.5;dashed=1;" edge="1" parent="p2_1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="65" y="630" as="sourcePoint" />
+            <mxPoint x="2870" y="630" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+
+        <mxCell id="p2_lane_hdr_PL3" value="&lt;b&gt;Kế Toán &amp;
+Finance Operations&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#10b981;strokeColor=#0f172a;strokeWidth=1.5;fontStyle=1;fontSize=12;fontColor=#ffffff;align=center;shadow=1;" vertex="1" parent="p2_1">
+          <mxGeometry x="65" y="640" width="145" height="220" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_lane_div_PL3" value="" style="endArrow=none;html=1;rounded=0;strokeColor=#cbd5e1;strokeWidth=1.5;dashed=1;" edge="1" parent="p2_1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="65" y="870" as="sourcePoint" />
+            <mxPoint x="2870" y="870" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+
+        <mxCell id="p2_lane_hdr_PL4" value="&lt;b&gt;Động Cơ Tự Động
+Mizuho VMS Core&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f59e0b;strokeColor=#0f172a;strokeWidth=1.5;fontStyle=1;fontSize=12;fontColor=#000000;align=center;shadow=1;" vertex="1" parent="p2_1">
+          <mxGeometry x="65" y="880" width="145" height="240" as="geometry" />
+        </mxCell>
+        <mxCell id="p2_lane_div_PL4" value="" style="endArrow=none;html=1;rounded=0;strokeColor=#cbd5e1;strokeWidth=1.5;dashed=1;" edge="1" parent="p2_1">
+          <mxGeometry width="50" height="50" relative="1" as="geometry">
+            <mxPoint x="65" y="1130" as="sourcePoint" />
+            <mxPoint x="2870" y="1130" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        
+
+    <!-- Task Container P2_T1 -->
+    <mxCell id="P2_T1" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#0284c7;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="240" y="420" width="210" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T1_h" value="&lt;b&gt;IT Admin / PM&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#e0f2fe;fontColor=#0f172a;" vertex="1" parent="P2_T1">
+      <mxGeometry width="210" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T1_b" value="Cài đặt ca làm việc chuẩn (ví dụ 8:30-17:30) cho nhân sự và gán vào dự án." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T1">
+      <mxGeometry y="22" width="210" height="64" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T1_f" value="📱 Mizuho VMS: /staff/shifts" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#0284c7;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T1">
+      <mxGeometry y="86" width="210" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container P2_T2 -->
+    <mxCell id="P2_T2" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#6366f1;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="240" y="200" width="210" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T2_h" value="&lt;b&gt;Nhân Sự Gia Công&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ede9fe;fontColor=#0f172a;" vertex="1" parent="P2_T2">
+      <mxGeometry width="210" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T2_b" value="Thực hiện quẹt thẻ Check-in và Check-out hàng ngày; ghi nhận lý do nếu làm ngoài giờ (OT)." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#6366f1;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T2">
+      <mxGeometry y="22" width="210" height="64" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T2_f" value="📱 Thiết bị chấm công nội bộ" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#6366f1;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T2">
+      <mxGeometry y="86" width="210" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container P2_T3 -->
+    <mxCell id="P2_T3" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="740" y="900" width="460" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T3_h" value="&lt;b&gt;Mizuho VMS Engine&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="P2_T3">
+      <mxGeometry width="460" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T3_b" value="So sánh giờ quẹt thẻ thực tế với ca chuẩn: Check-in &gt; giờ bắt đầu ca = Đi trễ; Check-out &lt; giờ kết thúc ca = Về sớm. Hiển thị Ma trận Punctuality ô vuông chéo: Vàng (trên) = Trễ, Đỏ (dưới) = Sớm, Trắng = Đúng giờ, Xám = Vắng." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T3">
+      <mxGeometry y="22" width="460" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T3_f" value="📱 Mizuho VMS: /attendance/punctuality" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T3">
+      <mxGeometry y="91" width="460" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container P2_T4 -->
+    <mxCell id="P2_T4" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#0284c7;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="740" y="420" width="220" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T4_h" value="&lt;b&gt;Quản Lý Dự Án (PM)&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#e0f2fe;fontColor=#0f172a;" vertex="1" parent="P2_T4">
+      <mxGeometry width="220" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T4_b" value="Kiểm tra tỷ lệ đúng giờ (% On-Time Rate) trên Dashboard; nhắc nhở nhân sự có vi phạm giờ giấc." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T4">
+      <mxGeometry y="22" width="220" height="64" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T4_f" value="📱 Mizuho VMS Dashboard" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#0284c7;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T4">
+      <mxGeometry y="86" width="220" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container P2_T5 -->
+    <mxCell id="P2_T5" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#0284c7;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="1260" y="420" width="220" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T5_h" value="&lt;b&gt;IT Admin&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#e0f2fe;fontColor=#0f172a;" vertex="1" parent="P2_T5">
+      <mxGeometry width="220" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T5_b" value="Thực hiện &#x27;Khóa Bảng Chấm Công&#x27; (Lock Attendance) vào ngày cut-off; ngăn chặn mọi hành vi sửa dữ liệu." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#0284c7;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T5">
+      <mxGeometry y="22" width="220" height="64" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T5_f" value="📱 Mizuho VMS Lock Engine" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#0284c7;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T5">
+      <mxGeometry y="86" width="220" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container P2_T6 -->
+    <mxCell id="P2_T6" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="1260" y="900" width="460" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T6_h" value="&lt;b&gt;Mizuho VMS Engine&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="P2_T6">
+      <mxGeometry width="460" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T6_b" value="Tự động kết xuất Bảng lương tháng (Monthly Payroll): Tính tổng ngày công chuẩn, công thực tế, phép năm và OT quy đổi; nhân đơn giá ngày thành chi phí T&amp;M (VND); tạo biên bản nghiệm thu chấm công." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T6">
+      <mxGeometry y="22" width="460" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T6_f" value="📱 Mizuho VMS: /attendance/monthly" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T6">
+      <mxGeometry y="91" width="460" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container P2_T7 -->
+    <mxCell id="P2_T7" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#10b981;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="1780" y="660" width="220" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T7_h" value="&lt;b&gt;Kế Toán Thanh Toán&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#d1fae5;fontColor=#0f172a;" vertex="1" parent="P2_T7">
+      <mxGeometry width="220" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T7_b" value="Nhận Hóa đơn điện tử XML (chuẩn TT78) từ Vendor và tải lên hệ thống Mizuho VMS." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T7">
+      <mxGeometry y="22" width="220" height="64" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T7_f" value="📱 Mizuho VMS: / (Invoices)" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#10b981;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T7">
+      <mxGeometry y="86" width="220" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container P2_T8 -->
+    <mxCell id="P2_T8" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="1780" y="900" width="480" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T8_h" value="&lt;b&gt;Mizuho VMS Engine&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="P2_T8">
+      <mxGeometry width="480" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T8_b" value="Động cơ đối soát tự động 3 chiều: Bóc tách mã số thuế bên mua/bán, đối chiếu số tiền hóa đơn với bảng công chốt tháng; phân loại tức thì: Matched (khớp 100%), Mismatch, No Payroll, No Contract." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T8">
+      <mxGeometry y="22" width="480" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T8_f" value="📱 Mizuho VMS 3-Way Engine" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T8">
+      <mxGeometry y="91" width="480" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container P2_T9 -->
+    <mxCell id="P2_T9" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#d97706;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="2320" y="900" width="440" height="115" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T9_h" value="&lt;b&gt;Mizuho VMS Engine&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#fef3c7;fontColor=#0f172a;" vertex="1" parent="P2_T9">
+      <mxGeometry width="440" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T9_b" value="Tự động sinh Biểu mẫu đề nghị thanh toán chuẩn Mizuho Global Services (MGS Form) với mã tham chiếu, thông tin vendor và số tiền chính xác." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#d97706;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T9">
+      <mxGeometry y="22" width="440" height="69" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T9_f" value="📱 Mizuho VMS: MGS Request Form" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#d97706;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T9">
+      <mxGeometry y="91" width="440" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container P2_T10 -->
+    <mxCell id="P2_T10" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#10b981;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="2320" y="660" width="210" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T10_h" value="&lt;b&gt;Kế Toán Thanh Toán&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#d1fae5;fontColor=#0f172a;" vertex="1" parent="P2_T10">
+      <mxGeometry width="210" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T10_b" value="In bản xem trước PDF, sao chép nội dung email và duyệt gửi lệnh chi sang cổng MGS Gateway; cập nhật trạng thái &#x27;Sent to MGS&#x27;." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T10">
+      <mxGeometry y="22" width="210" height="64" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T10_f" value="📱 Cổng thanh toán MGS" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#10b981;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T10">
+      <mxGeometry y="86" width="210" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <!-- Task Container P2_T11 -->
+    <mxCell id="P2_T11" value="" style="rounded=1;whiteSpace=wrap;html=1;container=1;collapsible=0;absoluteArcSize=1;arcSize=14;childLayout=stackLayout;horizontal=1;horizontalStack=0;resizeParent=1;resizeParentMax=0;resizeLast=0;fontSize=12;strokeColor=#10b981;strokeWidth=1.5;shadow=1;" vertex="1" parent="p2_1">
+      <mxGeometry x="2550" y="660" width="210" height="110" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T11_h" value="&lt;b&gt;Kế Toán Thanh Toán&lt;/b&gt;" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;bottomRightStyle=square;bottomLeftStyle=square;part=1;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#d1fae5;fontColor=#0f172a;" vertex="1" parent="P2_T11">
+      <mxGeometry width="210" height="22" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T11_b" value="Ghi nhận ngày tiền thực chi (Cashout Date) vào Ma trận Năm tài khóa để hoàn tất vòng đời giải ngân." style="shape=mxgraph.bpmn.task;part=1;taskMarker=abstract;connectable=0;whiteSpace=wrap;rounded=1;fontSize=11;strokeColor=#10b981;strokeWidth=1;fillColor=#ffffff;fontColor=#1e293b;align=left;spacingLeft=8;spacingRight=8;" vertex="1" parent="P2_T11">
+      <mxGeometry y="22" width="210" height="64" as="geometry" />
+    </mxCell>
+    <mxCell id="P2_T11_f" value="📱 Mizuho VMS: /payments Cashout" style="whiteSpace=wrap;connectable=0;html=1;shape=mxgraph.basic.rect;size=10;rectStyle=rounded;topRightStyle=square;topLeftStyle=square;fillColor=#f1f5f9;part=1;rounded=1;fontSize=10;strokeColor=#10b981;strokeWidth=1;fontColor=#475569;fontStyle=2;" vertex="1" parent="P2_T11">
+      <mxGeometry y="86" width="210" height="24" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="P2_E1" value="Ca làm việc áp dụng" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="p2_1" source="P2_T1" target="P2_T2">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="P2_E2" value="Dữ liệu quẹt thẻ thực tế" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="p2_1" source="P2_T2" target="P2_T3">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="P2_E3" value="Kết xuất Ma trận ô chéo" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="p2_1" source="P2_T3" target="P2_T4">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="P2_E4" value="Đến ngày chốt tháng (Cut-off)" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="p2_1" source="P2_T4" target="P2_T5">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="P2_E5" value="Đóng băng dữ liệu &amp; tính lương" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="p2_1" source="P2_T5" target="P2_T6">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="P2_E6" value="Biên bản nghiệm thu chuyển Kế toán" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="p2_1" source="P2_T6" target="P2_T7">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="P2_E7" value="Tải XML đối soát 3 chiều" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="p2_1" source="P2_T7" target="P2_T8">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="P2_E8" value="Hóa đơn Matched hợp lệ" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="p2_1" source="P2_T8" target="P2_T9">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="P2_E9" value="Tạo biểu mẫu thanh toán MGS" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="p2_1" source="P2_T9" target="P2_T10">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+
+    <mxCell id="P2_E10" value="Đẩy lệnh MGS &amp; Cập nhật Cashout Date" style="edgeStyle=orthogonalEdgeStyle;rounded=1;orthogonalLoop=1;jettySize=auto;html=1;fontSize=10;startArrow=none;startFill=0;endArrow=classic;endFill=1;strokeColor=#183181;strokeWidth=2;fontColor=#183181;" edge="1" parent="p2_1" source="P2_T10" target="P2_T11">
+      <mxGeometry relative="1" as="geometry" />
+    </mxCell>
+    
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
