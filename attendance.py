@@ -590,7 +590,7 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
 
     sub_nav = f"""
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
-      <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📅 Daily Attendance</a>
+      <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#183181; border-bottom: 2px solid #183181; padding-bottom: 8px;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
       <a href="/attendance/punctuality?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">⏱️ Punctuality Matrix</a>
@@ -1875,7 +1875,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
     sub_nav = f"""
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
       <a href="/attendance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
-      <a href="/attendance/monthly?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💵 Monthly Payroll</a>
+      <a href="/attendance/monthly?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#183181; border-bottom: 2px solid #183181; padding-bottom: 8px;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
       <a href="/attendance/punctuality?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">⏱️ Punctuality Matrix</a>
     </div>
@@ -2524,7 +2524,7 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
     <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
       <a href="/attendance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
-      <a href="/attendance/acceptance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📜 Attendance Acceptance</a>
+      <a href="/attendance/acceptance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#183181; border-bottom: 2px solid #183181; padding-bottom: 8px;">📜 Attendance Acceptance</a>
       <a href="/attendance/punctuality?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">⏱️ Punctuality Matrix</a>
     </div>
     """
@@ -2981,7 +2981,7 @@ def page_attendance_punctuality(filters: dict, error_msg: str | None = None, suc
       <a href="/attendance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
-      <a href="/attendance/punctuality?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">⏱️ Punctuality Matrix</a>
+      <a href="/attendance/punctuality?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#183181; border-bottom: 2px solid #183181; padding-bottom: 8px;">⏱️ Punctuality Matrix</a>
     </div>
     """
 
@@ -3070,10 +3070,10 @@ def page_attendance_punctuality(filters: dict, error_msg: str | None = None, suc
 
     <!-- KPI Metric Cards -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 16px;">
-      <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #0284c7; background: #f0f9ff;">
-        <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #0369a1;">Active Contract Staff</div>
-        <div style="font-size: 24px; font-weight: 700; color: #0c4a6e; margin-top: 4px;">{total_active_staff}</div>
-        <div style="font-size: 11px; color: #0284c7; margin-top: 2px;">In active annexes ({month_val})</div>
+      <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #183181; background: #f0f4fc;">
+        <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #183181;">Active Contract Staff</div>
+        <div style="font-size: 24px; font-weight: 700; color: #183181; margin-top: 4px;">{total_active_staff}</div>
+        <div style="font-size: 11px; color: #23429e; margin-top: 2px;">In active annexes ({month_val})</div>
       </div>
       <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #16a34a; background: #f0fdf4;">
         <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #15803d;">Punctual Attendances</div>

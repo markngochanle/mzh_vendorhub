@@ -733,8 +733,10 @@ def layout(title: str, body_html: str):
   <link rel="apple-touch-icon" href="/logo.png">
   <style>
     :root {{
-      --primary: #4f46e5;
-      --primary-hover: #4338ca;
+      --primary: #183181;
+      --primary-hover: #0f1f54;
+      --mizuho-blue: #183181;
+      --mizuho-red: #ed1a3a;
       --bg-main: #f8fafc;
       --bg-card: #ffffff;
       --text-primary: #0f172a;
@@ -802,11 +804,10 @@ def layout(title: str, body_html: str):
     }}
     .logo-title {{
       font-size: 20px;
-      font-weight: 700;
+      font-weight: 800;
       margin: 0;
-      background: linear-gradient(135deg, #4f46e5 0%, #06b6d4 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
+      color: #183181;
+      letter-spacing: -0.02em;
     }}
     .db-indicator {{
       display: inline-flex;

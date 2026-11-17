@@ -25,7 +25,7 @@ def render_payments_tabs(active_tab: str) -> str:
     links = []
     for url, label, is_active in tabs:
         if is_active:
-            links.append(f'<a href="{url}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px; text-decoration:none;">{label}</a>')
+            links.append(f'<a href="{url}" style="margin-right: 18px; font-weight: bold; color:#183181; border-bottom: 2px solid #183181; padding-bottom: 8px; text-decoration:none;">{label}</a>')
         else:
             links.append(f'<a href="{url}" style="margin-right: 18px; font-weight: 500; color:#64748b; text-decoration:none; padding-bottom: 8px;">{label}</a>')
     
