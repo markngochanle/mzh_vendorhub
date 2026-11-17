@@ -191,8 +191,8 @@ def run_playwright_tests():
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_staff.png"))
                 
-                # Navigate to Attendance
-                page.click("text=Attendance")
+                # Navigate to Attendance / Timesheet
+                page.click("a[href='/attendance']")
                 page.wait_for_selector("text=Import attendance data")
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_attendance.png"))

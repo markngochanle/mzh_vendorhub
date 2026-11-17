@@ -334,10 +334,15 @@ def get_mgs_data_dict(conn, inv) -> dict:
     resolved_annex_name = ""
     
     if contract_no:
-        c_row = conn.execute("""
+        c_rows = conn.execute("""
             SELECT id, framework_no, buyer_vendor_id, seller_vendor_id FROM contracts 
-            WHERE LOWER(TRIM(framework_no)) = ? AND is_active = 1
-        """, (contract_no.lower(),)).fetchone()
+            WHERE is_active = 1
+        """).fetchall()
+        c_row = None
+        for r in c_rows:
+            if (r["framework_no"] or "").strip().lower() == contract_no.lower():
+                c_row = r
+                break
         
         if c_row:
             buyer_id = c_row["buyer_vendor_id"]
@@ -386,19 +391,21 @@ def get_mgs_data_dict(conn, inv) -> dict:
                 if any_annex:
                     resolved_annex_name = any_annex["annex_name"]
         else:
-            # Try exact annex match
-            a_row = conn.execute("""
+            # Try annex match in Python
+            a_rows = conn.execute("""
                 SELECT id, contract_id, annex_name FROM contract_annexes
-                WHERE LOWER(TRIM(annex_name)) = ? AND is_active = 1
-            """, (contract_no.lower(),)).fetchone()
-            
-            # Try partial annex match if exact match fails
+                WHERE is_active = 1
+            """).fetchall()
+            a_row = None
+            for a in a_rows:
+                if (a["annex_name"] or "").strip().lower() == contract_no.lower():
+                    a_row = a
+                    break
             if not a_row:
-                a_row = conn.execute("""
-                    SELECT id, contract_id, annex_name FROM contract_annexes
-                    WHERE annex_name LIKE ? AND is_active = 1
-                    LIMIT 1
-                """, (f"%{contract_no}%",)).fetchone()
+                for a in a_rows:
+                    if contract_no.lower() in (a["annex_name"] or "").lower():
+                        a_row = a
+                        break
                 
             if a_row:
                 resolved_annex_name = a_row["annex_name"]
@@ -433,8 +440,8 @@ def get_mgs_data_dict(conn, inv) -> dict:
             """, (seller_id,)).fetchone()
             if c_row_fallback:
                 resolved_framework_no = c_row_fallback["framework_no"]
-                # If we don't have a resolved annex yet, treat contract_no as the annex name
-                if not resolved_annex_name:
+                # If we don't have a resolved annex yet, treat contract_no as the annex name (only if different)
+                if not resolved_annex_name and contract_no.lower() != resolved_framework_no.lower():
                     resolved_annex_name = contract_no
 
     # Fallback if both are empty but contract_no is present
@@ -514,7 +521,10 @@ def get_mgs_data_dict(conn, inv) -> dict:
     # Format the contract and annex text for PDF
     contract_display = ""
     if resolved_framework_no and resolved_annex_name:
-        contract_display = f"{resolved_framework_no}-{resolved_annex_name}"
+        if resolved_framework_no.strip().lower() == resolved_annex_name.strip().lower():
+            contract_display = resolved_framework_no
+        else:
+            contract_display = f"{resolved_framework_no}-{resolved_annex_name}"
     elif resolved_framework_no:
         contract_display = resolved_framework_no
     elif resolved_annex_name:
@@ -530,6 +540,8 @@ def get_mgs_data_dict(conn, inv) -> dict:
         "vendor": vendor_details,
         "buyer": buyer_details,
         "contract_no": contract_display,
+        "framework_no": resolved_framework_no or "",
+        "annex_name": resolved_annex_name or "",
         "ref_num": ref_num,
         "service_period": service_period,
         "content_of_work": content_of_work,
