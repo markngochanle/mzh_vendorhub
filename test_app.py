@@ -1712,6 +1712,7 @@ class TestServerRoutes(BaseTestCase):
             ("/attendance", "Time Attendance"),
             ("/attendance/monthly", "Monthly Payroll"),
             ("/attendance/acceptance", "Acceptance"),
+            ("/attendance/punctuality", "Actual Attendance &amp; Punctuality"),
             ("/attendance/cashout", "Fiscal Year Cash-out Overview"),
             ("/payments", "Fiscal Year Cash-out Overview"),
             ("/payments/dashboard", "Fiscal Year Cash-out Overview"),
@@ -4832,6 +4833,97 @@ class TestUsageBasedRecurringServices(BaseTestCase):
         # 7. Check Recurring Dashboard shows paid amount
         rec_paid_html = payments.page_payments_recurring(month="2026-04")
         self.assertIn("Paid 23,200,000 VND on 2026-05-05", rec_paid_html)
+
+
+class TestAttendancePunctuality(BaseTestCase):
+    def test_parse_shift_and_time_helpers(self):
+        from attendance import parse_shift_times, parse_time_minutes
+
+        # Normal standard shifts
+        sh, eh = parse_shift_times("8:30 - 17:30")
+        self.assertEqual(sh, 510)
+        self.assertEqual(eh, 1050)
+
+        sh2, eh2 = parse_shift_times("8:00 - 17:00")
+        self.assertEqual(sh2, 480)
+        self.assertEqual(eh2, 1020)
+
+        # Default fallback
+        sh_def, eh_def = parse_shift_times("")
+        self.assertEqual(sh_def, 510)
+        self.assertEqual(eh_def, 1050)
+
+        # Time minutes
+        self.assertEqual(parse_time_minutes("08:30"), 510)
+        self.assertEqual(parse_time_minutes("08:52"), 532)
+        self.assertEqual(parse_time_minutes("17:15"), 1035)
+        self.assertIsNone(parse_time_minutes(None))
+        self.assertIsNone(parse_time_minutes(""))
+
+    def test_page_attendance_punctuality_rendering(self):
+        from attendance import page_attendance_punctuality
+
+        # Seed an active staff member in a valid annex
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, is_active, billing_type)
+            VALUES (?, 'Annex Test Punctuality', '2026-06-01', '2026-06-30', 1, 'TM')
+        """, (self.contract_id,))
+        annex_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_staff (full_name_vi, vendor_id, position, status, work_shift)
+            VALUES ('Tran Van Punctual', ?, 'Developer', 'active', '8:30 - 17:30')
+        """, (self.seller_id,))
+        staff_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_staff_links (staff_id, contract_id, annex_id, joining_date, tentative_leaving_date)
+            VALUES (?, ?, ?, '2026-06-01', '2026-06-30')
+        """, (staff_id, self.contract_id, annex_id))
+
+        # Add attendance:
+        # Day 1: On-time (08:20 -> 17:35) -> White cell
+        # Day 2: Late only (08:50 -> 17:35) -> Yellow half
+        # Day 3: Early only (08:20 -> 17:10) -> Red half
+        # Day 4: Late & Early (08:55 -> 17:05) -> Yellow half + Red half
+        # Day 5..30: Absent -> Gray cell
+        cur.execute("""
+            INSERT INTO attendance (staff_id, date, check_in, check_out, work_hours, ot_hours)
+            VALUES (?, '2026-06-01', '08:20', '17:35', 8.0, 0.0),
+                   (?, '2026-06-02', '08:50', '17:35', 8.0, 0.0),
+                   (?, '2026-06-03', '08:20', '17:10', 8.0, 0.0),
+                   (?, '2026-06-04', '08:55', '17:05', 8.0, 0.0)
+        """, (staff_id, staff_id, staff_id, staff_id))
+        self.conn.commit()
+
+        # Render page
+        html = page_attendance_punctuality({"month": "2026-06"})
+        self.assertIn("Actual Attendance &amp; Punctuality Matrix", html)
+        self.assertIn("Active Contract Staff", html)
+        self.assertIn("Punctual Attendances", html)
+        self.assertIn("Late Arrivals", html)
+        self.assertIn("Early Departures", html)
+        self.assertIn("Matrix Legend", html)
+        self.assertIn("Tran Van Punctual", html)
+        self.assertIn("Annex Test Punctuality", html)
+
+        # Verify color gradient stylings
+        # Late only: Yellow half, White half
+        self.assertIn("linear-gradient(135deg, #facc15 50%, #ffffff 50%)", html)
+        # Early only: White half, Red half
+        self.assertIn("linear-gradient(135deg, #ffffff 50%, #ef4444 50%)", html)
+        # Late & Early: Yellow half, Red half
+        self.assertIn("linear-gradient(135deg, #facc15 50%, #ef4444 50%)", html)
+        # Absent: Gray cell
+        self.assertIn("background: #cbd5e1; border-color: #94a3b8;", html)
+
+        # Test filter by search q
+        html_filtered = page_attendance_punctuality({"month": "2026-06", "q": "Tran Van Punctual"})
+        self.assertIn("Tran Van Punctual", html_filtered)
+
+        html_nomatch = page_attendance_punctuality({"month": "2026-06", "q": "NonExistentStaffXYZ"})
+        self.assertIn("No active contract staff found", html_nomatch)
 
 
 if __name__ == "__main__":

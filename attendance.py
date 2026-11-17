@@ -593,6 +593,7 @@ def page_attendance(filters: dict, error_msg: str | None = None, success_msg: st
       <a href="/attendance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
+      <a href="/attendance/punctuality?month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={escape(q_filter)}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">⏱️ Punctuality Matrix</a>
     </div>
     """
 
@@ -1876,6 +1877,7 @@ def page_monthly_attendance(filters: dict, error_msg: str | None = None, success
       <a href="/attendance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
+      <a href="/attendance/punctuality?{filter_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">⏱️ Punctuality Matrix</a>
     </div>
     """
 
@@ -2523,6 +2525,7 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
       <a href="/attendance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
       <a href="/attendance/monthly?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
       <a href="/attendance/acceptance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">📜 Attendance Acceptance</a>
+      <a href="/attendance/punctuality?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">⏱️ Punctuality Matrix</a>
     </div>
     """
 
@@ -2661,6 +2664,526 @@ def page_attendance_acceptance(filters: dict, error_msg: str | None = None, succ
     """
 
     return layout("Attendance Acceptance", body)
+
+
+def parse_shift_times(shift_str: str | None) -> tuple[int, int]:
+    """Returns (start_mins_from_midnight, end_mins_from_midnight). Defaults to (510, 1050) = 08:30 - 17:30."""
+    default_start = 8 * 60 + 30  # 08:30 = 510
+    default_end = 17 * 60 + 30    # 17:30 = 1050
+    if not shift_str or "-" not in shift_str:
+        return (default_start, default_end)
+    try:
+        parts = shift_str.split("-")
+        sh, sm = [int(x.strip()) for x in parts[0].split(":")]
+        eh, em = [int(x.strip()) for x in parts[1].split(":")]
+        return (sh * 60 + sm, eh * 60 + em)
+    except Exception:
+        return (default_start, default_end)
+
+
+def parse_time_minutes(time_str: str | None) -> int | None:
+    """Returns minutes from midnight from HH:MM string, or None if invalid."""
+    if not time_str or ":" not in str(time_str):
+        return None
+    try:
+        parts = str(time_str).strip().split(":")
+        return int(parts[0]) * 60 + int(parts[1])
+    except Exception:
+        return None
+
+
+def page_attendance_punctuality(filters: dict, error_msg: str | None = None, success_msg: str | None = None) -> str:
+    conn = db_connect()
+    try:
+        # Determine selected month
+        month_val = (filters.get("month") or "").strip()
+        if not month_val:
+            latest_row = conn.execute("SELECT strftime('%Y-%m', date) as m FROM attendance ORDER BY date DESC LIMIT 1").fetchone()
+            if latest_row and latest_row[0]:
+                month_val = latest_row[0]
+            else:
+                month_val = date.today().strftime("%Y-%m")
+
+        try:
+            year, month = int(month_val.split("-")[0]), int(month_val.split("-")[1])
+        except Exception:
+            today = date.today()
+            year, month = today.year, today.month
+            month_val = today.strftime("%Y-%m")
+
+        num_days = calendar.monthrange(year, month)[1]
+        first_day_str = f"{year:04d}-{month:02d}-01"
+        last_day_str = f"{year:04d}-{month:02d}-{num_days:02d}"
+
+        # Filters
+        vendor_filter = parse_int_or_none(filters.get("vendor_id"))
+        contract_filter = parse_int_or_none(filters.get("contract_id"))
+        annex_filter = parse_int_or_none(filters.get("annex_id"))
+        q_filter = (filters.get("q") or "").strip()
+
+        # Sanitize relational filters
+        if vendor_filter is not None and contract_filter is not None:
+            c_row = conn.execute("SELECT 1 FROM contracts WHERE id=? AND seller_vendor_id=?", (contract_filter, vendor_filter)).fetchone()
+            if not c_row:
+                contract_filter = None
+
+        if contract_filter is not None and annex_filter is not None:
+            a_row = conn.execute("SELECT 1 FROM contract_annexes WHERE id=? AND contract_id=?", (annex_filter, contract_filter)).fetchone()
+            if not a_row:
+                annex_filter = None
+
+        # Load options for dropdowns
+        vendors = conn.execute("SELECT id, COALESCE(company_name, company_name_vi) AS company_name FROM vendors WHERE is_active=1 AND purchasing=0 ORDER BY company_name ASC").fetchall()
+        if vendor_filter is not None:
+            contracts = conn.execute("SELECT id, framework_no FROM contracts WHERE is_active=1 AND seller_vendor_id=? ORDER BY framework_no ASC", (vendor_filter,)).fetchall()
+        else:
+            contracts = conn.execute("SELECT id, framework_no FROM contracts WHERE is_active=1 ORDER BY framework_no ASC").fetchall()
+
+        annexes = conn.execute("""
+            SELECT a.id, a.contract_id, a.annex_name, c.seller_vendor_id 
+            FROM contract_annexes a 
+            JOIN contracts c ON c.id = a.contract_id 
+            WHERE a.is_active = 1 
+              AND a.deleted_at IS NULL
+              AND (a.start_date IS NULL OR a.start_date = '' OR a.start_date <= ?)
+              AND (a.end_date IS NULL OR a.end_date = '' OR a.end_date >= ?)
+            ORDER BY a.annex_name ASC
+        """, (last_day_str, first_day_str)).fetchall()
+
+        vendor_opts = ['<option value="">-- All Vendors --</option>']
+        for v in vendors:
+            sel = "selected" if vendor_filter == v["id"] else ""
+            vendor_opts.append(f'<option value="{v["id"]}" {sel}>{escape(v["company_name"] or f"Vendor #{v["id"]}")}</option>')
+
+        contract_opts = ['<option value="">-- All Contracts --</option>']
+        for c in contracts:
+            sel = "selected" if contract_filter == c["id"] else ""
+            contract_opts.append(f'<option value="{c["id"]}" {sel}>{escape(c["framework_no"] or f"Contract #{c["id"]}")}</option>')
+
+        annex_opts = ['<option value="">-- All Annexes --</option>']
+        for a in annexes:
+            if contract_filter is not None and a["contract_id"] != contract_filter:
+                continue
+            if vendor_filter is not None and a["seller_vendor_id"] != vendor_filter:
+                continue
+            sel = "selected" if annex_filter == a["id"] else ""
+            annex_opts.append(f'<option value="{a["id"]}" {sel}>{escape(a["annex_name"])}</option>')
+
+        # Query active staff linked to valid annexes covering the selected month
+        where = []
+        params = [last_day_str, first_day_str, last_day_str, first_day_str]
+
+        if vendor_filter is not None:
+            where.append("s.vendor_id = ?")
+            params.append(vendor_filter)
+        if contract_filter is not None:
+            where.append("l.contract_id = ?")
+            params.append(contract_filter)
+        if annex_filter is not None:
+            where.append("l.annex_id = ?")
+            params.append(annex_filter)
+        if q_filter:
+            where.append("(s.full_name_vi LIKE ? OR s.position LIKE ?)")
+            params.extend([f"%{q_filter}%", f"%{q_filter}%"])
+
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+        staff_list = conn.execute(f"""
+            SELECT s.id, s.full_name_vi, s.position, s.status, s.ot, s.work_shift,
+                   COALESCE(v.company_name, v.company_name_vi) AS vendor_name,
+                   c.framework_no AS contract_no,
+                   an.id AS annex_id,
+                   an.annex_name
+            FROM contract_staff s
+            JOIN vendors v ON v.id=s.vendor_id
+            JOIN contract_staff_links l ON l.id = (
+                SELECT l2.id FROM contract_staff_links l2
+                JOIN contract_annexes an2 ON an2.id = l2.annex_id
+                WHERE l2.staff_id = s.id
+                  AND an2.is_active = 1 AND an2.deleted_at IS NULL
+                  AND (an2.start_date IS NULL OR an2.start_date = '' OR an2.start_date <= ?)
+                  AND (an2.end_date IS NULL OR an2.end_date = '' OR an2.end_date >= ?)
+                  AND (l2.joining_date IS NULL OR l2.joining_date = '' OR l2.joining_date <= ?)
+                  AND (l2.tentative_leaving_date IS NULL OR l2.tentative_leaving_date = '' OR l2.tentative_leaving_date >= ?)
+                ORDER BY COALESCE(l2.joining_date, '') DESC, l2.id DESC LIMIT 1
+            )
+            JOIN contracts c ON c.id=l.contract_id
+            JOIN contract_annexes an ON an.id=l.annex_id
+            {where_sql}
+            ORDER BY vendor_name ASC, s.full_name_vi ASC
+        """, params).fetchall()
+
+        # Query attendance records for the month
+        att_rows = conn.execute("""
+            SELECT staff_id, date, work_hours, ot_hours, check_in, check_out
+            FROM attendance
+            WHERE date >= ? AND date <= ?
+        """, (first_day_str, last_day_str)).fetchall()
+
+        att_map = {}
+        for r in att_rows:
+            sid = r["staff_id"]
+            d_str = r["date"]
+            try:
+                day_num = int(d_str.split("-")[2])
+            except Exception:
+                continue
+            att_map.setdefault(sid, {})[day_num] = r
+
+    finally:
+        conn.close()
+
+    # KPI counts
+    total_active_staff = len(staff_list)
+    total_punctual_all = 0
+    total_late_all = 0
+    total_early_all = 0
+    total_absent_all = 0
+
+    # Build day headers
+    day_headers_r1 = []
+    day_headers_r2 = []
+    weekend_days = {}
+
+    for d in range(1, num_days + 1):
+        d_date = date(year, month, d)
+        dow_name = d_date.strftime("%a")
+        is_we = d_date.weekday() in (5, 6)
+        weekend_days[d] = is_we
+
+        we_style = "background: #fff5e6; color: #b00020;" if is_we else "background: #f8fafc;"
+        day_headers_r1.append(f"""
+          <th style="text-align: center; font-size: 11px; padding: 4px 2px; width: 30px; min-width: 30px; border-bottom: none; {we_style}">
+            <b>{d}</b>
+          </th>
+        """)
+        day_headers_r2.append(f"""
+          <th style="font-size: 9px; padding: 2px 0; text-align: center; border-top: none; {we_style}">
+            {dow_name}
+          </th>
+        """)
+
+    # Render staff rows
+    trs = []
+    for idx, s in enumerate(staff_list, 1):
+        sid = s["id"]
+        s_name = s["full_name_vi"]
+        s_shift = s["work_shift"] or "8:30 - 17:30"
+        shift_start, shift_end = parse_shift_times(s["work_shift"])
+
+        total_present = 0
+        total_late = 0
+        total_early = 0
+        total_absent = 0
+
+        day_cells = []
+        for d in range(1, num_days + 1):
+            d_date = date(year, month, d)
+            d_str = f"{year:04d}-{month:02d}-{d:02d}"
+            dow_name = d_date.strftime("%a")
+            is_we = weekend_days[d]
+            we_cell_bg = "background: #fffdf5;" if is_we else ""
+
+            att_rec = att_map.get(sid, {}).get(d)
+            if not att_rec:
+                # Absent / No log
+                total_absent += 1
+                total_absent_all += 1
+                bg_style = "background: #cbd5e1; border-color: #94a3b8;"
+                tooltip = f"{s_name} | {d_str} ({dow_name})\nStatus: Absent / Day off (Không đi làm)"
+            else:
+                ci = att_rec["check_in"] or ""
+                co = att_rec["check_out"] or ""
+                w = att_rec["work_hours"] or 0.0
+
+                if (not ci and not co) and (w == 0 or w is None):
+                    total_absent += 1
+                    total_absent_all += 1
+                    bg_style = "background: #cbd5e1; border-color: #94a3b8;"
+                    tooltip = f"{s_name} | {d_str} ({dow_name})\nStatus: Absent / Day off (Không đi làm)"
+                elif (not ci and not co) and w > 0:
+                    total_present += 1
+                    total_punctual_all += 1
+                    bg_style = "background: #ffffff; border-color: #cbd5e1;"
+                    tooltip = f"{s_name} | {d_str} ({dow_name})\nHours: {w:.1f}h (Holiday / Standard work)"
+                else:
+                    ci_mins = parse_time_minutes(ci)
+                    co_mins = parse_time_minutes(co)
+
+                    is_late = (ci_mins is not None and ci_mins > shift_start)
+                    is_early = (co_mins is not None and co_mins < shift_end)
+
+                    late_mins = max(0, ci_mins - shift_start) if is_late else 0
+                    early_mins = max(0, shift_end - co_mins) if is_early else 0
+
+                    if is_late:
+                        total_late += 1
+                        total_late_all += 1
+                    if is_early:
+                        total_early += 1
+                        total_early_all += 1
+                    if not is_late and not is_early:
+                        total_punctual_all += 1
+
+                    total_present += 1
+
+                    ci_desc = f"{ci} (Late: {late_mins}m)" if is_late else f"{ci or 'N/A'} (On-time)"
+                    co_desc = f"{co} (Early: {early_mins}m)" if is_early else f"{co or 'N/A'} (On-time)"
+                    tooltip = f"{s_name} | {d_str} ({dow_name})\nCa làm việc: {s_shift}\nVào: {ci_desc}\nRa: {co_desc}\nSố giờ: {w:.1f}h"
+
+                    if is_late and is_early:
+                        bg_style = "background: linear-gradient(135deg, #facc15 50%, #ef4444 50%); border-color: #cbd5e1;"
+                    elif is_late:
+                        bg_style = "background: linear-gradient(135deg, #facc15 50%, #ffffff 50%); border-color: #cbd5e1;"
+                    elif is_early:
+                        bg_style = "background: linear-gradient(135deg, #ffffff 50%, #ef4444 50%); border-color: #cbd5e1;"
+                    else:
+                        bg_style = "background: #ffffff; border-color: #cbd5e1;"
+
+            day_cells.append(f"""
+              <td style="padding: 2px; text-align: center; {we_cell_bg}">
+                <div class="punc-square" style="{bg_style}" title="{escape(tooltip)}"></div>
+              </td>
+            """)
+
+        inactive_tag = '<span class="tag tag-deactive" style="font-size:9px; padding:1px 4px; margin-left: 4px;">Inactive</span>' if (s["status"] and s["status"].strip().lower() == "inactive") else ""
+
+        trs.append(f"""
+        <tr>
+          <td class="sticky-col1" style="font-size: 11px; text-align: center;">{idx}</td>
+          <td class="sticky-col2" style="font-size: 12px;">
+            <b>{escape(s_name)}</b>{inactive_tag}
+            <div class="muted" style="font-size: 9px;">{escape(s["contract_no"] or "")}{f' - {escape(s["annex_name"])}' if s["annex_name"] else ''}</div>
+          </td>
+          <td style="font-size: 11px; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+            {escape(s["vendor_name"] or "")}
+          </td>
+          <td style="font-size: 11px; text-align: center;">
+            <div style="font-weight: 500;">{escape(s_shift)}</div>
+          </td>
+          <td style="font-size: 11px; text-align: center; background: #fffdf0;">
+            <span style="display:inline-block; min-width: 20px; padding: 2px 6px; border-radius: 10px; font-weight: bold; font-size: 11px; background: {'#fef9c3' if total_late > 0 else '#f1f5f9'}; color: {'#854d0e' if total_late > 0 else '#64748b'}; border: 1px solid {'#fde047' if total_late > 0 else '#e2e8f0'};">{total_late}</span>
+          </td>
+          <td style="font-size: 11px; text-align: center; background: #fff5f5;">
+            <span style="display:inline-block; min-width: 20px; padding: 2px 6px; border-radius: 10px; font-weight: bold; font-size: 11px; background: {'#fee2e2' if total_early > 0 else '#f1f5f9'}; color: {'#991b1b' if total_early > 0 else '#64748b'}; border: 1px solid {'#fca5a5' if total_early > 0 else '#e2e8f0'};">{total_early}</span>
+          </td>
+          <td style="font-size: 11px; text-align: center; background: #f0fdf4;">
+            <span style="display:inline-block; min-width: 20px; padding: 2px 6px; border-radius: 10px; font-weight: bold; font-size: 11px; background: #dcfce7; color: #166534; border: 1px solid #bbf7d0;">{total_present}</span>
+          </td>
+          {''.join(day_cells)}
+        </tr>
+        """)
+
+    act_qs = f"month={month_val}&vendor_id={vendor_filter or ''}&contract_id={contract_filter or ''}&annex_id={annex_filter or ''}&q={urllib.parse.quote(q_filter)}"
+
+    sub_nav = f"""
+    <div class="actions" style="margin-bottom: 14px; border-bottom: 1px solid #ddd; padding-bottom: 8px;">
+      <a href="/attendance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📅 Daily Attendance</a>
+      <a href="/attendance/monthly?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">💵 Monthly Payroll</a>
+      <a href="/attendance/acceptance?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#666; text-decoration:none;">📜 Attendance Acceptance</a>
+      <a href="/attendance/punctuality?{act_qs}" style="margin-right: 18px; font-weight: bold; color:#0b57d0; border-bottom: 2px solid #0b57d0; padding-bottom: 8px;">⏱️ Punctuality Matrix</a>
+    </div>
+    """
+
+    error_html = f"<div class='card danger' style='margin-bottom:16px;'><b>Error:</b> {escape(error_msg)}</div>" if error_msg else ""
+    success_html = f"<div class='card success' style='border-color:#b4e3be; background:#f4fbf6; color:#137333; padding:12px; border-radius:8px; margin-bottom:16px;'><b>Success:</b> {escape(success_msg)}</div>" if success_msg else ""
+
+    extra_styles = """
+    <style>
+      .punctuality-container {
+        overflow-x: auto;
+        max-width: 100%;
+        margin-top: 14px;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+      }
+      .punctuality-table {
+        margin: 0;
+        border-collapse: separate;
+        border-spacing: 0;
+        width: max-content;
+        font-size: 12px;
+      }
+      .punctuality-table th, .punctuality-table td {
+        border-right: 1px solid #e2e8f0;
+        border-bottom: 1px solid #e2e8f0;
+        padding: 4px 6px;
+        vertical-align: middle;
+      }
+      .sticky-col1 {
+        position: sticky;
+        left: 0;
+        background: #fff;
+        z-index: 5;
+        width: 36px;
+        text-align: center;
+      }
+      .sticky-col2 {
+        position: sticky;
+        left: 36px;
+        background: #fff;
+        z-index: 5;
+        min-width: 160px;
+        border-right: 2px solid #cbd5e1 !important;
+      }
+      th.sticky-col1, th.sticky-col2 {
+        z-index: 7;
+        background: #f8fafc;
+      }
+      tr:hover td.sticky-col1, tr:hover td.sticky-col2 {
+        background: #f1f5f9;
+      }
+      .punc-square {
+        width: 24px;
+        height: 24px;
+        border: 1px solid #94a3b8;
+        border-radius: 3px;
+        margin: 0 auto;
+        box-sizing: border-box;
+        cursor: pointer;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+      .punc-square:hover {
+        transform: scale(1.3);
+        box-shadow: 0 4px 10px rgba(0,0,0,0.25);
+        z-index: 10;
+        position: relative;
+      }
+    </style>
+    """
+
+    empty_trs = f"""
+    <tr>
+      <td colspan="{7 + num_days}" style="text-align: center; padding: 36px; color: #64748b; font-size: 13px;">
+        No active contract staff found in valid annexes for <b>{month_val}</b> matching the current filters.
+      </td>
+    </tr>
+    """
+
+    body = f"""
+    {extra_styles}
+    {sub_nav}
+    {error_html}
+    {success_html}
+
+    <!-- KPI Metric Cards -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; margin-bottom: 16px;">
+      <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #0284c7; background: #f0f9ff;">
+        <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #0369a1;">Active Contract Staff</div>
+        <div style="font-size: 24px; font-weight: 700; color: #0c4a6e; margin-top: 4px;">{total_active_staff}</div>
+        <div style="font-size: 11px; color: #0284c7; margin-top: 2px;">In active annexes ({month_val})</div>
+      </div>
+      <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #16a34a; background: #f0fdf4;">
+        <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #15803d;">Punctual Attendances</div>
+        <div style="font-size: 24px; font-weight: 700; color: #14532d; margin-top: 4px;">{total_punctual_all}</div>
+        <div style="font-size: 11px; color: #16a34a; margin-top: 2px;">On-time in & out (Trắng)</div>
+      </div>
+      <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #eab308; background: #fefce8;">
+        <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #a16207;">Late Arrivals</div>
+        <div style="font-size: 24px; font-weight: 700; color: #713f12; margin-top: 4px;">{total_late_all}</div>
+        <div style="font-size: 11px; color: #ca8a04; margin-top: 2px;">Đi làm trễ (Nửa vàng)</div>
+      </div>
+      <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #dc2626; background: #fef2f2;">
+        <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #b91c1c;">Early Departures</div>
+        <div style="font-size: 24px; font-weight: 700; color: #7f1d1d; margin-top: 4px;">{total_early_all}</div>
+        <div style="font-size: 11px; color: #dc2626; margin-top: 2px;">Về sớm (Nửa đỏ)</div>
+      </div>
+      <div class="card" style="margin: 0; padding: 14px; border-left: 4px solid #64748b; background: #f8fafc;">
+        <div style="font-size: 11px; font-weight: 600; text-transform: uppercase; color: #475569;">Absent / Off Days</div>
+        <div style="font-size: 24px; font-weight: 700; color: #1e293b; margin-top: 4px;">{total_absent_all}</div>
+        <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Không đi làm (Xám cả ô)</div>
+      </div>
+    </div>
+
+    <!-- Filters -->
+    <div class="card" style="margin-bottom: 16px;">
+      <form method="GET" action="/attendance/punctuality" class="filters" style="margin: 0;">
+        <div>
+          <div class="label">Attendance Month</div>
+          <input type="month" name="month" value="{month_val}" onchange="this.form.submit()">
+        </div>
+        <div>
+          <div class="label">Vendor</div>
+          <select id="vendor_id" name="vendor_id" onchange="this.form.submit()">
+            {''.join(vendor_opts)}
+          </select>
+        </div>
+        <div>
+          <div class="label">Framework Contract</div>
+          <select id="contract_id" name="contract_id" onchange="this.form.submit()">
+            {''.join(contract_opts)}
+          </select>
+        </div>
+        <div>
+          <div class="label">Annex (filtered by Framework)</div>
+          <select id="annex_id" name="annex_id" onchange="this.form.submit()">
+            {''.join(annex_opts)}
+          </select>
+        </div>
+        <div>
+          <div class="label">Search staff</div>
+          <input type="text" name="q" placeholder="Enter staff name or position..." value="{escape(q_filter)}">
+        </div>
+        <div class="actions">
+          <button type="submit">Filter</button>
+          <a class="muted" href="/attendance/punctuality">Reset</a>
+        </div>
+      </form>
+    </div>
+
+    <!-- Visual Legend -->
+    <div style="display: flex; gap: 20px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; background: #fff; padding: 10px 16px; border: 1px solid #e2e8f0; border-radius: 8px;">
+      <span style="font-weight: 600; font-size: 12px; color: #334155; text-transform: uppercase; letter-spacing: 0.5px;">Matrix Legend:</span>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155;">
+        <div style="width: 20px; height: 20px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 3px;"></div>
+        <span>Đúng giờ (On-time in & out)</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155;">
+        <div style="width: 20px; height: 20px; background: linear-gradient(135deg, #facc15 50%, #ffffff 50%); border: 1px solid #cbd5e1; border-radius: 3px;"></div>
+        <span>Đi làm trễ (Nửa trên vàng)</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155;">
+        <div style="width: 20px; height: 20px; background: linear-gradient(135deg, #ffffff 50%, #ef4444 50%); border: 1px solid #cbd5e1; border-radius: 3px;"></div>
+        <span>Về sớm (Nửa dưới đỏ)</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155;">
+        <div style="width: 20px; height: 20px; background: linear-gradient(135deg, #facc15 50%, #ef4444 50%); border: 1px solid #cbd5e1; border-radius: 3px;"></div>
+        <span>Trễ & Về sớm (Nửa vàng + nửa đỏ)</span>
+      </div>
+      <div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155;">
+        <div style="width: 20px; height: 20px; background: #cbd5e1; border: 1px solid #94a3b8; border-radius: 3px;"></div>
+        <span>Không đi làm (Cả ô xám)</span>
+      </div>
+    </div>
+
+    <!-- Matrix Table Container -->
+    <div class="punctuality-container">
+      <table class="punctuality-table">
+        <thead>
+          <tr>
+            <th rowspan="2" class="sticky-col1" style="font-size: 11px; text-align: center; width: 36px;">#</th>
+            <th rowspan="2" class="sticky-col2" style="font-size: 12px; min-width: 160px;">Staff & Annex</th>
+            <th rowspan="2" style="font-size: 11px; min-width: 130px; text-align: left;">Vendor</th>
+            <th rowspan="2" style="font-size: 11px; min-width: 95px; text-align: center;">Shift</th>
+            <th rowspan="2" style="font-size: 11px; min-width: 48px; text-align: center; background: #fffdf0;" title="Total days arrived late in this month">Late</th>
+            <th rowspan="2" style="font-size: 11px; min-width: 48px; text-align: center; background: #fff5f5;" title="Total days left early in this month">Early</th>
+            <th rowspan="2" style="font-size: 11px; min-width: 48px; text-align: center; background: #f0fdf4;" title="Total days attended in this month">Work</th>
+            {''.join(day_headers_r1)}
+          </tr>
+          <tr>
+            {''.join(day_headers_r2)}
+          </tr>
+        </thead>
+        <tbody>
+          {''.join(trs) if trs else empty_trs}
+        </tbody>
+      </table>
+    </div>
+    """
+
+    return layout("Actual Attendance & Punctuality Matrix", body)
 
 
 def handle_attendance_cashout_post(handler):

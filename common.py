@@ -694,6 +694,7 @@ def layout(title: str, body_html: str):
           <a href="/attendance/acceptance" class="nav-dropdown-item">📝 T&M Acceptance</a>
           <div style="border-top: 1px solid #f1f5f9; margin: 4px 0;"></div>
           <a href="/staff/shifts" class="nav-dropdown-item">⏰ Work Shifts Settings</a>
+          <a href="/attendance/punctuality" class="nav-dropdown-item">⏱️ Actual Attendance & Punctuality</a>
         </div>
       </div>
 

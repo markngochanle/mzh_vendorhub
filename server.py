@@ -104,6 +104,7 @@ from attendance import (
     handle_attendance_monthly_export_get,
     page_attendance_timesheet_report,
     page_attendance_acceptance,
+    page_attendance_punctuality,
     handle_attendance_cashout_post,
     page_attendance_payout,
     handle_attendance_payout_export_get,
@@ -549,6 +550,17 @@ class Handler(BaseHTTPRequestHandler):
                     "q": qs.get("q", [""])[0],
                 }
                 send_html(self, page_attendance_timesheet_report(filters))
+                return
+
+            if path == "/attendance/punctuality":
+                filters = {
+                    "month": qs.get("month", [""])[0],
+                    "vendor_id": qs.get("vendor_id", [""])[0],
+                    "contract_id": qs.get("contract_id", [""])[0],
+                    "annex_id": qs.get("annex_id", [""])[0],
+                    "q": qs.get("q", [""])[0],
+                }
+                send_html(self, page_attendance_punctuality(filters))
                 return
 
             if path in ("/payments", "/payments/dashboard", "/attendance/cashout", "/attendance/payout"):

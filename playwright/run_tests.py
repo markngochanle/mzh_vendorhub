@@ -245,6 +245,18 @@ def run_playwright_tests():
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_attendance_acceptance.png"))
 
+                # Navigate to Actual Attendance & Punctuality Matrix via Projects & Resources dropdown
+                page.hover(".nav-dropdown:has-text('Projects & Resources')")
+                page.click("a[href='/attendance/punctuality']")
+                page.wait_for_selector(".actions:has-text('Punctuality Matrix')")
+                punc_active = page.locator("a.nav-dropdown-item[href='/attendance/punctuality'].active").count()
+                att_active4 = page.locator("a.nav-dropdown-item[href='/attendance'].active").count()
+                assert punc_active == 1, "Expected /attendance/punctuality to be active in dropdown"
+                assert att_active4 == 0, "Expected /attendance to NOT be active in dropdown when on /attendance/punctuality"
+                assert page.locator("text=Matrix Legend").count() >= 1, "Expected Matrix Legend to be visible"
+                if show:
+                    page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_attendance_punctuality.png"))
+
                 # Navigate to Cash-out Dashboard via Payments & Invoices dropdown
                 page.hover(".nav-dropdown:has-text('Payments & Invoices')")
                 page.click("a[href='/payments']")
