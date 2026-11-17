@@ -205,13 +205,23 @@ def check_invoice_payroll_reconciliation(conn, contract_no_str, year, month, inv
         fee = rec_obj["recurring_fee"] if (rec_obj["recurring_fee"] is not None and rec_obj["recurring_fee"] > 0) else (rec_obj["contract_value"] if rec_contract else rec_obj["value"])
         fee = float(fee or 0.0)
         inv_amt = float(invoice_amount or 0.0)
+        is_usage_based = int(rec_obj["is_usage_based"] or 0) if "is_usage_based" in rec_obj.keys() else 0
 
-        if fee > 0 and abs(fee - inv_amt) < 1.0:
-            return 'ok', fee, fee, f"Matched Recurring Fee: '{target_name}' ({fee:,.0f} VND)"
-        elif fee > 0:
-            return 'mismatch', fee, fee, f"Recurring Contract '{target_name}': Invoice amount ({inv_amt:,.0f} VND) does not match expected recurring fee ({fee:,.0f} VND)"
+        if is_usage_based == 1:
+            if fee > 0 and inv_amt > fee:
+                diff = inv_amt - fee
+                return 'ok', inv_amt, inv_amt, f"Matched Usage-based Service: '{target_name}' ({inv_amt:,.0f} VND) [Exceeded Monthly Cap of {fee:,.0f} by +{diff:,.0f} VND]"
+            elif fee > 0:
+                return 'ok', inv_amt, inv_amt, f"Matched Usage-based Service: '{target_name}' ({inv_amt:,.0f} VND, Budget Cap: {fee:,.0f} VND)"
+            else:
+                return 'ok', inv_amt, inv_amt, f"Matched Usage-based Service: '{target_name}' ({inv_amt:,.0f} VND)"
         else:
-            return 'ok', inv_amt, inv_amt, f"Matched Recurring Contract '{target_name}' (Fee not specified)"
+            if fee > 0 and abs(fee - inv_amt) < 1.0:
+                return 'ok', fee, fee, f"Matched Recurring Fee: '{target_name}' ({fee:,.0f} VND)"
+            elif fee > 0:
+                return 'mismatch', fee, fee, f"Recurring Contract '{target_name}': Invoice amount ({inv_amt:,.0f} VND) does not match expected recurring fee ({fee:,.0f} VND)"
+            else:
+                return 'ok', inv_amt, inv_amt, f"Matched Recurring Contract '{target_name}' (Fee not specified)"
 
     # 2. Time & Material flow: requires service month and year
     if year is None or month is None:
@@ -1450,12 +1460,12 @@ def parse_xml_bytes(xml_bytes: bytes, filename: str) -> tuple[dict, list[dict]]:
     root = ET.fromstring(xml_bytes)
     dlh = root.find("./DLHDon")
     if dlh is None:
-        raise ValueError("Thiếu thẻ <DLHDon>")
+        raise ValueError("Missing <DLHDon> XML tag")
 
     tt = dlh.find("./TTChung")
     nd = dlh.find("./NDHDon")
     if tt is None or nd is None:
-        raise ValueError("Thiếu thẻ <TTChung> hoặc <NDHDon>")
+        raise ValueError("Missing <TTChung> or <NDHDon> XML tag")
 
     khhdon = get_xml_text(tt, "./KHHDon")
     shdon = get_xml_text(tt, "./SHDon")
@@ -1527,7 +1537,7 @@ def iter_local_xml_files(path: Path):
                 yield p
         return
 
-    raise FileNotFoundError(f"Đường dẫn không tồn tại: {path}")
+    raise FileNotFoundError(f"Path does not exist: {path}")
 
 
 def db_insert_or_duplicate(
@@ -1741,7 +1751,7 @@ def page_new_invoice(
         # Load all active contracts
         c_rows = conn.execute("""
             SELECT c.id, c.framework_no, c.framework_name, c.contract_type, c.billing_type, c.contract_value,
-                   c.recurring_fee, c.recurring_period,
+                   c.recurring_fee, c.recurring_period, c.is_usage_based,
                    COALESCE(sv.company_name, sv.company_name_vi) AS seller_name, sv.tax_id AS seller_tax
             FROM contracts c
             JOIN vendors sv ON sv.id = c.seller_vendor_id
@@ -1751,7 +1761,7 @@ def page_new_invoice(
 
         # Load all active annexes
         a_rows = conn.execute("""
-            SELECT a.id, a.contract_id, a.annex_name, a.value, a.billing_type, a.recurring_fee, a.recurring_period,
+            SELECT a.id, a.contract_id, a.annex_name, a.value, a.billing_type, a.recurring_fee, a.recurring_period, a.is_usage_based,
                    c.framework_no, COALESCE(sv.company_name, sv.company_name_vi) AS seller_name
             FROM contract_annexes a
             JOIN contracts c ON c.id = a.contract_id
@@ -1834,13 +1844,15 @@ def page_new_invoice(
     for c in c_rows:
         if c["billing_type"] == "RECURRING":
             sel = "selected" if (contract_no and c["framework_no"] == contract_no) else ""
+            mode_tag = " (Usage-based)" if ("is_usage_based" in c.keys() and c["is_usage_based"]) else ""
             fee_txt = f"{int(round(c['recurring_fee'])):,} VND/{c['recurring_period']}" if c["recurring_fee"] else "Fee not set"
-            rec_opts.append(f'<option value="{escape(c["framework_no"] or "")}" {sel}>{escape(c["framework_no"] or "")} - {escape(c["seller_name"])} ({fee_txt})</option>')
+            rec_opts.append(f'<option value="{escape(c["framework_no"] or "")}" {sel}>{escape(c["framework_no"] or "")} - {escape(c["seller_name"])} ({fee_txt}{mode_tag})</option>')
     for a in a_rows:
         if a["billing_type"] == "RECURRING":
             sel = "selected" if (contract_no and a["annex_name"] == contract_no) else ""
+            mode_tag = " (Usage-based)" if ("is_usage_based" in a.keys() and a["is_usage_based"]) else ""
             fee_txt = f"{int(round(a['recurring_fee'])):,} VND/{a['recurring_period']}" if a["recurring_fee"] else "Fee not set"
-            rec_opts.append(f'<option value="{escape(a["annex_name"] or "")}" {sel}>{escape(a["framework_no"] or "")} / {escape(a["annex_name"] or "")} - {escape(a["seller_name"])} ({fee_txt})</option>')
+            rec_opts.append(f'<option value="{escape(a["annex_name"] or "")}" {sel}>{escape(a["framework_no"] or "")} / {escape(a["annex_name"] or "")} - {escape(a["seller_name"])} ({fee_txt}{mode_tag})</option>')
 
     # JSON milestones for dynamic JS filtering
     milestones_list = []

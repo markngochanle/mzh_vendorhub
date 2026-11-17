@@ -440,7 +440,7 @@ def page_payments_recurring(month: str | None = None, q: str = "", vendor_id: st
         contracts_rows = conn.execute(f"""
             SELECT
                 c.id, c.framework_no, c.framework_name, c.contract_type, c.contract_value,
-                c.recurring_fee, c.recurring_period, c.start_date, c.end_date,
+                c.recurring_fee, c.recurring_period, c.is_usage_based, c.start_date, c.end_date,
                 COALESCE(bv.company_name, bv.company_name_vi) AS buyer_name, bv.tax_id AS buyer_tax,
                 COALESCE(sv.company_name, sv.company_name_vi) AS seller_name, sv.tax_id AS seller_tax,
                 sv.id AS seller_vendor_id
@@ -468,7 +468,7 @@ def page_payments_recurring(month: str | None = None, q: str = "", vendor_id: st
         annexes_rows = conn.execute(f"""
             SELECT
                 a.id AS annex_id, a.annex_name, a.value AS annex_value,
-                a.recurring_fee, a.recurring_period, a.start_date, a.end_date,
+                a.recurring_fee, a.recurring_period, a.is_usage_based, a.start_date, a.end_date,
                 c.id AS contract_id, c.framework_no, c.framework_name,
                 COALESCE(bv.company_name, bv.company_name_vi) AS buyer_name, bv.tax_id AS buyer_tax,
                 COALESCE(sv.company_name, sv.company_name_vi) AS seller_name, sv.tax_id AS seller_tax,
@@ -533,6 +533,7 @@ def page_payments_recurring(month: str | None = None, q: str = "", vendor_id: st
             "seller_vendor_id": c["seller_vendor_id"],
             "fee": float(fee),
             "period": c["recurring_period"] or "MONTHLY",
+            "is_usage_based": bool(c["is_usage_based"]) if "is_usage_based" in c.keys() else False,
             "start_date": c["start_date"],
             "end_date": c["end_date"],
             "is_expired": not in_period,
@@ -563,6 +564,7 @@ def page_payments_recurring(month: str | None = None, q: str = "", vendor_id: st
             "seller_vendor_id": a["seller_vendor_id"],
             "fee": float(fee),
             "period": a["recurring_period"] or "MONTHLY",
+            "is_usage_based": bool(a["is_usage_based"]) if "is_usage_based" in a.keys() else False,
             "start_date": a["start_date"],
             "end_date": a["end_date"],
             "is_expired": not in_period,
@@ -580,8 +582,9 @@ def page_payments_recurring(month: str | None = None, q: str = "", vendor_id: st
         payout = payout_map.get(key)
 
         is_paid = bool(payout and payout["status"] == "PAID" and payout["cashout_date"])
+        payout_amt = float(payout["amount"]) if (payout and payout["amount"] is not None) else it["fee"]
         if is_paid:
-            paid_sum += it["fee"]
+            paid_sum += payout_amt
 
         # Try to find matched invoice
         matched_inv = None
@@ -601,12 +604,18 @@ def page_payments_recurring(month: str | None = None, q: str = "", vendor_id: st
             inv_amt = float(matched_inv["tg_tttbso"] or 0)
             fee_amt = float(it["fee"] or 0)
             diff = inv_amt - fee_amt
-            if abs(diff) < 1.0:
-                recon_badge = '<span class="tag tag-active" style="font-size:10px; padding:1px 5px;" title="Invoice amount matches recurring fee exactly">✓ Matched Fee</span>'
-            elif diff > 0:
-                recon_badge = f'<span class="tag tag-danger" style="font-size:10px; padding:1px 5px;" title="Invoice ({inv_amt:,.0f}) exceeds recurring fee ({fee_amt:,.0f}) by {diff:,.0f} VND">⚠️ Mismatch: +{diff:,.0f} VND</span>'
+            if it.get("is_usage_based"):
+                if fee_amt > 0 and inv_amt > fee_amt:
+                    recon_badge = f'<span class="tag tag-warning" style="font-size:10px; padding:1px 5px;" title="Usage-based invoice ({inv_amt:,.0f} VND) exceeded budget cap ({fee_amt:,.0f} VND) by +{diff:,.0f} VND">⚠️ Cap Exceeded: +{diff:,.0f} VND</span>'
+                else:
+                    recon_badge = f'<span class="tag tag-active" style="font-size:10px; padding:1px 5px;" title="Usage-based actual invoice amount matched ({inv_amt:,.0f} VND)">✓ Usage Matched</span>'
             else:
-                recon_badge = f'<span class="tag tag-warning" style="font-size:10px; padding:1px 5px;" title="Invoice ({inv_amt:,.0f}) is less than recurring fee ({fee_amt:,.0f}) by {abs(diff):,.0f} VND">⚠️ Mismatch: -{abs(diff):,.0f} VND</span>'
+                if abs(diff) < 1.0:
+                    recon_badge = '<span class="tag tag-active" style="font-size:10px; padding:1px 5px;" title="Invoice amount matches recurring fee exactly">✓ Matched Fee</span>'
+                elif diff > 0:
+                    recon_badge = f'<span class="tag tag-danger" style="font-size:10px; padding:1px 5px;" title="Invoice ({inv_amt:,.0f}) exceeds recurring fee ({fee_amt:,.0f}) by {diff:,.0f} VND">⚠️ Mismatch: +{diff:,.0f} VND</span>'
+                else:
+                    recon_badge = f'<span class="tag tag-warning" style="font-size:10px; padding:1px 5px;" title="Invoice ({inv_amt:,.0f}) is less than recurring fee ({fee_amt:,.0f}) by {abs(diff):,.0f} VND">⚠️ Mismatch: -{abs(diff):,.0f} VND</span>'
 
             inv_display = f"""
             <div>
@@ -632,7 +641,7 @@ def page_payments_recurring(month: str | None = None, q: str = "", vendor_id: st
         if is_paid:
             cashout_html = f"""
             <div style="font-size:11px; font-weight:600; color:var(--success);">
-              ✓ Paid on {escape(payout['cashout_date'])}
+              ✓ Paid {payout_amt:,.0f} VND on {escape(payout['cashout_date'])}
               <form class="inline" method="POST" action="/payments/recurring/cashout" style="display:inline; margin-left:4px;">
                 <input type="hidden" name="contract_id" value="{it['contract_id']}">
                 <input type="hidden" name="annex_id" value="{it['annex_id'] or ''}">
@@ -645,32 +654,43 @@ def page_payments_recurring(month: str | None = None, q: str = "", vendor_id: st
             """
             status_badge = '<span class="tag tag-active" style="background:#047857; color:#fff; border-color:#047857;">✓ Paid</span>'
         else:
+            if it.get("is_usage_based") and matched_inv and matched_inv["tg_tttbso"] is not None:
+                cashout_val = int(round(float(matched_inv["tg_tttbso"])))
+            else:
+                cashout_val = int(round(it['fee']))
+
             cashout_html = f"""
             <form class="inline" method="POST" action="/payments/recurring/cashout" style="display:flex; align-items:center; gap:4px;">
               <input type="hidden" name="contract_id" value="{it['contract_id']}">
               <input type="hidden" name="annex_id" value="{it['annex_id'] or ''}">
               <input type="hidden" name="service_month" value="{month}">
-              <input type="hidden" name="amount" value="{int(round(it['fee']))}">
+              <input type="hidden" name="amount" value="{cashout_val}">
               <input type="hidden" name="action" value="pay">
               <input type="hidden" name="return_to" value="{escape(return_to)}">
               <input type="date" name="cashout_date" value="{today_str}" style="font-size:11px; padding:2px 4px; width:110px;" required>
-              <button type="submit" class="btn-secondary" style="font-size:10px; padding:2px 6px;">Cashout</button>
+              <button type="submit" class="btn-secondary" style="font-size:10px; padding:2px 6px;" title="Pay {cashout_val:,.0f} VND">Cashout</button>
             </form>
             """
             status_badge = '<span class="tag tag-warning">Pending Payment</span>'
 
         edit_url = f"/annex/edit?id={it['annex_id']}" if it["is_annex"] else f"/contract/edit?id={it['contract_id']}"
 
+        usage_tag = '<span class="tag" style="background:#e0f2fe; color:#0369a1; border:1px solid #bae6fd; font-size:10px; margin-left:4px;">Usage</span>' if it.get("is_usage_based") else ""
+        if it.get("is_usage_based"):
+            fee_td = f'<td style="text-align:right; font-family:monospace; font-weight:600;">{it["fee"]:,.0f} VND<div class="muted" style="font-size:10px; font-weight:normal;">Budget Cap</div></td>'
+        else:
+            fee_td = f'<td style="text-align:right; font-family:monospace; font-weight:600;">{it["fee"]:,.0f} VND</td>'
+
         trs.append(f"""
         <tr>
           <td>{idx}</td>
           <td>
-            <a href="{edit_url}"><b>{escape(it['no'] or '')}</b></a>
+            <a href="{edit_url}"><b>{escape(it['no'] or '')}</b></a>{usage_tag}
             <div class="muted" style="font-size:11px;">{escape(it['name'] or '')}</div>
           </td>
           <td>{escape(it['seller'])}</td>
           <td><span class="tag tag-info">{escape(it['period'])}</span></td>
-          <td style="text-align:right; font-family:monospace; font-weight:600;">{it['fee']:,.0f} VND</td>
+          {fee_td}
           <td style="font-size:11px;">{escape(it['start_date'] or '')} → {escape(it['end_date'] or '')}</td>
           <td>{inv_display}</td>
           <td>{cashout_html}</td>

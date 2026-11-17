@@ -263,7 +263,10 @@ def page_contracts_list(q: str = "", status: str = "active", renewal_type: str =
         elif b_type == 'FIXED_PRICE':
             billing_badge = '<span class="tag tag-warning">Fixed Price</span>'
         else:
-            billing_badge = '<span class="tag tag-info">Recurring</span>'
+            if ("is_usage_based" in r.keys() and r["is_usage_based"]):
+                billing_badge = '<span class="tag tag-info" title="Recurring (Usage-based)">Recurring (Usage)</span>'
+            else:
+                billing_badge = '<span class="tag tag-info">Recurring</span>'
 
         buyer = f"{(r['buyer_name'] or '').strip()} ({(r['buyer_tax'] or '').strip()})"
         seller = f"{(r['seller_name'] or '').strip()} ({(r['seller_tax'] or '').strip()})"
@@ -883,6 +886,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
     b_type_val = gv("billing_type") or "TM"
     rec_fee_val = gv("recurring_fee")
     rec_period_val = gv("recurring_period") or "MONTHLY"
+    is_usage_based_val = gv("is_usage_based") or "0"
     ren_type_val = gv("renewal_type") or "MANUAL"
     ren_notice_days_val = gv("renewal_notice_days") or "60"
     ren_period_months_val = gv("renewal_period_months") or ""
@@ -1254,9 +1258,16 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
           </div>
 
           <div id="contract_recurring_fields" style="display:{'block' if (c_type_val=='STANDALONE' and b_type_val=='RECURRING') else 'none'}; grid-column:span 2; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px;">
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
               <div>
-                <div class="label">Recurring Fee (VND)</div>
+                <div class="label">Pricing Model</div>
+                <select name="is_usage_based" style="width:100%;">
+                  <option value="0" {"selected" if is_usage_based_val=="0" else ""}>Fixed Flat-rate</option>
+                  <option value="1" {"selected" if is_usage_based_val=="1" else ""}>Usage-based (SMS, Cloud, Call...)</option>
+                </select>
+              </div>
+              <div>
+                <div class="label">Recurring Fee / Budget Cap (VND)</div>
                 <input type="number" step="1" name="recurring_fee" value="{escape(rec_fee_val)}" placeholder="e.g. 15000000" style="width:100%;">
               </div>
               <div>
@@ -1268,7 +1279,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
                 </select>
               </div>
             </div>
-            <div class="muted" style="font-size:11px; margin-top:6px;">Configured recurring fee is used for automatic invoice matching and monthly payouts tracking (e.g. Internet line, Cloud/SaaS).</div>
+            <div class="muted" style="font-size:11px; margin-top:6px;">For Fixed Flat-rate, invoices must match the fee exactly. For Usage-based (e.g. SMS Banking, Telco OTP, Cloud), the fee acts as a monthly budget cap; actual invoice amounts are automatically approved and reconciled against logs.</div>
           </div>
         </div>
 
@@ -1321,6 +1332,7 @@ def page_annex_form(mode: str, annex_row, contract_id: int, error_msg: str | Non
     a_btype = gv("billing_type") or "TM"
     a_rec_fee = gv("recurring_fee")
     a_rec_period = gv("recurring_period") or "MONTHLY"
+    a_is_usage_based = gv("is_usage_based") or "0"
 
     annex_milestones_html = ""
     has_ms = False
@@ -1384,9 +1396,16 @@ def page_annex_form(mode: str, annex_row, contract_id: int, error_msg: str | Non
           </div>
 
           <div id="annex_recurring_fields" style="display:{'block' if a_btype=='RECURRING' else 'none'}; grid-column:span 2; background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:10px;">
-            <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:12px;">
               <div>
-                <div class="label">Recurring Fee (VND)</div>
+                <div class="label">Pricing Model</div>
+                <select name="is_usage_based" style="width:100%;">
+                  <option value="0" {"selected" if a_is_usage_based=="0" else ""}>Fixed Flat-rate</option>
+                  <option value="1" {"selected" if a_is_usage_based=="1" else ""}>Usage-based (SMS, Cloud, Call...)</option>
+                </select>
+              </div>
+              <div>
+                <div class="label">Recurring Fee / Budget Cap (VND)</div>
                 <input type="number" step="1" name="recurring_fee" value="{escape(a_rec_fee)}" placeholder="e.g. 15000000" style="width:100%;">
               </div>
               <div>
@@ -1398,6 +1417,7 @@ def page_annex_form(mode: str, annex_row, contract_id: int, error_msg: str | Non
                 </select>
               </div>
             </div>
+            <div class="muted" style="font-size:11px; margin-top:6px;">For Fixed Flat-rate, invoices must match the fee exactly. For Usage-based (e.g. SMS Banking, Telco OTP, Cloud), the fee acts as a monthly budget cap; actual invoice amounts are automatically approved and reconciled against logs.</div>
           </div>
         </div>
 
@@ -1423,6 +1443,7 @@ def handle_contract_create_post(handler):
     billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip()
     recurring_fee_raw = (form.get("recurring_fee", [""])[0] or "").strip()
     recurring_period = (form.get("recurring_period", ["MONTHLY"])[0] or "MONTHLY").strip()
+    is_usage_based = 1 if (form.get("is_usage_based", ["0"])[0] or "0").strip() == "1" else 0
     contract_value_raw = (form.get("contract_value", [""])[0] or "").strip()
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
@@ -1486,11 +1507,12 @@ def handle_contract_create_post(handler):
               buyer_vendor_id, seller_vendor_id,
               framework_no, framework_name, contract_summary, contract_value,
               start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period,
+              is_usage_based,
               renewal_type, renewal_notice_days, renewal_period_months, renewal_note,
               is_active, deleted_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_summary, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), now_iso()))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_summary, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, is_usage_based, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), now_iso()))
         new_id = cur.lastrowid
         log_action(cur, "CREATE_CONTRACT", "contracts", new_id, f"Created new contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type}, Renewal: {renewal_type})")
         conn.commit()
@@ -1516,6 +1538,7 @@ def handle_contract_update_post(handler):
     billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip()
     recurring_fee_raw = (form.get("recurring_fee", [""])[0] or "").strip()
     recurring_period = (form.get("recurring_period", ["MONTHLY"])[0] or "MONTHLY").strip()
+    is_usage_based = 1 if (form.get("is_usage_based", ["0"])[0] or "0").strip() == "1" else 0
     contract_value_raw = (form.get("contract_value", [""])[0] or "").strip()
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
@@ -1607,13 +1630,14 @@ def handle_contract_update_post(handler):
                 billing_type=?,
                 recurring_fee=?,
                 recurring_period=?,
+                is_usage_based=?,
                 renewal_type=?,
                 renewal_notice_days=?,
                 renewal_period_months=?,
                 renewal_note=?,
                 updated_at=?
             WHERE id=?
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_summary, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), int(cid)))
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_summary, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, is_usage_based, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), int(cid)))
         log_action(cur, "UPDATE_CONTRACT", "contracts", int(cid), f"Updated contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type}, Renewal: {renewal_type})")
         conn.commit()
     finally:
@@ -1733,6 +1757,7 @@ def handle_annex_create_post(handler):
     billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip()
     recurring_fee_raw = (form.get("recurring_fee", [""])[0] or "").strip()
     recurring_period = (form.get("recurring_period", ["MONTHLY"])[0] or "MONTHLY").strip()
+    is_usage_based = 1 if (form.get("is_usage_based", ["0"])[0] or "0").strip() == "1" else 0
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
     value_raw = (form.get("value", [""])[0] or "").strip()
@@ -1772,10 +1797,11 @@ def handle_annex_create_post(handler):
         cur.execute("""
             INSERT INTO contract_annexes (
               contract_id, annex_name, start_date, end_date, value, billing_type, recurring_fee, recurring_period,
+              is_usage_based,
               is_active, deleted_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
-        """, (int(contract_id), annex_name, start_date, end_date, value, billing_type, recurring_fee, recurring_period, now_iso(), now_iso()))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        """, (int(contract_id), annex_name, start_date, end_date, value, billing_type, recurring_fee, recurring_period, is_usage_based, now_iso(), now_iso()))
         new_annex_id = cur.lastrowid
         log_action(cur, "CREATE_ANNEX", "contract_annexes", new_annex_id, f"Created new annex '{annex_name}' ({billing_type}) for framework contract '{c_name}'")
         conn.commit()
@@ -1793,6 +1819,7 @@ def handle_annex_update_post(handler):
     billing_type = (form.get("billing_type", ["TM"])[0] or "TM").strip()
     recurring_fee_raw = (form.get("recurring_fee", [""])[0] or "").strip()
     recurring_period = (form.get("recurring_period", ["MONTHLY"])[0] or "MONTHLY").strip()
+    is_usage_based = 1 if (form.get("is_usage_based", ["0"])[0] or "0").strip() == "1" else 0
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
     value_raw = (form.get("value", [""])[0] or "").strip()
@@ -1835,9 +1862,10 @@ def handle_annex_update_post(handler):
                 billing_type=?,
                 recurring_fee=?,
                 recurring_period=?,
+                is_usage_based=?,
                 updated_at=?
             WHERE id=?
-        """, (annex_name, start_date, end_date, value, billing_type, recurring_fee, recurring_period, now_iso(), int(aid)))
+        """, (annex_name, start_date, end_date, value, billing_type, recurring_fee, recurring_period, is_usage_based, now_iso(), int(aid)))
         log_action(cur, "UPDATE_ANNEX", "contract_annexes", int(aid), f"Updated annex '{annex_name}' ({billing_type}) for framework contract '{c_name}'")
         conn.commit()
     finally:

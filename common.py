@@ -543,10 +543,12 @@ def init_db():
         ensure_column(conn, "contracts", "contract_value", "REAL")
         ensure_column(conn, "contracts", "is_active", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(conn, "contracts", "deleted_at", "TEXT")
+        ensure_column(conn, "contracts", "is_usage_based", "INTEGER NOT NULL DEFAULT 0")
 
         ensure_column(conn, "contract_annexes", "value", "REAL")
         ensure_column(conn, "contract_annexes", "is_active", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(conn, "contract_annexes", "deleted_at", "TEXT")
+        ensure_column(conn, "contract_annexes", "is_usage_based", "INTEGER NOT NULL DEFAULT 0")
 
         ensure_column(conn, "contract_staff", "work_shift", "TEXT")
         ensure_column(conn, "contract_staff", "joining_date", "TEXT")

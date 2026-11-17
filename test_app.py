@@ -4366,6 +4366,154 @@ class TestContractRenewal(BaseTestCase):
         self.assertIsNone(msg_renewed)
 
 
+class TestUsageBasedRecurringServices(BaseTestCase):
+    def setUp(self):
+        super().setUp()
+        cur = self.conn.cursor()
+        # Create a telco vendor
+        cur.execute("""
+            INSERT INTO vendors (tax_id, company_name, company_name_vi, address, purchasing, is_active, created_at, updated_at)
+            VALUES ('0100109106', 'Viettel Telecom', 'Tập đoàn Công nghiệp - Viễn thông Quân đội', 'Hà Nội', 0, 1, '2026-01-01T00:00:00', '2026-01-01T00:00:00')
+        """)
+        self.telco_id = cur.lastrowid
+        self.conn.commit()
+
+    def test_usage_based_contract_crud(self):
+        # 1. Create a STANDALONE RECURRING contract with is_usage_based=1 (SMS Banking)
+        body = (
+            f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.telco_id}&"
+            f"framework_no=MHB/SMS/2026&framework_name=SMS+Banking+Gateway&contract_type=STANDALONE&"
+            f"billing_type=RECURRING&recurring_fee=20000000&recurring_period=MONTHLY&is_usage_based=1&"
+            f"start_date=2026-01-01&end_date=2026-12-31&renewal_type=MANUAL&renewal_notice_days=60"
+        ).encode("utf-8")
+        h = MockHandler(body=body, headers={"content-length": str(len(body))})
+        contracts.handle_contract_create_post(h)
+        self.assertEqual(h.response_status, 302)
+
+        row = self.conn.execute("SELECT * FROM contracts WHERE framework_no='MHB/SMS/2026'").fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["is_usage_based"], 1)
+        self.assertEqual(float(row["recurring_fee"]), 20000000.0)
+
+        # 2. View contract in contracts list - shows Recurring (Usage)
+        html_list = contracts.page_contracts_list(q="MHB/SMS/2026", return_to="/contracts")
+        self.assertIn("Recurring (Usage)", html_list)
+
+        # 3. View contract edit form - shows Pricing Model dropdown with Usage-based selected
+        c_row = self.conn.execute("SELECT * FROM contracts WHERE id=?", (row["id"],)).fetchone()
+        html_form = contracts.page_contract_form("edit", c_row, [])
+        self.assertIn('value="1" selected', html_form)
+        self.assertIn("Usage-based (SMS, Cloud, Call...)", html_form)
+
+        # 4. Update contract back to fixed flat-rate is_usage_based=0
+        body_up = (
+            f"id={row['id']}&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.telco_id}&"
+            f"framework_no=MHB/SMS/2026&framework_name=SMS+Banking+Gateway&contract_type=STANDALONE&"
+            f"billing_type=RECURRING&recurring_fee=20000000&recurring_period=MONTHLY&is_usage_based=0&"
+            f"start_date=2026-01-01&end_date=2026-12-31&renewal_type=MANUAL&renewal_notice_days=60"
+        ).encode("utf-8")
+        h_up = MockHandler(body=body_up, headers={"content-length": str(len(body_up))})
+        contracts.handle_contract_update_post(h_up)
+        self.assertEqual(h_up.response_status, 302)
+
+        row_up = self.conn.execute("SELECT is_usage_based FROM contracts WHERE id=?", (row["id"],)).fetchone()
+        self.assertEqual(row_up["is_usage_based"], 0)
+
+    def test_usage_based_annex_crud(self):
+        # Create framework contract first
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (framework_no, framework_name, buyer_vendor_id, seller_vendor_id, contract_type, billing_type, start_date, end_date, is_active, created_at, updated_at)
+            VALUES ('MHB/FW/TELCO', 'Telco Master Agreement', ?, ?, 'FRAMEWORK', 'TM', '2026-01-01', '2026-12-31', 1, '2026-01-01T00:00:00', '2026-01-01T00:00:00')
+        """, (self.buyer_id, self.telco_id))
+        fw_id = cur.lastrowid
+        self.conn.commit()
+
+        # Create annex with is_usage_based=1
+        body_annex = (
+            f"contract_id={fw_id}&annex_name=PL01-Brandname-OTP&billing_type=RECURRING&"
+            f"recurring_fee=15000000&recurring_period=MONTHLY&is_usage_based=1&start_date=2026-01-01&end_date=2026-12-31"
+        ).encode("utf-8")
+        h_annex = MockHandler(body=body_annex, headers={"content-length": str(len(body_annex))})
+        contracts.handle_annex_create_post(h_annex)
+        self.assertEqual(h_annex.response_status, 302)
+
+        a_row = self.conn.execute("SELECT * FROM contract_annexes WHERE annex_name='PL01-Brandname-OTP'").fetchone()
+        self.assertIsNotNone(a_row)
+        self.assertEqual(a_row["is_usage_based"], 1)
+
+    def test_usage_based_invoice_reconciliation_and_cashout(self):
+        # 1. Create Standalone Usage-based Recurring Contract: 20M VND budget cap
+        cur = self.conn.cursor()
+        cur.execute("""
+            INSERT INTO contracts (
+                framework_no, framework_name, buyer_vendor_id, seller_vendor_id,
+                contract_type, billing_type, recurring_fee, recurring_period, is_usage_based,
+                start_date, end_date, renewal_type, is_active, created_at, updated_at
+            )
+            VALUES ('MHB/SMS/2026', 'SMS Banking & Brandname', ?, ?, 'STANDALONE', 'RECURRING', 20000000, 'MONTHLY', 1, '2026-01-01', '2026-12-31', 'AUTO', 1, '2026-01-01T00:00:00', '2026-01-01T00:00:00')
+        """, (self.buyer_id, self.telco_id))
+        c_id = cur.lastrowid
+        self.conn.commit()
+
+        # 2. Case A: Monthly usage is UNDER budget cap (e.g. 18,500,000 VND)
+        # Reconcile function directly
+        status_a, net_a, gross_a, msg_a = invoices.check_invoice_payroll_reconciliation(
+            self.conn, 'MHB/SMS/2026', 2026, 3, 18500000.0
+        )
+        self.assertEqual(status_a, 'ok')
+        self.assertEqual(net_a, 18500000.0)
+        self.assertIn("Matched Usage-based Service", msg_a)
+        self.assertIn("Budget Cap: 20,000,000 VND", msg_a)
+
+        # 3. Case B: Monthly usage EXCEEDS budget cap (e.g. 23,200,000 VND due to holiday traffic spike)
+        status_b, net_b, gross_b, msg_b = invoices.check_invoice_payroll_reconciliation(
+            self.conn, 'MHB/SMS/2026', 2026, 4, 23200000.0
+        )
+        self.assertEqual(status_b, 'ok')
+        self.assertEqual(net_b, 23200000.0)
+        self.assertIn("Matched Usage-based Service", msg_b)
+        self.assertIn("Exceeded Monthly Cap of 20,000,000 by +3,200,000 VND", msg_b)
+
+        # 4. Insert actual invoice into invoices table for month 2026-04
+        cur.execute("""
+            INSERT INTO invoices (
+                shdon, nlap, seller_mst, seller_name, buyer_mst, buyer_name,
+                tg_tttbso, contract_no, service_year, service_month,
+                created_at, updated_at
+            )
+            VALUES ('INV-SMS-04', '2026-04-30', '0100109106', 'Viettel', '0100112233', 'Mizuho',
+                    23200000, 'MHB/SMS/2026', 2026, 4, '2026-05-01T00:00:00', '2026-05-01T00:00:00')
+        """)
+        inv_id = cur.lastrowid
+        self.conn.commit()
+
+        # 5. Check Recurring Dashboard for 2026-04
+        rec_html = payments.page_payments_recurring(month="2026-04")
+        self.assertIn("Usage-based", rec_html)
+        self.assertIn("Cap Exceeded: +3,200,000 VND", rec_html)
+        # Cashout form default value must be 23,200,000 (actual invoice), not 20,000,000!
+        self.assertIn('name="amount" value="23200000"', rec_html)
+
+        # 6. Perform Cashout of actual usage amount 23,200,000
+        cashout_body = (
+            f"contract_id={c_id}&service_month=2026-04&amount=23200000&action=pay&cashout_date=2026-05-05"
+        ).encode("utf-8")
+        h_pay = MockHandler(body=cashout_body, headers={"content-length": str(len(cashout_body))})
+        payments.handle_recurring_cashout_post(h_pay)
+        self.assertEqual(h_pay.response_status, 302)
+
+        # Verify payout record
+        payout = self.conn.execute("SELECT * FROM recurring_payouts WHERE contract_id=? AND service_month='2026-04'", (c_id,)).fetchone()
+        self.assertIsNotNone(payout)
+        self.assertEqual(payout["status"], "PAID")
+        self.assertEqual(float(payout["amount"]), 23200000.0)
+
+        # 7. Check Recurring Dashboard shows paid amount
+        rec_paid_html = payments.page_payments_recurring(month="2026-04")
+        self.assertIn("Paid 23,200,000 VND on 2026-05-05", rec_paid_html)
+
+
 if __name__ == "__main__":
     unittest.main()
 
