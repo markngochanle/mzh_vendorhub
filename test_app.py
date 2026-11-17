@@ -2068,6 +2068,48 @@ class TestDashboard(BaseTestCase):
         output_f = handler_f.get_output_text()
         self.assertIn("DASH-PROJ", output_f)
 
+    def test_dashboard_multi_model_punctuality_and_renewals(self):
+        cur = self.conn.cursor()
+        # 1. Insert Fixed Price Milestone
+        cur.execute("""
+            INSERT INTO contract_milestones (
+                contract_id, milestone_name, milestone_type, amount, planned_date, status, cashout_date
+            ) VALUES (?, 'Phase 1 Acceptance', 'DELIVERY', 150000000.0, '2026-06-15', 'PAID', '2026-06-20')
+        """, (self.contract_id,))
+
+        # 2. Insert Recurring Payout
+        cur.execute("""
+            INSERT INTO recurring_payouts (
+                contract_id, service_month, amount, status, cashout_date
+            ) VALUES (?, '2026-06', 15000000.0, 'PAID', '2026-06-25')
+        """, (self.contract_id,))
+
+        # 3. Insert Attendance punches (1 on-time and 1 late for an 8:00-17:00 shift)
+        cur.execute("""
+            INSERT INTO attendance (staff_id, date, check_in, check_out, work_hours)
+            VALUES (?, '2026-06-01', '07:55', '17:05', 8.0)
+        """, (self.staff_id,))
+        cur.execute("""
+            INSERT INTO attendance (staff_id, date, check_in, check_out, work_hours)
+            VALUES (?, '2026-06-02', '08:50', '17:00', 8.0)
+        """, (self.staff_id,))
+        self.conn.commit()
+
+        handler = StubHandler("/dashboard?start_month=2026-06&end_month=2026-06", "GET")
+        handler.do_GET()
+        html = handler.get_output_text()
+
+        # Assert upgraded dashboard sections and metrics
+        self.assertIn("Real-time executive overview of workforce operations, multi-model spend", html)
+        self.assertIn("Workforce Punctuality", html)
+        self.assertIn("50.0% On-Time", html)
+        self.assertIn("1 late", html)
+        self.assertIn("Multi-Model Spend Distribution", html)
+        self.assertIn("spendModelChart", html)
+        self.assertIn("punctualityChart", html)
+        self.assertIn("Project Budget Utilization", html)
+
+
 
 # ==================== 11. Test Annex Filters ====================
 class TestAnnexFilters(BaseTestCase):
