@@ -1,6 +1,6 @@
 # Playwright UAT Automation Tests
 
-Thư mục này chứa toàn bộ chương trình kiểm thử tự động (Automation Test) cho các kịch bản nghiệm thu người dùng (UAT) của ứng dụng **Mizuho IT Outsourcing Vendor Hub**.
+Thư mục này chứa toàn bộ chương trình kiểm thử tự động (Automation Test) cho các kịch bản nghiệm thu người dùng (UAT) của ứng dụng **Mizuho VMS (Vendor & Workforce Management System)**.
 
 ## 📑 Danh sách 7 Kịch bản UAT tự động:
 1. **UAT 1**: Kiểm tra trang chính (Dashboard) và điều hướng (Navigation) qua các menu.

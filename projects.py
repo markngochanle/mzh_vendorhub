@@ -37,7 +37,7 @@ def page_projects_list(error_msg: str | None = None, success_msg: str | None = N
           </div>
           <div>
             <div class="label">Full Name (required)</div>
-            <input type="text" name="full_name" placeholder="e.g. Mizuho Vendor Hub System" style="width: 100%;" required>
+            <input type="text" name="full_name" placeholder="e.g. Mizuho Core Banking Enhancement" style="width: 100%;" required>
           </div>
           <div>
             <div class="label">IT Outsourcing Budget</div>

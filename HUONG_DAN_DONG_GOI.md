@@ -1,5 +1,5 @@
 # HƯỚNG DẪN ĐÓNG GÓI ỨNG DỤNG (ONLINE & OFFLINE)
-**Mizuho IT Outsourcing Vendor Hub**
+**Mizuho VMS (Vendor & Workforce Management System)**
 
 Tài liệu này hướng dẫn cách đóng gói toàn bộ hệ thống thành file thực thi độc lập **`.exe`** chạy trên hệ điều hành Windows, bao gồm cả trường hợp máy chủ hoặc máy phát triển **hoàn toàn không có kết nối mạng Internet** (mạng nội bộ ngân hàng / Air-gapped network).
 

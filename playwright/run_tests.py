@@ -180,7 +180,7 @@ def run_playwright_tests():
                 if show:
                     print("\n[UAT 1] Checking Dashboard & Menu Navigation...")
                 page.goto(base_url)
-                page.wait_for_selector("text=Mizuho IT Outsourcing Vendor Hub")
+                page.wait_for_selector("text=Mizuho VMS")
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_dashboard.png"))
                 

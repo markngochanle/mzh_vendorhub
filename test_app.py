@@ -4110,7 +4110,8 @@ Content-Disposition: form-data; name="xml_content"
         self.assertIn('<img src="/logo.png"', html)
         self.assertIn('height:64px', html)
         self.assertIn('alt="Mizuho Logo"', html)
-        self.assertIn('Mizuho IT Outsourcing Vendor Hub</h1>', html)
+        self.assertIn('Mizuho VMS</h1>', html)
+        self.assertIn('Vendor &amp; Workforce Management System', html)
 
         # 2. Test GET /logo.png via server StubHandler
         stub_logo = StubHandler("/logo.png", method="GET")

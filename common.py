@@ -727,7 +727,7 @@ def layout(title: str, body_html: str):
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{escape(title)} - Mizuho IT Outsourcing Vendor Hub</title>
+  <title>{escape(title)} - Mizuho VMS</title>
   <link rel="icon" type="image/png" href="/logo.png">
   <link rel="shortcut icon" type="image/png" href="/logo.png">
   <link rel="apple-touch-icon" href="/logo.png">
@@ -1169,7 +1169,10 @@ def layout(title: str, body_html: str):
     <div class="logo-area">
       <a href="/" style="display:flex; align-items:center; gap:14px; text-decoration:none;">
         <img src="/logo.png" alt="Mizuho Logo" style="height:64px; width:auto; max-width:96px; object-fit:contain; border-radius:6px; display:inline-block; vertical-align:middle;">
-        <h1 class="logo-title">Mizuho IT Outsourcing Vendor Hub</h1>
+        <div>
+          <h1 class="logo-title" style="margin:0; font-size: 20px; font-weight: 800; letter-spacing: -0.02em;">Mizuho VMS</h1>
+          <div style="font-size: 11px; font-weight: 500; color: var(--text-muted); margin-top: 1px;">Vendor &amp; Workforce Management System</div>
+        </div>
       </a>
     </div>
     <div class="db-indicator">
