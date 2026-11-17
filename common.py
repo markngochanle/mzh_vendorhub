@@ -914,6 +914,11 @@ def layout(title: str, body_html: str):
       background: #f1f5f9;
       color: var(--primary);
     }}
+    .nav-dropdown-item.active {{
+      font-weight: 700;
+      color: var(--primary);
+      background-color: #f1f5f9;
+    }}
 
     .muted {{
       color: var(--text-muted);
@@ -1179,30 +1184,77 @@ def layout(title: str, body_html: str):
 
   <script>
     window.addEventListener('DOMContentLoaded', () => {{
-      // Auto-set active navigation links
+      // Auto-set active dropdown item (pick the single best matching item)
+      let bestItem = null;
+      let bestScore = 0;
       const path = window.location.pathname;
+      const fullPath = window.location.pathname + window.location.search;
+
+      document.querySelectorAll('.nav-dropdown-item').forEach(item => {{
+        item.classList.remove('active');
+        item.style.fontWeight = '';
+        item.style.color = '';
+        item.style.backgroundColor = '';
+
+        const hrefRaw = item.getAttribute('href') || '';
+        const hrefWithoutHash = hrefRaw.split('#')[0];
+        const [itemPath, itemQuery] = hrefWithoutHash.split('?');
+        let score = 0;
+
+        if (itemQuery) {{
+          if (fullPath === hrefWithoutHash) {{
+            score = 100;
+          }} else if (path === itemPath && window.location.search.includes(itemQuery)) {{
+            score = 90;
+          }}
+        }} else {{
+          if (itemPath === path) {{
+            score = 80;
+          }} else if (itemPath !== '/' && path.startsWith(itemPath + '/')) {{
+            score = 40 + itemPath.length;
+          }} else if (itemPath === '/' && path === '/') {{
+            score = 80;
+          }} else if (itemPath === '/contracts' && path.startsWith('/contract/')) {{
+            score = 50;
+          }}
+        }}
+
+        if (score > bestScore) {{
+          bestScore = score;
+          bestItem = item;
+        }}
+      }});
+
+      if (bestItem && bestScore > 0) {{
+        bestItem.classList.add('active');
+        bestItem.style.fontWeight = '700';
+        bestItem.style.color = 'var(--primary)';
+        bestItem.style.backgroundColor = '#f1f5f9';
+      }}
+
+      // Dropdown toggle active state
       document.querySelectorAll('.nav-dropdown').forEach(dd => {{
         const toggle = dd.querySelector('.nav-dropdown-toggle');
+        if (!toggle) return;
+        toggle.classList.remove('active');
+        if (bestItem && dd.contains(bestItem)) {{
+          toggle.classList.add('active');
+          return;
+        }}
         const items = Array.from(dd.querySelectorAll('.nav-dropdown-item')).map(a => a.getAttribute('href').split('#')[0].split('?')[0]);
-        const toggleHref = toggle ? toggle.getAttribute('href').split('?')[0] : '';
-        const isMatch = items.some(h => (h === '/' ? path === '/' : (path === h || (h !== '/' && path.startsWith(h))))) ||
-                        (toggleHref && (toggleHref === '/' ? path === '/' : (path === toggleHref || (toggleHref !== '/' && path.startsWith(toggleHref)))));
-        if (isMatch && toggle) {{
+        const toggleHref = toggle.getAttribute('href').split('?')[0];
+        const isMatch = items.some(h => (h === '/' ? path === '/' : (path === h || (h !== '/' && path.startsWith(h + '/'))))) ||
+                        (toggleHref && (toggleHref === '/' ? path === '/' : (path === toggleHref || (toggleHref !== '/' && path.startsWith(toggleHref + '/'))))) ||
+                        (toggleHref === '/contracts' && path.startsWith('/contract/'));
+        if (isMatch) {{
           toggle.classList.add('active');
         }}
       }});
+
       document.querySelectorAll('.nav-container > .nav-link').forEach(link => {{
         const href = link.getAttribute('href').split('?')[0];
         if (href === path || (href !== '/' && path.startsWith(href))) {{
           link.classList.add('active');
-        }}
-      }});
-      document.querySelectorAll('.nav-dropdown-item').forEach(item => {{
-        const href = item.getAttribute('href').split('#')[0].split('?')[0];
-        if (href === path || (href === '/' && path === '/') || (href !== '/' && path.startsWith(href))) {{
-          item.style.fontWeight = '700';
-          item.style.color = 'var(--primary)';
-          item.style.backgroundColor = '#f1f5f9';
         }}
       }});
 

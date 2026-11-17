@@ -209,8 +209,25 @@ def run_playwright_tests():
                 page.hover(".nav-dropdown:has-text('Projects & Resources')")
                 page.click("a[href='/attendance']")
                 page.wait_for_selector("text=Import attendance data")
+                # Verify that only /attendance is active, not /attendance/monthly
+                att_active = page.locator("a.nav-dropdown-item[href='/attendance'].active").count()
+                mon_active = page.locator("a.nav-dropdown-item[href='/attendance/monthly'].active").count()
+                assert att_active == 1, "Expected /attendance to be active in dropdown"
+                assert mon_active == 0, "Expected /attendance/monthly to NOT be active in dropdown"
                 if show:
                     page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_attendance.png"))
+
+                # Navigate to Monthly Payroll Lock via Projects & Resources dropdown
+                page.hover(".nav-dropdown:has-text('Projects & Resources')")
+                page.click("a[href='/attendance/monthly']")
+                page.wait_for_selector(".actions:has-text('Monthly Payroll')")
+                # Verify that only /attendance/monthly is active, not /attendance
+                att_active2 = page.locator("a.nav-dropdown-item[href='/attendance'].active").count()
+                mon_active2 = page.locator("a.nav-dropdown-item[href='/attendance/monthly'].active").count()
+                assert att_active2 == 0, "Expected /attendance to NOT be active in dropdown when on /attendance/monthly"
+                assert mon_active2 == 1, "Expected /attendance/monthly to be active in dropdown when on /attendance/monthly"
+                if show:
+                    page.screenshot(path=str(SCREENSHOTS_DIR / "uat1_attendance_monthly.png"))
                 
                 # Navigate to Invoices via Payments & Invoices dropdown
                 page.hover(".nav-dropdown:has-text('Payments & Invoices')")

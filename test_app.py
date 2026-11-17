@@ -3667,14 +3667,14 @@ class TestRecurringAndPaymentsDashboards(BaseTestCase):
         self.assertIn("📊 Dashboard", out_rec)
         self.assertIn("💵 Time & Material (T&M)", out_rec)
 
-        # Test GET /attendance renders top level Payments sub-bar
+        # Test GET /attendance does not render Payments sub-bar (it belongs under Payments & Invoices)
         stub_att = StubHandler("/attendance", method="GET")
         stub_att.do_GET()
         out_att = stub_att.get_output_text()
-        self.assertIn("📊 Dashboard", out_att)
-        self.assertIn("💵 Time & Material (T&M)", out_att)
-        self.assertIn("🎯 Fixed Price (Milestones)", out_att)
-        self.assertIn("🌐 Recurring Services (Internet / SaaS)", out_att)
+        self.assertNotIn(">📊 Dashboard<", out_att)
+        self.assertNotIn("🌐 Recurring Services (Internet / SaaS)", out_att)
+        self.assertIn("📅 Daily Attendance", out_att)
+        self.assertIn("💵 Monthly Payroll", out_att)
 
     def test_payments_dashboard_three_tabs_and_cashout_matrix(self):
         import attendance
