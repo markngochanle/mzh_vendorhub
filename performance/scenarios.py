@@ -108,32 +108,32 @@ def get_write_mixed_generator() -> Callable[[], Dict[str, Any]]:
 
 SCENARIO_REGISTRY = {
     "read_heavy": {
-        "name": "Read-Heavy Workload",
-        "description": "Simulates normal browsing activity across invoices, contracts, staff, and dashboards.",
+        "name": "Kịch bản Tải Đọc Thực Tế (Read-Heavy)",
+        "description": "Mô phỏng người dùng duyệt xem danh sách hóa đơn, hợp đồng, phụ lục, nhân sự và dashboard.",
         "generator_factory": get_read_heavy_generator,
         "default_profile": "standard",
     },
     "heavy_reports": {
-        "name": "Heavy Analytics & Reports",
-        "description": "Simulates high-demand aggregation queries (annual dashboard cashout, leave calculations, punctuality).",
+        "name": "Kịch bản Báo Cáo & Tổng Hợp Nặng (Heavy Reports)",
+        "description": "Mô phỏng các truy vấn tổng hợp phức tạp (ma trận dòng tiền cash-out, tính ngày phép, chuyên cần).",
         "generator_factory": get_heavy_reports_generator,
         "default_profile": "standard",
     },
     "write_mixed": {
-        "name": "Mixed Read/Write Load",
-        "description": "Simulates realistic operational traffic with 85% reads and 15% state updates/AJAX.",
+        "name": "Kịch bản Tải Kết Hợp Đọc / Ghi (Mixed Load)",
+        "description": "Mô phỏng tác vụ thực tế với 85% xem dữ liệu và 15% thao tác cập nhật trạng thái/AJAX.",
         "generator_factory": get_write_mixed_generator,
         "default_profile": "standard",
     },
     "stress_burst": {
-        "name": "Stress Saturation Burst",
-        "description": "Drives maximum concurrent traffic into database-intensive endpoints to test concurrency limits.",
+        "name": "Kịch bản Quá Tải Cực Hạn (Stress Saturation)",
+        "description": "Gửi lưu lượng đồng thời tối đa vào các trang nặng nhất để đo ngưỡng chịu tải giới hạn.",
         "generator_factory": get_stress_generator,
         "default_profile": "stress",
     },
     "soak_endurance": {
-        "name": "Soak & Endurance Test",
-        "description": "Longer-duration continuous load to monitor memory leaks, connection starvation, and latency degradation.",
+        "name": "Kịch bản Kiểm Thử Bền Bỉ (Soak Endurance)",
+        "description": "Duy trì tải liên tục trong thời gian dài để kiểm tra rò rỉ bộ nhớ và độ ổn định kết nối.",
         "generator_factory": get_read_heavy_generator,
         "default_profile": "soak",
     },

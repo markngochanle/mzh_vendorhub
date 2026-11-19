@@ -39,11 +39,11 @@ class TestStatisticalEngine(unittest.TestCase):
         self.assertAlmostEqual(p95, 95.5, places=1)
 
     def test_determine_grade(self):
-        self.assertEqual(determine_grade(apdex=0.98, error_rate=0.0, p95=80.0), "A+ (Excellent)")
-        self.assertEqual(determine_grade(apdex=0.92, error_rate=0.0, p95=200.0), "A (Very Good)")
-        self.assertEqual(determine_grade(apdex=0.85, error_rate=0.4, p95=280.0), "B (Good)")
-        self.assertEqual(determine_grade(apdex=0.75, error_rate=1.5, p95=450.0), "C (Fair)")
-        self.assertEqual(determine_grade(apdex=0.50, error_rate=10.0, p95=1200.0), "F (Poor)")
+        self.assertEqual(determine_grade(apdex=0.98, error_rate=0.0, p95=80.0), "A+ (Xuất sắc)")
+        self.assertEqual(determine_grade(apdex=0.92, error_rate=0.0, p95=200.0), "A (Rất tốt)")
+        self.assertEqual(determine_grade(apdex=0.85, error_rate=0.4, p95=280.0), "B (Tốt)")
+        self.assertEqual(determine_grade(apdex=0.75, error_rate=1.5, p95=450.0), "C (Trung bình)")
+        self.assertEqual(determine_grade(apdex=0.50, error_rate=10.0, p95=1200.0), "F (Kém)")
 
 
 class TestDirectHandler(unittest.TestCase):

@@ -115,14 +115,14 @@ def calculate_percentile(sorted_values: List[float], percentile: float) -> float
 
 def determine_grade(apdex: float, error_rate: float, p95: float) -> str:
     if error_rate > 5.0 or apdex < 0.70 or p95 > 1000.0:
-        return "F (Poor)"
+        return "F (Kém)"
     if error_rate > 2.0 or apdex < 0.80 or p95 > 500.0:
-        return "C (Fair)"
+        return "C (Trung bình)"
     if error_rate > 0.5 or apdex < 0.90 or p95 > 300.0:
-        return "B (Good)"
+        return "B (Tốt)"
     if apdex >= 0.95 and p95 <= 150.0 and error_rate == 0.0:
-        return "A+ (Excellent)"
-    return "A (Very Good)"
+        return "A+ (Xuất sắc)"
+    return "A (Rất tốt)"
 
 
 class BenchmarkEngine:

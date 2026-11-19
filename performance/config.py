@@ -37,31 +37,31 @@ PROFILES = {
     "smoke": {
         "concurrency": 2,
         "duration_sec": 5,
-        "description": "Quick health-check smoke test with 2 concurrent users"
+        "description": "Kiểm thử nhanh tình trạng hệ thống với 2 người dùng đồng thời"
     },
     "standard": {
         "concurrency": 10,
         "duration_sec": 15,
-        "description": "Standard load benchmark simulating 10 concurrent active users"
+        "description": "Kiểm thử tải tiêu chuẩn mô phỏng 10 người dùng hoạt động đồng thời"
     },
     "heavy": {
         "concurrency": 25,
         "duration_sec": 20,
-        "description": "High-traffic load benchmark simulating 25 concurrent users"
+        "description": "Kiểm thử tải cao mô phỏng 25 người dùng hoạt động đồng thời"
     },
     "stress": {
         "concurrency": 50,
         "duration_sec": 15,
-        "description": "Stress saturation test with 50 concurrent users to find breaking point"
+        "description": "Kiểm thử quá tải cực hạn với 50 người dùng để tìm điểm nghẽn chịu tải"
     },
     "spike": {
         "concurrency": 75,
         "duration_sec": 10,
-        "description": "Spike burst test simulating sudden traffic surges"
+        "description": "Kiểm thử đột biến lưu lượng bất ngờ với 75 người dùng đồng thời"
     },
     "soak": {
         "concurrency": 8,
         "duration_sec": 45,
-        "description": "Soak endurance test to evaluate memory leak and latency drift"
+        "description": "Kiểm thử độ bền bỉ dài hạn để theo dõi rò rỉ bộ nhớ và độ ổn định"
     }
 }

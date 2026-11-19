@@ -27,7 +27,7 @@ current_log_file = None
 
 def page_performance_runner(handler):
     """
-    Renders the Performance Testing Dashboard interface.
+    Hiển thị giao diện Dashboard điều khiển Performance Testing Suite.
     """
     scenario_cards_html = []
     for sc_id, sc in SCENARIO_REGISTRY.items():
@@ -42,18 +42,18 @@ def page_performance_runner(handler):
           </td>
           <td style="vertical-align: top; padding: 14px 12px;">
             <span class="badge" style="background:#e0f2fe; color:#0369a1; font-weight:600;">{prof.upper()}</span>
-            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">{prof_info['concurrency']} users, {prof_info['duration_sec']}s</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">{prof_info['concurrency']} người dùng, {prof_info['duration_sec']}s</div>
           </td>
           <td style="vertical-align: top; padding: 14px 12px; font-size: 12px; color: var(--text-secondary);">
-            Median &le; 60ms<br>
+            Trung vị &le; 60ms<br>
             P95 &le; 250ms<br>
-            Error &le; 0.5%
+            Tỷ lệ lỗi &le; 0.5%
           </td>
           <td style="text-align: center; vertical-align: top; padding: 14px 12px;">
-            <span class="test-status badge badge-idle" id="status-{sc_id}">Ready</span>
+            <span class="test-status badge badge-idle" id="status-{sc_id}">Sẵn sàng</span>
           </td>
           <td style="text-align: center; vertical-align: top; padding: 14px 12px;">
-            <button type="button" class="btn btn-run" onclick="runScenario('{sc_id}')" style="font-size: 12px; padding: 6px 14px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer;">Run</button>
+            <button type="button" class="btn btn-run" onclick="runScenario('{sc_id}')" style="font-size: 12px; padding: 6px 14px; background: var(--primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: 600;">Chạy Test</button>
           </td>
         </tr>
         """)
@@ -71,36 +71,36 @@ def page_performance_runner(handler):
                 <strong><a href="/performance/report?name={f.name}" target="_blank" style="color: var(--primary); text-decoration: none;">📊 {f.name}</a></strong>
                 <span style="color: var(--text-muted); font-size: 11px; margin-left: 8px;">({size_kb} KB - {mtime_str})</span>
               </div>
-              <a href="/performance/report?name={f.name}" target="_blank" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; text-decoration: none;">Open Report &rarr;</a>
+              <a href="/performance/report?name={f.name}" target="_blank" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; text-decoration: none;">Mở Báo Cáo &rarr;</a>
             </li>
             """)
 
     if not reports_html:
-        reports_html.append("<li style='padding: 10px; color: var(--text-muted); font-size: 13px;'>No reports generated yet. Run a benchmark to view results.</li>")
+        reports_html.append("<li style='padding: 10px; color: var(--text-muted); font-size: 13px;'>Chưa có báo cáo nào được tạo. Hãy chạy một kịch bản kiểm thử để xem kết quả.</li>")
 
     body_html = f"""
     <div style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
       <div>
         <h2 style="margin: 0 0 6px 0; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
-          <span>⚡ Performance & Load Testing Suite</span>
-          <span style="font-size: 12px; background: #dbeafe; color: #1e40af; padding: 3px 8px; border-radius: 4px; font-weight: 600;">Enterprise Grade</span>
+          <span>⚡ Trung Tâm Đo Lường & Kiểm Thử Tải (Performance Suite)</span>
+          <span style="font-size: 12px; background: #dbeafe; color: #1e40af; padding: 3px 8px; border-radius: 4px; font-weight: 600;">Chuẩn Doanh Nghiệp</span>
         </h2>
         <p style="margin: 0; color: var(--text-muted); font-size: 14px;">
-          High-performance benchmarking engine, SLA compliance gates, Apdex scoring, and direct SQLite query analysis.
+          Đo lường năng lực chịu tải, kiểm định chất lượng SLA, chấm điểm Apdex và phân tích kế hoạch thực thi truy vấn SQLite (chạy 100% offline nội bộ).
         </p>
       </div>
       <div style="display: flex; gap: 10px; align-items: center;">
-        <select id="profile-select" style="padding: 6px 10px; font-size: 13px; border: 1px solid var(--border); border-radius: 4px; background: white;">
-          <option value="smoke">Profile: Smoke (2 users, 5s)</option>
-          <option value="standard" selected>Profile: Standard (10 users, 15s)</option>
-          <option value="heavy">Profile: Heavy (25 users, 20s)</option>
-          <option value="stress">Profile: Stress (50 users, 15s)</option>
+        <select id="profile-select" style="padding: 7px 10px; font-size: 13px; border: 1px solid var(--border); border-radius: 4px; background: white;">
+          <option value="smoke">Cấu hình: Nhanh (Smoke - 2 users, 5s)</option>
+          <option value="standard" selected>Cấu hình: Tiêu chuẩn (Standard - 10 users, 15s)</option>
+          <option value="heavy">Cấu hình: Tải cao (Heavy - 25 users, 20s)</option>
+          <option value="stress">Cấu hình: Quá tải cực hạn (Stress - 50 users, 15s)</option>
         </select>
         <button type="button" id="btn-db-bench" class="btn" style="background: #0284c7; color:#fff; border:none; font-weight: 600; padding: 7px 14px; border-radius: 4px; cursor: pointer;" onclick="runDbBench()">
-          🗄️ Run DB Benchmarks
+          🗄️ Benchmark CSDL SQLite
         </button>
         <button type="button" id="btn-run-all" class="btn" style="background: var(--success); color:#fff; border:none; font-weight: 600; padding: 7px 14px; border-radius: 4px; cursor: pointer;" onclick="runScenario('all')">
-          ▶ Run All Workloads
+          ▶ Chạy Tất Cả Kịch Bản
         </button>
       </div>
     </div>
@@ -110,11 +110,11 @@ def page_performance_runner(handler):
       <table style="width:100%; border-collapse: collapse; margin:0; border:none;">
         <thead>
           <tr style="background: #f8fafc; border-bottom: 1px solid var(--border);">
-            <th style="text-align: left; padding: 12px;">Benchmark Scenario</th>
-            <th style="text-align: left; width: 180px; padding: 12px;">Workload Profile</th>
-            <th style="text-align: left; width: 180px; padding: 12px;">SLA Thresholds</th>
-            <th style="width: 120px; text-align: center; padding: 12px;">Status</th>
-            <th style="width: 100px; text-align: center; padding: 12px;">Action</th>
+            <th style="text-align: left; padding: 12px;">Kịch Bản Kiểm Thử</th>
+            <th style="text-align: left; width: 190px; padding: 12px;">Mức Tải (Profile)</th>
+            <th style="text-align: left; width: 180px; padding: 12px;">Cam Kết SLA</th>
+            <th style="width: 120px; text-align: center; padding: 12px;">Trạng Thái</th>
+            <th style="width: 110px; text-align: center; padding: 12px;">Thao Tác</th>
           </tr>
         </thead>
         <tbody>
@@ -127,17 +127,17 @@ def page_performance_runner(handler):
     <div class="card" style="margin-bottom: 24px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
         <h3 style="margin: 0; font-size: 15px; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
-          <span>🖥️ Live Benchmark Console</span>
-          <span id="runner-process-status" style="font-size: 11px; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; font-weight: 600; color: var(--text-muted);">Idle</span>
+          <span>🖥️ Nhật Ký Thực Thi Thời Gian Thực (Console Log)</span>
+          <span id="runner-process-status" style="font-size: 11px; background: #f1f5f9; padding: 2px 8px; border-radius: 4px; font-weight: 600; color: var(--text-muted);">Sẵn sàng</span>
         </h3>
-        <button type="button" class="btn btn-secondary" onclick="clearConsole()" style="font-size: 11px; padding: 4px 10px;">Clear Console</button>
+        <button type="button" class="btn btn-secondary" onclick="clearConsole()" style="font-size: 11px; padding: 4px 10px;">Xóa Màn Hình</button>
       </div>
       <pre id="terminal-box" style="background: #0f172a; color: #f8fafc; font-family: monospace; font-size: 12px; padding: 14px; border-radius: 6px; height: 260px; overflow-y: auto; margin: 0; white-space: pre-wrap; line-height: 1.5;"></pre>
     </div>
 
     <!-- Reports Section -->
     <div class="card">
-      <h3 style="margin: 0 0 12px 0; font-size: 15px; color: var(--text-primary);">📊 Generated Benchmark Reports (Chart.js)</h3>
+      <h3 style="margin: 0 0 12px 0; font-size: 15px; color: var(--text-primary);">📊 Báo Cáo Đo Lường Gần Đây (Đồ Thị Chart.js)</h3>
       <ul style="list-style: none; padding: 0; margin: 0;">
         {"".join(reports_html)}
       </ul>
@@ -155,15 +155,15 @@ def page_performance_runner(handler):
         const b = document.getElementById('status-' + id);
         if (!b) return;
         b.innerText = status;
-        if (status === 'Running...') {{
+        if (status === 'Đang chạy...') {{
           b.className = 'test-status badge';
           b.style.background = '#fef08a';
           b.style.color = '#854d0e';
-        }} else if (status === 'Passed' || status === 'Grade: A+' || status === 'Grade: A') {{
+        }} else if (status === 'Đạt' || status.includes('Xuất sắc') || status.includes('Rất tốt') || status.includes('Tốt')) {{
           b.className = 'test-status badge';
           b.style.background = '#dcfce7';
           b.style.color = '#166534';
-        }} else if (status === 'Failed' || status.includes('Grade: F')) {{
+        }} else if (status === 'Thất bại' || status.includes('Kém')) {{
           b.className = 'test-status badge';
           b.style.background = '#fee2e2';
           b.style.color = '#991b1b';
@@ -174,23 +174,23 @@ def page_performance_runner(handler):
 
       function runScenario(scId) {{
         if (activeInterval) {{
-          alert('A benchmark is already running.');
+          alert('Đang có một tiến trình kiểm thử chạy.');
           return;
         }}
         const profile = document.getElementById('profile-select').value;
         const term = document.getElementById('terminal-box');
-        term.innerText = '>>> Initializing benchmark run: ' + scId + ' (Profile: ' + profile + ')...\\n';
+        term.innerText = '>>> Đang khởi động kịch bản: ' + scId + ' (Cấu hình: ' + profile + ')...\\n';
         lastLogIndex = 0;
-        document.getElementById('runner-process-status').innerText = 'Running';
+        document.getElementById('runner-process-status').innerText = 'Đang chạy';
 
         if (scId === 'all') {{
           document.querySelectorAll('.test-status').forEach(b => {{
-            b.innerText = 'Queued';
+            b.innerText = 'Đang chờ';
             b.style.background = '#e2e8f0';
             b.style.color = '#475569';
           }});
         }} else {{
-          updateStatusBadge(scId, 'Running...');
+          updateStatusBadge(scId, 'Đang chạy...');
         }}
 
         fetch('/api/performance-tests/run', {{
@@ -203,12 +203,12 @@ def page_performance_runner(handler):
           if (data.status === 'ok') {{
             activeInterval = setInterval(() => pollLog(scId), 300);
           }} else {{
-            alert(data.message || 'Could not start benchmark.');
+            alert(data.message || 'Không thể khởi động kiểm thử.');
             resetUI();
           }}
         }})
         .catch(err => {{
-          alert('Failed to connect to server: ' + err);
+          alert('Lỗi kết nối tới máy chủ: ' + err);
           resetUI();
         }});
       }}
@@ -231,26 +231,26 @@ def page_performance_runner(handler):
           if (data.status === 'done') {{
             clearInterval(activeInterval);
             activeInterval = null;
-            document.getElementById('runner-process-status').innerText = 'Completed';
+            document.getElementById('runner-process-status').innerText = 'Hoàn thành';
             const success = data.exit_code === 0;
 
             if (scId === 'all') {{
               document.querySelectorAll('.test-status').forEach(b => {{
-                b.innerText = success ? 'Passed' : 'Failed';
+                b.innerText = success ? 'Đạt SLA' : 'Không đạt';
                 b.style.background = success ? '#dcfce7' : '#fee2e2';
                 b.style.color = success ? '#166534' : '#991b1b';
               }});
             }} else if (scId !== 'db_bench') {{
-              updateStatusBadge(scId, success ? 'Passed' : 'Failed');
+              updateStatusBadge(scId, success ? 'Đạt SLA' : 'Không đạt');
             }}
 
             term.innerText += '\\n------------------------------------------------------------\\n';
-            term.innerText += success ? '🎉 PERFORMANCE RUN FINISHED WITH EXCELLENT STATUS!\\n' : '⚠️ BENCHMARK COMPLETED WITH NOTED THRESHOLDS.\\n';
+            term.innerText += success ? '🎉 ĐỢT KIỂM THỬ HIỆU NĂNG ĐÃ HOÀN TẤT THÀNH CÔNG!\\n' : '⚠️ KIỂM THỬ HOÀN TẤT VỚI CÁC CHỈ SỐ GHI NHẬN Ở TRÊN.\\n';
             term.scrollTop = term.scrollHeight;
           }}
         }})
         .catch(err => {{
-          console.error('Error polling performance logs:', err);
+          console.error('Lỗi khi lấy log:', err);
         }});
       }}
 
@@ -259,11 +259,11 @@ def page_performance_runner(handler):
           clearInterval(activeInterval);
           activeInterval = null;
         }}
-        document.getElementById('runner-process-status').innerText = 'Idle';
+        document.getElementById('runner-process-status').innerText = 'Sẵn sàng';
       }}
     </script>
     """
-    send_html(handler, layout("Performance Test Suite", body_html))
+    send_html(handler, layout("Đo Lường Hiệu Năng", body_html))
 
 
 def handle_run_performance_post(handler):
@@ -412,7 +412,7 @@ def page_performance_reports_list(handler):
             g_color = "#991b1b"
 
         err_style = "color: #dc2626; font-weight: bold;" if r["error_rate"] > 0.5 else "color: var(--text-secondary);"
-        view_btn = f"""<a href="/performance/report?name={r['html_name']}" target="_blank" class="btn" style="background: var(--primary); color: white; padding: 5px 12px; font-size: 12px; border-radius: 4px; text-decoration: none; font-weight: 600;">📊 View Report</a>""" if r["html_name"] else """<span class="text-muted" style="font-size: 11px;">No HTML</span>"""
+        view_btn = f"""<a href="/performance/report?name={r['html_name']}" target="_blank" class="btn" style="background: var(--primary); color: white; padding: 5px 12px; font-size: 12px; border-radius: 4px; text-decoration: none; font-weight: 600;">📊 Xem Báo Cáo</a>""" if r["html_name"] else """<span class="text-muted" style="font-size: 11px;">Chưa có HTML</span>"""
 
         rows_html.append(f"""
         <tr>
@@ -453,7 +453,7 @@ def page_performance_reports_list(handler):
         rows_html.append("""
         <tr>
           <td colspan="8" style="text-align: center; padding: 30px; color: var(--text-muted); font-size: 14px;">
-            No performance reports found yet. Go to <a href="/performance-tests">⚡ Performance Suite</a> to execute your first benchmark!
+            Chưa có báo cáo hiệu năng nào. Hãy chuyển sang <a href="/performance-tests">⚡ Performance Suite</a> để thực hiện bài test đầu tiên!
           </td>
         </tr>
         """)
@@ -462,16 +462,16 @@ def page_performance_reports_list(handler):
     <div style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
       <div>
         <h2 style="margin: 0 0 6px 0; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
-          <span>📊 Performance Test Reports & Analytics</span>
-          <span style="font-size: 12px; background: #dbeafe; color: #1e40af; padding: 3px 8px; border-radius: 4px; font-weight: 600;">Historical Archive</span>
+          <span>📊 Kho Lưu Trữ Báo Cáo & Phân Tích Hiệu Năng</span>
+          <span style="font-size: 12px; background: #dbeafe; color: #1e40af; padding: 3px 8px; border-radius: 4px; font-weight: 600;">Lịch Sử Kiểm Thử</span>
         </h2>
         <p style="margin: 0; color: var(--text-muted); font-size: 14px;">
-          Explore and compare historical load test results, SLA compliance records, throughput, and Chart.js graphs.
+          Theo dõi, đối sánh kết quả các lần kiểm thử tải, mức độ tuân thủ tiêu chuẩn SLA và đồ thị trực quan Chart.js (hoạt động 100% offline).
         </p>
       </div>
       <div style="display: flex; gap: 10px;">
         <a href="/performance-tests" class="btn" style="background: var(--primary); color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px;">
-          ⚡ Launch New Benchmark Runner
+          ⚡ Mở Trình Chạy Kiểm Thử Mới
         </a>
       </div>
     </div>
@@ -479,24 +479,24 @@ def page_performance_reports_list(handler):
     <!-- KPI Summary Grid -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
       <div class="card" style="padding: 16px; border-left: 4px solid var(--primary);">
-        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Total Benchmark Runs</div>
+        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Tổng Số Đợt Benchmark</div>
         <div style="font-size: 26px; font-weight: 800; color: var(--text-primary); margin-top: 4px;">{total_runs}</div>
-        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Archived in performance_reports/</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Lưu trữ trong performance_reports/</div>
       </div>
       <div class="card" style="padding: 16px; border-left: 4px solid #16a34a;">
-        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Latest Execution Grade</div>
+        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Xếp Hạng Gần Nhất</div>
         <div style="font-size: 26px; font-weight: 800; color: #16a34a; margin-top: 4px;">{escape(latest_grade)}</div>
-        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Evaluated via Apdex & SLA gate</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Đánh giá qua Apdex & SLA gate</div>
       </div>
       <div class="card" style="padding: 16px; border-left: 4px solid #0284c7;">
-        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Best Observed P95 Latency</div>
+        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Độ Trễ P95 Tốt Nhất</div>
         <div style="font-size: 26px; font-weight: 800; color: #0284c7; margin-top: 4px;">{best_p95:.1f} <span style="font-size: 14px; font-weight: 500;">ms</span></div>
-        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">SLA Budget: &le; 250 ms</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Ngưỡng SLA cam kết: &le; 250 ms</div>
       </div>
       <div class="card" style="padding: 16px; border-left: 4px solid #f59e0b;">
-        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Peak Throughput (RPS)</div>
+        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Lưu Lượng Đỉnh (RPS)</div>
         <div style="font-size: 26px; font-weight: 800; color: #f59e0b; margin-top: 4px;">{max_rps:,.1f} <span style="font-size: 14px; font-weight: 500;">req/s</span></div>
-        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">SLA Budget: &ge; 35 req/s</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Ngưỡng SLA cam kết: &ge; 35 req/s</div>
       </div>
     </div>
 
@@ -505,14 +505,14 @@ def page_performance_reports_list(handler):
       <table style="width: 100%; border-collapse: collapse; margin: 0; border: none;">
         <thead>
           <tr style="background: #f8fafc; border-bottom: 1px solid var(--border);">
-            <th style="text-align: left; padding: 12px;">Scenario & Execution Date</th>
-            <th style="text-align: center; width: 130px; padding: 12px;">Performance Grade</th>
-            <th style="text-align: right; width: 110px; padding: 12px;">Workload</th>
-            <th style="text-align: right; width: 130px; padding: 12px;">Throughput (RPS)</th>
-            <th style="text-align: right; width: 130px; padding: 12px;">Latency P95</th>
-            <th style="text-align: right; width: 100px; padding: 12px;">Apdex (T=100ms)</th>
-            <th style="text-align: right; width: 100px; padding: 12px;">Error Rate</th>
-            <th style="text-align: center; width: 140px; padding: 12px;">Actions</th>
+            <th style="text-align: left; padding: 12px;">Kịch Bản & Thời Điểm Thực Thi</th>
+            <th style="text-align: center; width: 150px; padding: 12px;">Xếp Hạng (Grade)</th>
+            <th style="text-align: right; width: 120px; padding: 12px;">Mức Tải</th>
+            <th style="text-align: right; width: 140px; padding: 12px;">Lưu Lượng (RPS)</th>
+            <th style="text-align: right; width: 130px; padding: 12px;">Độ Trễ P95</th>
+            <th style="text-align: right; width: 120px; padding: 12px;">Apdex (T=100ms)</th>
+            <th style="text-align: right; width: 100px; padding: 12px;">Tỷ Lệ Lỗi</th>
+            <th style="text-align: center; width: 140px; padding: 12px;">Thao Tác</th>
           </tr>
         </thead>
         <tbody>
@@ -521,7 +521,7 @@ def page_performance_reports_list(handler):
       </table>
     </div>
     """
-    send_html(handler, layout("Performance Test Reports", body_html))
+    send_html(handler, layout("Báo Cáo Hiệu Năng", body_html))
 
 
 def page_view_performance_report(handler):
