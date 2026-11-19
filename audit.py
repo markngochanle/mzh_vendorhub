@@ -36,15 +36,15 @@ def page_audit_logs(handler):
         where_str = f"WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
         
         # Get count
-        total_count = conn.execute(f"SELECT COUNT(*) FROM audit_logs {where_str}", params).fetchone()[0]
+        count_query = "SELECT COUNT(*) FROM audit_logs " + where_str
+        total_count = conn.execute(count_query, params).fetchone()[0]
         
         # Fetch logs
-        logs_query = f"""
-            SELECT * FROM audit_logs 
-            {where_str} 
-            ORDER BY id DESC 
-            LIMIT ? OFFSET ?
-        """
+        logs_query = (
+            "SELECT * FROM audit_logs "
+            + where_str
+            + " ORDER BY id DESC LIMIT ? OFFSET ?"
+        )
         logs = conn.execute(logs_query, params + [limit, offset]).fetchall()
         
         # Fetch unique actions for filter dropdown

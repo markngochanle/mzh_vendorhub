@@ -4099,7 +4099,8 @@ def _render_payments_overview_dashboard(
         )""")
         inv_params.extend([vendor_filter, vendor_filter, vendor_filter])
 
-    inv_rows = conn.execute(f"SELECT * FROM invoices WHERE {' AND '.join(inv_where)} ORDER BY id DESC", inv_params).fetchall()
+    inv_sql = "SELECT * FROM invoices WHERE " + " AND ".join(inv_where) + " ORDER BY id DESC"
+    inv_rows = conn.execute(inv_sql, inv_params).fetchall()
 
     inv_matched_count = 0
     inv_matched_amt = 0.0

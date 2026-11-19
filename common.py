@@ -78,8 +78,11 @@ LIST_LIMIT = 2000
 
 # -------------------- DB --------------------
 def db_connect():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30.0)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")
+    conn.execute("PRAGMA cache_size = -64000")
     return conn
 
 
@@ -1970,6 +1973,9 @@ def send_html(handler, html_text: str, status=200):
     handler.send_response(status)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.send_header("Content-Length", str(len(data)))
+    handler.send_header("X-Content-Type-Options", "nosniff")
+    handler.send_header("X-Frame-Options", "SAMEORIGIN")
+    handler.send_header("Referrer-Policy", "strict-origin-when-cross-origin")
     handler.end_headers()
     handler.wfile.write(data)
 
@@ -1979,6 +1985,7 @@ def send_bytes(handler, data: bytes, content_type: str = "image/png", status=200
     handler.send_header("Content-Type", content_type)
     handler.send_header("Content-Length", str(len(data)))
     handler.send_header("Cache-Control", "public, max-age=86400")
+    handler.send_header("X-Content-Type-Options", "nosniff")
     handler.end_headers()
     handler.wfile.write(data)
 

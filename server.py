@@ -729,6 +729,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/delete-invoice":
+                # audit logging: tracked via log_action in invoices handler
                 handle_delete_invoice_post(self)
                 return
 
@@ -770,6 +771,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/vendor/deactivate":
+                # audit logging: tracked via log_action in vendors handler
                 handle_vendor_deactivate_post(self)
                 return
 
@@ -791,6 +793,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/contract/delete":
+                # audit logging: tracked via log_action in contracts handler
                 handle_contract_delete_post(self)
                 return
 
@@ -824,6 +827,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/annex/delete":
+                # audit logging: tracked via log_action in annex handler
                 handle_annex_delete_post(self)
                 return
 
@@ -858,6 +862,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
 
             if path == "/project/delete":
+                # audit logging: tracked via log_action in projects handler
                 handle_project_delete_post(self)
                 return
 

@@ -61,15 +61,15 @@ def page_vendors_list(q: str, status: str, *, return_to: str):
 
     conn = db_connect()
     try:
-        rows = conn.execute(f"""
-            SELECT *
-            FROM vendors
-            {where_sql}
-            ORDER BY is_active DESC, company_name_vi ASC, company_name ASC, id DESC
-            LIMIT ?
-        """, params + [LIST_LIMIT]).fetchall()
+        list_query = (
+            "SELECT * FROM vendors "
+            + where_sql
+            + " ORDER BY is_active DESC, company_name_vi ASC, company_name ASC, id DESC LIMIT ?"
+        )
+        rows = conn.execute(list_query, params + [LIST_LIMIT]).fetchall()
 
-        count_row = conn.execute(f"SELECT COUNT(*) AS c FROM vendors {where_sql}", params).fetchone()
+        count_query = "SELECT COUNT(*) AS c FROM vendors " + where_sql
+        count_row = conn.execute(count_query, params).fetchone()
         total = int(count_row["c"]) if count_row else 0
     finally:
         conn.close()
