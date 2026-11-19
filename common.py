@@ -717,6 +717,14 @@ def layout(title: str, body_html: str):
       </div>
 
       <div class="nav-dropdown">
+        <a href="/performance-tests" class="nav-link nav-dropdown-toggle" style="font-weight: 700; color: var(--primary);">⚡ Performance <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
+        <div class="nav-dropdown-menu">
+          <a href="/performance-tests" class="nav-dropdown-item">⚡ Performance Suite Runner</a>
+          <a href="/performance-reports" class="nav-dropdown-item">📊 Performance Reports & Analytics</a>
+        </div>
+      </div>
+
+      <div class="nav-dropdown">
         <a href="/audit-logs" class="nav-link nav-dropdown-toggle">System & Tools <span style="font-size: 10px; margin-left: 2px;">▾</span></a>
         <div class="nav-dropdown-menu">
           <a href="/audit-logs" class="nav-dropdown-item">📋 Audit Logs</a>
