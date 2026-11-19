@@ -356,14 +356,193 @@ def handle_get_performance_log(handler):
     })
 
 
+def page_performance_reports_list(handler):
+    """
+    Renders the Performance Reports Archive & Analytics Dashboard at /performance-reports.
+    """
+    reports_data = []
+    if REPORTS_DIR.exists():
+        json_files = sorted(REPORTS_DIR.glob("*.json"), key=lambda f: f.stat().st_mtime, reverse=True)
+        for jf in json_files:
+            try:
+                with open(jf, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                html_name = jf.stem + ".html"
+                has_html = (REPORTS_DIR / html_name).exists()
+                meta = data.get("meta", {})
+                metrics = data.get("metrics", {})
+                grade = meta.get("grade", "N/A")
+
+                reports_data.append({
+                    "json_name": jf.name,
+                    "html_name": html_name if has_html else None,
+                    "scenario": meta.get("scenario", jf.stem),
+                    "timestamp": meta.get("generated_at", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(jf.stat().st_mtime))),
+                    "concurrency": meta.get("concurrency", "-"),
+                    "duration": meta.get("duration_sec", "-"),
+                    "grade": grade,
+                    "rps": metrics.get("rps", 0.0),
+                    "p50_ms": metrics.get("latency_median_ms", 0.0),
+                    "p95_ms": metrics.get("latency_p95_ms", 0.0),
+                    "apdex": metrics.get("apdex_score", 0.0),
+                    "error_rate": metrics.get("error_rate_pct", 0.0),
+                    "total_reqs": metrics.get("total_requests", 0),
+                    "size_kb": round(jf.stat().st_size / 1024, 1)
+                })
+            except Exception:
+                continue
+
+    # KPI summary counts
+    total_runs = len(reports_data)
+    latest_grade = reports_data[0]["grade"] if reports_data else "N/A"
+    best_p95 = min([r["p95_ms"] for r in reports_data if r["p95_ms"] > 0], default=0.0)
+    max_rps = max([r["rps"] for r in reports_data], default=0.0)
+
+    rows_html = []
+    for r in reports_data:
+        # Grade badge color
+        if "A" in r["grade"]:
+            g_bg = "#dcfce7"
+            g_color = "#166534"
+        elif "B" in r["grade"] or "C" in r["grade"]:
+            g_bg = "#fef9c3"
+            g_color = "#854d0e"
+        else:
+            g_bg = "#fee2e2"
+            g_color = "#991b1b"
+
+        err_style = "color: #dc2626; font-weight: bold;" if r["error_rate"] > 0.5 else "color: var(--text-secondary);"
+        view_btn = f"""<a href="/performance/report?name={r['html_name']}" target="_blank" class="btn" style="background: var(--primary); color: white; padding: 5px 12px; font-size: 12px; border-radius: 4px; text-decoration: none; font-weight: 600;">📊 View Report</a>""" if r["html_name"] else """<span class="text-muted" style="font-size: 11px;">No HTML</span>"""
+
+        rows_html.append(f"""
+        <tr>
+          <td style="padding: 12px; font-size: 13px;">
+            <div style="font-weight: 700; color: var(--primary); font-size: 14px;">{escape(r['scenario'])}</div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">🕒 {escape(r['timestamp'])}</div>
+          </td>
+          <td style="text-align: center; padding: 12px;">
+            <span class="badge" style="background: {g_bg}; color: {g_color}; font-weight: 800; font-size: 12px; padding: 4px 10px; border-radius: 6px;">
+              {escape(r['grade'])}
+            </span>
+          </td>
+          <td style="text-align: right; padding: 12px; font-size: 13px;">
+            <strong>{r['concurrency']}</strong> users<br>
+            <small class="text-muted">{r['duration']}s</small>
+          </td>
+          <td style="text-align: right; padding: 12px; font-size: 13px;">
+            <strong>{r['rps']:,.1f}</strong> req/s<br>
+            <small class="text-muted">{r['total_reqs']:,} reqs</small>
+          </td>
+          <td style="text-align: right; padding: 12px; font-size: 13px;">
+            <strong style="color: {'#166534' if r['p95_ms'] <= 250 else '#dc2626'};">{r['p95_ms']:.1f} ms</strong><br>
+            <small class="text-muted">P50: {r['p50_ms']:.1f}ms</small>
+          </td>
+          <td style="text-align: right; padding: 12px; font-size: 13px; font-weight: 600;">
+            {r['apdex']:.3f}
+          </td>
+          <td style="text-align: right; padding: 12px; font-size: 13px; {err_style}">
+            {r['error_rate']:.2f}%
+          </td>
+          <td style="text-align: center; padding: 12px; white-space: nowrap;">
+            {view_btn}
+          </td>
+        </tr>
+        """)
+
+    if not rows_html:
+        rows_html.append("""
+        <tr>
+          <td colspan="8" style="text-align: center; padding: 30px; color: var(--text-muted); font-size: 14px;">
+            No performance reports found yet. Go to <a href="/performance-tests">⚡ Performance Suite</a> to execute your first benchmark!
+          </td>
+        </tr>
+        """)
+
+    body_html = f"""
+    <div style="margin-bottom: 24px; display: flex; justify-content: space-between; align-items: flex-end; flex-wrap: wrap; gap: 16px;">
+      <div>
+        <h2 style="margin: 0 0 6px 0; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+          <span>📊 Performance Test Reports & Analytics</span>
+          <span style="font-size: 12px; background: #dbeafe; color: #1e40af; padding: 3px 8px; border-radius: 4px; font-weight: 600;">Historical Archive</span>
+        </h2>
+        <p style="margin: 0; color: var(--text-muted); font-size: 14px;">
+          Explore and compare historical load test results, SLA compliance records, throughput, and Chart.js graphs.
+        </p>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <a href="/performance-tests" class="btn" style="background: var(--primary); color: white; padding: 8px 16px; border-radius: 6px; text-decoration: none; font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+          ⚡ Launch New Benchmark Runner
+        </a>
+      </div>
+    </div>
+
+    <!-- KPI Summary Grid -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; margin-bottom: 24px;">
+      <div class="card" style="padding: 16px; border-left: 4px solid var(--primary);">
+        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Total Benchmark Runs</div>
+        <div style="font-size: 26px; font-weight: 800; color: var(--text-primary); margin-top: 4px;">{total_runs}</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Archived in performance_reports/</div>
+      </div>
+      <div class="card" style="padding: 16px; border-left: 4px solid #16a34a;">
+        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Latest Execution Grade</div>
+        <div style="font-size: 26px; font-weight: 800; color: #16a34a; margin-top: 4px;">{escape(latest_grade)}</div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Evaluated via Apdex & SLA gate</div>
+      </div>
+      <div class="card" style="padding: 16px; border-left: 4px solid #0284c7;">
+        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Best Observed P95 Latency</div>
+        <div style="font-size: 26px; font-weight: 800; color: #0284c7; margin-top: 4px;">{best_p95:.1f} <span style="font-size: 14px; font-weight: 500;">ms</span></div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">SLA Budget: &le; 250 ms</div>
+      </div>
+      <div class="card" style="padding: 16px; border-left: 4px solid #f59e0b;">
+        <div style="font-size: 12px; text-transform: uppercase; color: var(--text-muted); font-weight: 600;">Peak Throughput (RPS)</div>
+        <div style="font-size: 26px; font-weight: 800; color: #f59e0b; margin-top: 4px;">{max_rps:,.1f} <span style="font-size: 14px; font-weight: 500;">req/s</span></div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">SLA Budget: &ge; 35 req/s</div>
+      </div>
+    </div>
+
+    <!-- Reports Table -->
+    <div class="card" style="padding: 0; overflow: hidden;">
+      <table style="width: 100%; border-collapse: collapse; margin: 0; border: none;">
+        <thead>
+          <tr style="background: #f8fafc; border-bottom: 1px solid var(--border);">
+            <th style="text-align: left; padding: 12px;">Scenario & Execution Date</th>
+            <th style="text-align: center; width: 130px; padding: 12px;">Performance Grade</th>
+            <th style="text-align: right; width: 110px; padding: 12px;">Workload</th>
+            <th style="text-align: right; width: 130px; padding: 12px;">Throughput (RPS)</th>
+            <th style="text-align: right; width: 130px; padding: 12px;">Latency P95</th>
+            <th style="text-align: right; width: 100px; padding: 12px;">Apdex (T=100ms)</th>
+            <th style="text-align: right; width: 100px; padding: 12px;">Error Rate</th>
+            <th style="text-align: center; width: 140px; padding: 12px;">Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {"".join(rows_html)}
+        </tbody>
+      </table>
+    </div>
+    """
+    send_html(handler, layout("Performance Test Reports", body_html))
+
+
 def page_view_performance_report(handler):
     """
     Serves a specific generated HTML report file from performance_reports/.
+    If no name provided, automatically loads the latest report or redirects to /performance-reports.
     """
     qs = parse_qs(handler.path.split("?")[-1]) if "?" in handler.path else {}
     name = qs.get("name", [""])[0].strip()
 
-    if not name or ".." in name or "/" in name or "\\" in name:
+    if not name:
+        html_files = sorted(REPORTS_DIR.glob("*.html"), key=lambda f: f.stat().st_mtime, reverse=True)
+        if html_files:
+            name = html_files[0].name
+        else:
+            handler.send_response(302)
+            handler.send_header("Location", "/performance-reports")
+            handler.end_headers()
+            return
+
+    if ".." in name or "/" in name or "\\" in name:
         send_html(handler, layout("Error", "<div class='card danger'>Invalid report filename.</div>"), status=400)
         return
 
@@ -375,7 +554,7 @@ def page_view_performance_report(handler):
         return
 
     if not target_file.exists() or not target_file.is_file():
-        send_html(handler, layout("Not Found", f"<div class='card danger'>Report {escape(name)} not found.</div>"), status=404)
+        send_html(handler, layout("Not Found", f"<div class='card danger'>Report {escape(name)} not found. <a href='/performance-reports'>Back to Reports</a></div>"), status=404)
         return
 
     content = target_file.read_bytes()

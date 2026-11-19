@@ -722,7 +722,9 @@ def layout(title: str, body_html: str):
           <a href="/audit-logs" class="nav-dropdown-item">📋 Audit Logs</a>
           <a href="/unit-tests" class="nav-dropdown-item">🧪 Unit Test Runner</a>
           <a href="/playwright" class="nav-dropdown-item">🎭 UAT Playwright Runner</a>
+          <div style="border-top: 1px solid #f1f5f9; margin: 4px 0;"></div>
           <a href="/performance-tests" class="nav-dropdown-item">⚡ Performance Suite</a>
+          <a href="/performance-reports" class="nav-dropdown-item">📊 Performance Reports</a>
         </div>
       </div>
     </div>

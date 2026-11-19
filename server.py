@@ -49,6 +49,7 @@ from playwright_runner import page_playwright_runner, handle_run_tests_post, han
 from unittest_runner import page_unittest_runner, handle_run_unittests_post, handle_get_unittest_log
 from performance_runner import (
     page_performance_runner,
+    page_performance_reports_list,
     handle_run_performance_post,
     handle_get_performance_log,
     page_view_performance_report,
@@ -246,6 +247,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/performance-tests":
                 page_performance_runner(self)
+                return
+
+            if path == "/performance-reports":
+                page_performance_reports_list(self)
                 return
 
             if path == "/api/performance-tests/log":
