@@ -54,6 +54,13 @@ from performance_runner import (
     handle_get_performance_log,
     page_view_performance_report,
 )
+from security_runner import (
+    page_security_runner,
+    page_security_reports_list,
+    handle_run_security_post,
+    handle_get_security_log,
+    page_view_security_report,
+)
 
 from vendors import (
     page_vendors_list,
@@ -259,6 +266,22 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/performance/report":
                 page_view_performance_report(self)
+                return
+
+            if path == "/security-checks":
+                page_security_runner(self)
+                return
+
+            if path == "/security-reports":
+                page_security_reports_list(self)
+                return
+
+            if path == "/api/security-checks/log":
+                handle_get_security_log(self)
+                return
+
+            if path == "/security/report":
+                page_view_security_report(self)
                 return
 
             if path == "/":
@@ -727,6 +750,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/performance-tests/run":
                 handle_run_performance_post(self)
+                return
+
+            if path == "/api/security-checks/run":
+                handle_run_security_post(self)
                 return
 
             if path == "/invoice/force-match":

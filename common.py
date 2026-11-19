@@ -725,6 +725,9 @@ def layout(title: str, body_html: str):
           <div style="border-top: 1px solid #f1f5f9; margin: 4px 0;"></div>
           <a href="/performance-tests" class="nav-dropdown-item">⚡ Performance Suite</a>
           <a href="/performance-reports" class="nav-dropdown-item">📊 Performance Reports</a>
+          <div style="border-top: 1px solid #f1f5f9; margin: 4px 0;"></div>
+          <a href="/security-checks" class="nav-dropdown-item">🛡️ Security Suite</a>
+          <a href="/security-reports" class="nav-dropdown-item">📑 Security Reports</a>
         </div>
       </div>
     </div>
