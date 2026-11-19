@@ -93,8 +93,11 @@ def page_performance_runner(handler):
         <select id="profile-select" style="padding: 7px 10px; font-size: 13px; border: 1px solid var(--border); border-radius: 4px; background: white;">
           <option value="smoke">Cấu hình: Nhanh (Smoke - 2 users, 5s)</option>
           <option value="standard" selected>Cấu hình: Tiêu chuẩn (Standard - 10 users, 15s)</option>
+          <option value="stages">Cấu hình: Đa giai đoạn (k6 Stages: 5 -> 15 -> 2 VUs)</option>
+          <option value="saturation_knee">Cấu hình: Quét trần chịu tải (Knee-of-the-Curve 5-100 VUs)</option>
           <option value="heavy">Cấu hình: Tải cao (Heavy - 25 users, 20s)</option>
           <option value="stress">Cấu hình: Quá tải cực hạn (Stress - 50 users, 15s)</option>
+          <option value="soak">Cấu hình: Độ bền bỉ dài hạn (Soak - 8 users, 45s)</option>
         </select>
         <button type="button" id="btn-db-bench" class="btn" style="background: #0284c7; color:#fff; border:none; font-weight: 600; padding: 7px 14px; border-radius: 4px; cursor: pointer;" onclick="runDbBench()">
           🗄️ Benchmark CSDL SQLite

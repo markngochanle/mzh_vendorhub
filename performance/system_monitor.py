@@ -61,6 +61,13 @@ class SystemMonitor:
         except Exception:
             return time.process_time()
 
+    def _get_wal_size_bytes(self) -> int:
+        try:
+            wal_p = Path(self.db_path + "-wal")
+            return wal_p.stat().st_size if wal_p.exists() else 0
+        except Exception:
+            return 0
+
     def _monitor_loop(self):
         last_wall = self.start_wall_time
         last_cpu = self.start_cpu_time
@@ -72,6 +79,7 @@ class SystemMonitor:
             rss_mb = self._get_current_rss_mb()
             active_threads = threading.active_count()
             db_size_kb = round(self._get_db_size_bytes() / 1024.0, 1)
+            wal_size_kb = round(self._get_wal_size_bytes() / 1024.0, 1)
 
             # Calculate windowed CPU %
             elapsed_wall = now_wall - last_wall
@@ -91,7 +99,8 @@ class SystemMonitor:
                 "rss_mb": rss_mb,
                 "cpu_pct": cpu_pct,
                 "active_threads": active_threads,
-                "db_size_kb": db_size_kb
+                "db_size_kb": db_size_kb,
+                "wal_size_kb": wal_size_kb
             })
 
     def start(self):
@@ -116,15 +125,39 @@ class SystemMonitor:
         self.end_cpu_time = self._get_process_cpu_seconds()
         self.end_rss_mb = self._get_current_rss_mb()
         self.end_db_bytes = self._get_db_size_bytes()
+        end_wal_bytes = self._get_wal_size_bytes()
 
         if self.end_rss_mb > self.peak_rss_mb:
             self.peak_rss_mb = self.end_rss_mb
 
-        total_wall = self.end_wall_time - self.start_wall_time
+        total_wall = max(0.001, self.end_wall_time - self.start_wall_time)
         total_cpu = self.end_cpu_time - self.start_cpu_time
         avg_cpu_pct = round((total_cpu / total_wall) * 100.0, 1) if total_wall > 0 else 0.0
         delta_rss_mb = round(self.end_rss_mb - self.start_rss_mb, 2)
         delta_db_kb = round((self.end_db_bytes - self.start_db_bytes) / 1024.0, 1)
+
+        # Advanced Linear Regression Analysis on Memory Growth (Soak & Leak Detection)
+        slope_mb_per_min = 0.0
+        if len(self.timeline) >= 4:
+            ts = [point["elapsed_sec"] for point in self.timeline]
+            ys = [point["rss_mb"] for point in self.timeline]
+            t_mean = sum(ts) / len(ts)
+            y_mean = sum(ys) / len(ys)
+            num = sum((t - t_mean) * (y - y_mean) for t, y in zip(ts, ys))
+            den = sum((t - t_mean) ** 2 for t in ts)
+            if den > 0:
+                slope_per_sec = num / den
+                slope_mb_per_min = round(slope_per_sec * 60.0, 3)
+
+        if slope_mb_per_min < 0.2:
+            memory_health_status = "HEALTHY"
+            memory_health_message = "Bộ nhớ ổn định, không phát hiện dấu hiệu rò rỉ (Slope < 0.2 MB/phút)."
+        elif slope_mb_per_min < 0.8:
+            memory_health_status = "DRIFT_WARNING"
+            memory_health_message = f"Bộ nhớ có xu hướng tăng nhẹ ({slope_mb_per_min:.2f} MB/phút), cần theo dõi trong phiên chạy dài hơn."
+        else:
+            memory_health_status = "LEAK_CRITICAL"
+            memory_health_message = f"CẢNH BÁO: Phát hiện tốc độ tăng bộ nhớ bất thường ({slope_mb_per_min:.2f} MB/phút), nghi ngờ có rò rỉ bộ nhớ (Memory Leak)!"
 
         return {
             "duration_sec": round(total_wall, 2),
@@ -132,10 +165,14 @@ class SystemMonitor:
             "end_rss_mb": self.end_rss_mb,
             "peak_rss_mb": self.peak_rss_mb,
             "delta_rss_mb": delta_rss_mb,
+            "memory_slope_mb_min": slope_mb_per_min,
+            "memory_health_status": memory_health_status,
+            "memory_health_message": memory_health_message,
             "average_cpu_pct": avg_cpu_pct,
             "peak_threads": self.peak_threads,
             "start_db_kb": round(self.start_db_bytes / 1024.0, 1),
             "end_db_kb": round(self.end_db_bytes / 1024.0, 1),
+            "wal_size_kb": round(end_wal_bytes / 1024.0, 1),
             "delta_db_kb": delta_db_kb,
             "samples_count": len(self.timeline),
             "timeline": self.timeline

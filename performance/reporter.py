@@ -49,12 +49,17 @@ class PerformanceReporter:
                 "latency_min_ms": self.result.latency_min_ms,
                 "latency_mean_ms": self.result.latency_mean_ms,
                 "latency_median_ms": self.result.latency_median_ms,
+                "latency_p75_ms": getattr(self.result, "latency_p75_ms", self.result.latency_median_ms),
                 "latency_p90_ms": self.result.latency_p90_ms,
                 "latency_p95_ms": self.result.latency_p95_ms,
                 "latency_p99_ms": self.result.latency_p99_ms,
+                "latency_p99_9_ms": getattr(self.result, "latency_p99_9_ms", self.result.latency_p99_ms),
                 "latency_max_ms": self.result.latency_max_ms,
                 "latency_stddev_ms": self.result.latency_stddev_ms,
+                "pacing_mode": getattr(self.result, "pacing_mode", "realistic_pacing"),
             },
+            "knee_saturation_data": getattr(self.result, "knee_saturation_data", None),
+            "journeys_breakdown": getattr(self.result, "journeys_breakdown", None),
             "status_codes": self.result.status_codes,
             "endpoint_breakdown": self.result.endpoint_breakdown,
             "timeline": self.result.timeline_series,
@@ -298,6 +303,151 @@ class PerformanceReporter:
             </div>
             """
 
+        # Virtual User Journeys HTML (if available)
+        journeys_data = getattr(r, "journeys_breakdown", None)
+        journeys_section_html = ""
+        if journeys_data:
+            j_rows = ""
+            for j_id, j_info in journeys_data.items():
+                j_rows += f"""
+                <tr>
+                  <td><strong>{j_id}</strong></td>
+                  <td class="text-right">{j_info['total_steps']:,}</td>
+                  <td class="text-right font-bold {'danger' if j_info['errors'] > 0 else 'pass'}">{j_info['success_rate_pct']}%</td>
+                  <td class="text-right">{j_info['p50_ms']} ms</td>
+                  <td class="text-right font-bold">{j_info['p95_ms']} ms</td>
+                  <td class="text-right">{j_info['p99_ms']} ms</td>
+                </tr>
+                """
+            journeys_section_html = f"""
+            <div class="card mt-4">
+              <h2>🧭 Bảng Phân Tích Chuỗi Hành Vi Người Dùng Doanh Nghiệp (Virtual User Journeys)</h2>
+              <p class="text-muted">Mô phỏng 5 luồng nghiệp vụ thực tế có pacing think-time (CFO, Hợp đồng, Kế toán, Chấm công, Dự án).</p>
+              <div class="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Luồng Nghiệp Vụ (Journey)</th>
+                      <th class="text-right">Tổng Bước Thực Hiện</th>
+                      <th class="text-right">Tỷ Lệ Thành Công</th>
+                      <th class="text-right">Trung Vị (P50)</th>
+                      <th class="text-right">Phân Vị 95 (P95)</th>
+                      <th class="text-right">Phân Vị 99 (P99)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {j_rows}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            """
+
+        # Knee-of-the-Curve Saturation HTML (if available)
+        knee_data = getattr(r, "knee_saturation_data", None)
+        knee_section_html = ""
+        if knee_data:
+            step_rows = ""
+            for s in knee_data.get("steps", []):
+                p95_cls = "danger" if s["p95_ms"] > 250 else ""
+                err_cls = "danger" if s["error_rate_pct"] > 0.5 else ""
+                step_rows += f"""
+                <tr>
+                  <td class="font-bold">{s['concurrency']} users</td>
+                  <td class="text-right font-bold">{s['rps']} req/s</td>
+                  <td class="text-right">{s['median_ms']} ms</td>
+                  <td class="text-right font-bold {p95_cls}">{s['p95_ms']} ms</td>
+                  <td class="text-right {err_cls}">{s['error_rate_pct']}%</td>
+                </tr>
+                """
+            knee_section_html = f"""
+            <div class="card mt-4" style="border-left: 5px solid #183181;">
+              <h2>📐 Trần Năng Lực Chịu Tải & Điểm Bão Hòa (Knee-of-the-Curve Scalability)</h2>
+              <div style="display: flex; gap: 20px; align-items: center; margin-bottom: 14px; flex-wrap: wrap;">
+                <div style="background: #e0f2fe; padding: 10px 16px; border-radius: 6px;">
+                  <span style="font-size: 11px; font-weight: 700; color: #0369a1; text-transform: uppercase;">Ngưỡng Tải Tối Ưu (Sweet Spot):</span>
+                  <div style="font-size: 22px; font-weight: 800; color: #075985;">{knee_data.get('sweet_spot_concurrency')} Người dùng đồng thời</div>
+                </div>
+                <div style="background: #f0fdf4; padding: 10px 16px; border-radius: 6px;">
+                  <span style="font-size: 11px; font-weight: 700; color: #15803d; text-transform: uppercase;">Lưu Lượng Bền Vững Đạt Chuẩn:</span>
+                  <div style="font-size: 22px; font-weight: 800; color: #166534;">{knee_data.get('max_sustainable_rps', 0):.1f} req/giây</div>
+                </div>
+                <div style="font-size: 13px; color: var(--text-muted);">
+                  <strong>Nhận định điểm nghẽn:</strong> {knee_data.get('bottleneck_onset')}
+                </div>
+              </div>
+              <div class="table-container">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Mức Tải Đồng Thời (VUs)</th>
+                      <th class="text-right">Throughput (RPS)</th>
+                      <th class="text-right">Độ Trễ Trung Vị (P50)</th>
+                      <th class="text-right">Độ Trễ P95 (ms)</th>
+                      <th class="text-right">Tỷ Lệ Lỗi</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {step_rows}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            """
+
+        # Memory Soak & Leak HTML (if available)
+        memory_card_html = ""
+        if self.sys_metrics:
+            mem_status = self.sys_metrics.get("memory_health_status", "HEALTHY")
+            mem_slope = self.sys_metrics.get("memory_slope_mb_min", 0.0)
+            mem_msg = self.sys_metrics.get("memory_health_message", "Bộ nhớ ổn định.")
+            wal_kb = self.sys_metrics.get("wal_size_kb", 0.0)
+            peak_rss = self.sys_metrics.get("peak_rss_mb", 0.0)
+            avg_cpu = self.sys_metrics.get("average_cpu_pct", 0.0)
+
+            if mem_status == "HEALTHY":
+                m_bg = "#dcfce7"
+                m_color = "#166534"
+                m_title = "BỘ NHỚ ỔN ĐỊNH"
+            elif mem_status == "DRIFT_WARNING":
+                m_bg = "#fef9c3"
+                m_color = "#854d0e"
+                m_title = "CẢNH BÁO TĂNG BỘ NHỚ"
+            else:
+                m_bg = "#fee2e2"
+                m_color = "#991b1b"
+                m_title = "NGUY CƠ RÒ RỈ BỘ NHỚ"
+
+            memory_card_html = f"""
+            <div class="card mt-4" style="border-left: 5px solid {m_color};">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                <h2>🧠 Giám Sát Độ Bền Bỉ & Rò Rỉ Bộ Nhớ (Memory Soak & Leak Analysis)</h2>
+                <span class="badge" style="background: {m_bg}; color: {m_color}; font-size: 13px; padding: 6px 12px; border-radius: 6px; font-weight: 800;">
+                  {m_title}
+                </span>
+              </div>
+              <p style="font-size: 13px; color: var(--text-main); margin-bottom: 14px;"><strong>Chẩn đoán:</strong> {mem_msg}</p>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 12px; font-size: 13px;">
+                <div style="background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                  <span style="color: var(--text-muted); display: block;">Tốc độ tăng bộ nhớ (Slope):</span>
+                  <strong style="color: var(--text-main); font-size: 16px;">{mem_slope:.3f} MB/phút</strong>
+                </div>
+                <div style="background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                  <span style="color: var(--text-muted); display: block;">Bộ nhớ RAM RSS Đỉnh:</span>
+                  <strong style="color: var(--text-main); font-size: 16px;">{peak_rss} MB</strong>
+                </div>
+                <div style="background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                  <span style="color: var(--text-muted); display: block;">SQLite WAL Journal Size:</span>
+                  <strong style="color: var(--text-main); font-size: 16px;">{wal_kb} KB</strong>
+                </div>
+                <div style="background: #f8fafc; padding: 12px; border-radius: 6px; border: 1px solid #e2e8f0;">
+                  <span style="color: var(--text-muted); display: block;">CPU Trung Bình:</span>
+                  <strong style="color: var(--text-main); font-size: 16px;">{avg_cpu}%</strong>
+                </div>
+              </div>
+            </div>
+            """
+
         html_content = f"""<!doctype html>
 <html lang="vi">
 <head>
@@ -523,6 +673,12 @@ class PerformanceReporter:
               <td class="text-center">{sla_badge(r.sla_compliance.get('p99_latency', False))}</td>
             </tr>
             <tr>
+              <td>Độ trễ phân vị 99.9 (P99.9 - Three Nines Tail)</td>
+              <td>&le; {SLA_THRESHOLDS.get('p99_9_latency_ms', 1200.0)} ms</td>
+              <td><strong>{getattr(r, 'latency_p99_9_ms', r.latency_p99_ms):.1f} ms</strong></td>
+              <td class="text-center">{sla_badge(r.sla_compliance.get('p99_9_latency', True))}</td>
+            </tr>
+            <tr>
               <td>Tỷ lệ lỗi tối đa</td>
               <td>&le; {SLA_THRESHOLDS['max_error_rate_pct']}%</td>
               <td><strong>{r.error_rate_pct:.2f}%</strong></td>
@@ -544,6 +700,10 @@ class PerformanceReporter:
         </table>
       </div>
     </div>
+
+    {memory_card_html}
+    {knee_section_html}
+    {journeys_section_html}
 
     <!-- Charts Section -->
     <div class="charts-grid mt-4">

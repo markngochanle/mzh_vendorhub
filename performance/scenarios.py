@@ -198,7 +198,97 @@ def get_write_mixed_generator() -> Callable[[], Dict[str, Any]]:
     return generator
 
 
+# 5 Realistic Stateful Enterprise User Journeys (k6 Scenarios / Gatling Simulation Standard)
+ENTERPRISE_JOURNEYS = [
+    {
+        "id": "J1_EXECUTIVE",
+        "name": "Luồng Giám Đốc / CFO (Executive Drilldown)",
+        "weight": 20,
+        "steps": [
+            {"path": "/dashboard", "name": "Executive Dashboard", "think_ms": 100},
+            {"path": "/dashboard?fy=2026", "name": "Báo cáo Năm Tài Chính 2026", "think_ms": 80},
+            {"path": "/dashboard?fy=2025", "name": "So sánh Năm Tài Chính 2025", "think_ms": 80},
+            {"path": "/audit-logs", "name": "Kiểm tra Nhật ký Kiểm toán", "think_ms": 120},
+        ]
+    },
+    {
+        "id": "J2_CONTRACTS_VENDORS",
+        "name": "Luồng Chuyên Viên Hợp Đồng & Vendor (Contracts Workflow)",
+        "weight": 25,
+        "steps": [
+            {"path": "/contracts", "name": "Danh sách Hợp đồng", "think_ms": 90},
+            {"path": "/contracts?status=active", "name": "Lọc Hợp đồng Hiệu lực", "think_ms": 70},
+            {"path": "/contracts/references", "name": "Bảng Tham chiếu Chi phí", "think_ms": 100},
+            {"path": "/contract/assign-staff?contract_id=1", "name": "Phân bổ Nhân sự Hợp đồng", "think_ms": 80},
+            {"path": "/vendors", "name": "Danh mục Nhà cung cấp", "think_ms": 60},
+        ]
+    },
+    {
+        "id": "J3_ACCOUNTING_INVOICES",
+        "name": "Luồng Kế Toán Đối Soát & Thanh Toán (Invoice Reconciliation)",
+        "weight": 25,
+        "steps": [
+            {"path": "/", "name": "Bảng Danh sách Hóa đơn", "think_ms": 100},
+            {"path": "/?month=2026-06", "name": "Lọc Hóa đơn Tháng 06/2026", "think_ms": 70},
+            {"path": "/invoice?id=1", "name": "Chi tiết Hóa đơn VAT", "think_ms": 80},
+            {"path": "/payments/recurring", "name": "Bảng Thanh toán Định kỳ", "think_ms": 90},
+            {"path": "/payments/fixed-price", "name": "Bảng Thanh toán Trọn gói", "think_ms": 80},
+        ]
+    },
+    {
+        "id": "J4_TIMESHEET_OPERATIONS",
+        "name": "Luồng Vận Hành Chấm Công & Nghiệm Thu (Timesheet & Operations)",
+        "weight": 20,
+        "steps": [
+            {"path": "/attendance", "name": "Ma trận Chấm công Hàng ngày", "think_ms": 100},
+            {"path": "/attendance/monthly", "name": "Bảng Tổng hợp Công Tháng", "think_ms": 80},
+            {"path": "/attendance/timesheet", "name": "Chi tiết Timesheet Nhân sự", "think_ms": 90},
+            {"path": "/attendance/punctuality", "name": "Báo cáo Đi muộn & Chuyên cần", "think_ms": 100},
+            {"path": "/attendance/acceptance", "name": "Nghiệm thu Dịch vụ Vendor", "think_ms": 120},
+        ]
+    },
+    {
+        "id": "J5_PROJECT_ALLOCATION",
+        "name": "Luồng Quản Lý Dự Án & Ma Trận Nhân Sự (Project Allocation Matrix)",
+        "weight": 10,
+        "steps": [
+            {"path": "/projects", "name": "Danh mục Dự án", "think_ms": 80},
+            {"path": "/projects/assign", "name": "Ma trận Phân bổ Dự án", "think_ms": 100},
+            {"path": "/api/projects/available-staff?month=2026-06", "name": "Truy vấn Nhân sự Khả dụng", "think_ms": 60},
+            {"path": "/staff", "name": "Danh mục Nhân sự & Phép", "think_ms": 70},
+        ]
+    }
+]
+
+
+def get_enterprise_journeys_generator() -> Callable[[], Dict[str, Any]]:
+    """
+    Simulates realistic sequential virtual user journeys with state and pacing think-times.
+    """
+    journey_weights = [j["weight"] for j in ENTERPRISE_JOURNEYS]
+
+    def chooser() -> Dict[str, Any]:
+        # Pick a journey based on weights, then pick a random step or step sequence
+        chosen_journey = random.choices(ENTERPRISE_JOURNEYS, weights=journey_weights, k=1)[0]
+        step = random.choice(chosen_journey["steps"])
+        return {
+            "path": step["path"],
+            "method": "GET",
+            "journey_id": chosen_journey["id"],
+            "journey_name": chosen_journey["name"],
+            "step_name": step["name"],
+            "think_ms": step.get("think_ms", 80)
+        }
+    return chooser
+
+
 SCENARIO_REGISTRY = {
+    "enterprise_journeys": {
+        "name": "Kịch bản Chuỗi Hành Vi Người Dùng Doanh Nghiệp (Enterprise User Journeys)",
+        "description": "Mô phỏng 5 luồng nghiệp vụ thực tế (CFO, Quản lý Hợp đồng, Kế toán hóa đơn, Vận hành chấm công, Quản lý dự án) kèm độ trễ tư duy (Think-Time Pacing) theo chuẩn k6.",
+        "generator_factory": get_enterprise_journeys_generator,
+        "default_profile": "standard",
+    },
     "full_coverage": {
         "name": "Kịch bản Quét Toàn Diện Mọi Trang (100% Page Coverage)",
         "description": "Kiểm thử đầy đủ 40 trang & URL chức năng trên toàn hệ thống (Hóa đơn, Hợp đồng, Phụ lục, Vendor, Nhân sự, Chấm công, Thanh toán, Dự án, Audit Log, Form chỉnh sửa).",

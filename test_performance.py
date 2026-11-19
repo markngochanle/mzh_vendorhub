@@ -62,6 +62,7 @@ class TestScenarios(unittest.TestCase):
         self.assertIn("read_heavy", SCENARIO_REGISTRY)
         self.assertIn("heavy_reports", SCENARIO_REGISTRY)
         self.assertIn("write_mixed", SCENARIO_REGISTRY)
+        self.assertIn("enterprise_journeys", SCENARIO_REGISTRY)
 
         gen_full = get_full_coverage_generator()
         target_f = gen_full()
@@ -76,6 +77,12 @@ class TestScenarios(unittest.TestCase):
         gen_write = get_write_mixed_generator()
         target_w = gen_write()
         self.assertIn("path", target_w)
+
+        gen_journeys = SCENARIO_REGISTRY["enterprise_journeys"]["generator_factory"]()
+        target_j = gen_journeys()
+        self.assertIn("path", target_j)
+        self.assertIn("journey_id", target_j)
+        self.assertIn("think_ms", target_j)
 
 
 class TestDatabaseBenchmark(unittest.TestCase):
@@ -108,6 +115,39 @@ class TestSystemMonitor(unittest.TestCase):
         stats = mon.stop()
         self.assertGreater(stats["samples_count"], 0)
         self.assertGreater(stats["peak_rss_mb"], 0.0)
+        self.assertIn("memory_health_status", stats)
+        self.assertIn(stats["memory_health_status"], ("HEALTHY", "DRIFT_WARNING", "LEAK_CRITICAL"))
+
+
+class TestMultiStageAndSaturation(unittest.TestCase):
+    def test_multi_stage_execution(self):
+        engine = BenchmarkEngine(transport="inprocess")
+        sc = SCENARIO_REGISTRY["read_heavy"]
+        stages = [
+            {"target_concurrency": 2, "duration_sec": 1.0, "name": "Warmup"},
+            {"target_concurrency": 3, "duration_sec": 1.5, "name": "Peak"},
+        ]
+        res = engine.run_stages_workload(
+            scenario_name="Test Multi-Stage Ramping",
+            target_generator=sc["generator_factory"](),
+            stages=stages
+        )
+        self.assertGreater(res.total_requests, 10)
+        self.assertEqual(res.pacing_mode, "k6_stages_ramping")
+        self.assertGreater(res.latency_p99_9_ms, 0.0)
+
+    def test_knee_saturation_detection(self):
+        engine = BenchmarkEngine(transport="inprocess")
+        sc = SCENARIO_REGISTRY["read_heavy"]
+        res = engine.run_saturation_scan(
+            scenario_name="Test Saturation Knee",
+            target_generator=sc["generator_factory"](),
+            steps=[2, 4],
+            step_duration_sec=1.0
+        )
+        self.assertIsNotNone(res.knee_saturation_data)
+        self.assertIn("sweet_spot_concurrency", res.knee_saturation_data)
+        self.assertIn("max_sustainable_rps", res.knee_saturation_data)
 
 
 class TestPerformanceSLA(unittest.TestCase):

@@ -13,7 +13,7 @@ Usage examples:
 
 import sys
 import argparse
-from typing import List
+from typing import List, Optional
 
 from performance.config import TARGET_BASE_URL, PROFILES
 from performance.benchmark_engine import BenchmarkEngine, BenchmarkResult
@@ -85,6 +85,7 @@ def run_single_scenario(
     concurrency: int,
     duration: float,
     target_url: str,
+    profile_name: Optional[str] = None,
     export_html: bool = True,
     export_json: bool = True,
     db_bench_result = None
@@ -94,7 +95,7 @@ def run_single_scenario(
     generator = sc_meta["generator_factory"]()
 
     print(f"\n▶ Starting benchmark: {scenario_name}")
-    print(f"  Target: {target_url} | Concurrency: {concurrency} | Duration: {duration}s")
+    print(f"  Target: {target_url} | Profile: {profile_name or 'custom'} | Concurrency: {concurrency} | Duration: {duration}s")
 
     engine = BenchmarkEngine(base_url=target_url)
     monitor = SystemMonitor()
@@ -103,13 +104,32 @@ def run_single_scenario(
     def progress_callback(elapsed: float, total: float, pct: float):
         print(f"  [{pct:5.1f}%] Running... {elapsed:.1f}s / {total:.1f}s", end="\r", flush=True)
 
-    result = engine.run_workload(
-        scenario_name=scenario_name,
-        target_generator=generator,
-        concurrency=concurrency,
-        duration_sec=duration,
-        on_progress=progress_callback
-    )
+    if profile_name == "saturation_knee":
+        step_config = PROFILES["saturation_knee"]
+        result = engine.run_saturation_scan(
+            scenario_name=scenario_name,
+            target_generator=generator,
+            steps=step_config.get("steps", [5, 15, 30, 50, 75, 100]),
+            step_duration_sec=step_config.get("step_duration_sec", 5.0),
+            on_progress=progress_callback
+        )
+    elif profile_name == "stages" or (profile_name and "stages" in PROFILES.get(profile_name, {})):
+        stages_config = PROFILES["stages"]["stages"]
+        result = engine.run_stages_workload(
+            scenario_name=scenario_name,
+            target_generator=generator,
+            stages=stages_config,
+            on_progress=progress_callback
+        )
+    else:
+        result = engine.run_workload(
+            scenario_name=scenario_name,
+            target_generator=generator,
+            concurrency=concurrency,
+            duration_sec=duration,
+            pacing=True,
+            on_progress=progress_callback
+        )
 
     sys_metrics = monitor.stop()
     print("  [100.0%] Benchmark completed! Analyzing metrics...       ")
@@ -174,6 +194,7 @@ def main():
             concurrency=concurrency,
             duration=duration,
             target_url=args.target_url,
+            profile_name=prof_name,
             export_html=not args.no_html,
             export_json=not args.no_json,
             db_bench_result=db_bench_result

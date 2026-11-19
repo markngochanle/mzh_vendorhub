@@ -38,7 +38,7 @@ class TestSecurityScoringAndGrades(unittest.TestCase):
         self.assertIn("F ", get_grade(45.0))
 
     def test_rules_metadata_integrity(self):
-        self.assertEqual(len(RULES_METADATA), 10)
+        self.assertEqual(len(RULES_METADATA), 16)
         for r_id, meta in RULES_METADATA.items():
             self.assertIn("name", meta)
             self.assertIn("category", meta)
