@@ -366,6 +366,7 @@ def page_contracts_list(q: str = "", status: str = "active", renewal_type: str =
           <td>{escape(buyer)}</td>
           <td>{escape(seller)}</td>
           <td>
+            {f'<div style="font-size:11px; color:#475569; margin-bottom:3px;" title="Signing Date (Ngày ký)">✍️ Signed: <b>{escape(r["signed_date"])}</b></div>' if ("signed_date" in r.keys() and r["signed_date"]) else ''}
             <div style="font-family:monospace; font-size:12px; font-weight:600;">{escape(r["start_date"] or "")} → {escape(r["end_date"] or "")}</div>
             <div style="margin-top:4px; display:flex; gap:4px; align-items:center; flex-wrap:wrap;">
               {ren_badge}
@@ -838,6 +839,74 @@ def render_milestones_card(contract_id: int, annex_id: int | None, milestones: l
     """
 
 
+def _format_leave_days(d: float) -> str:
+    if d == int(d):
+        return f"{int(d)}d"
+    return f"{d:.1f}d"
+
+
+def _render_staff_leave_badge(s, parent_obj, mas_by_staff: dict) -> str:
+    pl_tot = float(s["paid_leave_total_hours"] or 0.0)
+    co_tot = float(s["carried_over_leave_hours"] or 0.0)
+    total_entitled_h = pl_tot + co_tot
+
+    def _row_val(row, key):
+        if row is None:
+            return ""
+        if hasattr(row, "keys") and key in row.keys():
+            v = row[key]
+            return str(v) if v is not None else ""
+        if isinstance(row, dict):
+            v = row.get(key)
+            return str(v) if v is not None else ""
+        return ""
+
+    eff_start = s["joining_date"] or _row_val(parent_obj, "start_date")
+    eff_end = s["tentative_leaving_date"] or _row_val(parent_obj, "end_date")
+    start_m = eff_start[:7] if eff_start else "1970-01"
+    end_m = eff_end[:7] if eff_end else "9999-12"
+
+    period_start_m = _row_val(parent_obj, "start_date")[:7]
+    period_end_m = _row_val(parent_obj, "end_date")[:7]
+    if period_start_m and period_start_m > start_m:
+        start_m = period_start_m
+    if period_end_m and period_end_m < end_m:
+        end_m = period_end_m
+
+    staff_summaries = mas_by_staff.get(s["staff_id"], [])
+    used_days = sum(
+        float(r["paid_leave_days"] or 0.0)
+        for r in staff_summaries
+        if start_m <= r["month"] <= end_m
+    )
+
+    if total_entitled_h <= 0.0 and used_days <= 0.0:
+        return ""
+
+    used_h = used_days * 8.0
+    total_entitled_d = total_entitled_h / 8.0
+    rem_d = max(0.0, total_entitled_d - used_days)
+    rem_h = max(0.0, total_entitled_h - used_h)
+
+    pl_d_str = _format_leave_days(pl_tot / 8.0)
+    co_d_str = _format_leave_days(co_tot / 8.0)
+    tot_d_str = _format_leave_days(total_entitled_d)
+    used_d_str = _format_leave_days(used_days)
+    rem_d_str = _format_leave_days(rem_d)
+
+    if co_tot > 0:
+        if pl_tot > 0:
+            badge_text = f"🏖️ {used_d_str} / {pl_d_str} ({pl_tot:.1f}h) (+{co_d_str} / {co_tot:.1f}h)"
+        else:
+            badge_text = f"🏖️ {used_d_str} / (+{co_d_str} / {co_tot:.1f}h)"
+        tip = f"Taken in this annex: {used_d_str} ({used_h:.1f}h) | Annex quota: {pl_d_str} ({pl_tot:.1f}h) + Carried over: {co_d_str} ({co_tot:.1f}h) = {tot_d_str} ({total_entitled_h:.1f}h) | Remaining: {rem_d_str} ({rem_h:.1f}h)"
+    else:
+        badge_text = f"🏖️ {used_d_str} / {pl_d_str} ({pl_tot:.1f}h)"
+        tip = f"Taken in this annex: {used_d_str} ({used_h:.1f}h) | Annex quota: {pl_d_str} ({pl_tot:.1f}h) | Remaining: {rem_d_str} ({rem_h:.1f}h)"
+
+    return f'<span class="muted" style="font-size:10px; margin-left:6px;" title="{escape(tip)}">{badge_text}</span>'
+
+
 def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | None = None):
     if mode not in ("new", "edit"):
         mode = "new"
@@ -855,6 +924,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
 
     allocated_staff = []
     has_active_annex = False
+    mas_by_staff = {}
     if mode == "edit" and contract_row:
         has_active_annex = any(int(a["is_active"]) == 1 for a in annex_rows)
         conn = db_connect()
@@ -867,6 +937,16 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
                 JOIN contract_staff s ON s.id = l.staff_id
                 WHERE l.contract_id = ?
             """, (contract_row["id"],)).fetchall()
+            if allocated_staff:
+                s_ids = list({s["staff_id"] for s in allocated_staff})
+                ph = ",".join("?" for _ in s_ids)
+                mas_rows = conn.execute(f"""
+                    SELECT staff_id, month, paid_leave_days
+                    FROM monthly_attendance_summary
+                    WHERE staff_id IN ({ph})
+                """, s_ids).fetchall()
+                for r in mas_rows:
+                    mas_by_staff.setdefault(r["staff_id"], []).append(r)
         finally:
             conn.close()
 
@@ -980,14 +1060,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
                 staff_items = []
                 for s in annex_staff:
                     m_rate = f"{s['monthly_rate']:,.2f} VND" if s['monthly_rate'] is not None else "-"
-                    pl_info = ""
-                    pl_tot = s['paid_leave_total_hours'] or 0.0
-                    co_tot = s['carried_over_leave_hours'] or 0.0
-                    if pl_tot > 0 or co_tot > 0:
-                        if co_tot > 0:
-                            pl_info = f'<span class="muted" style="font-size:10px; margin-left:6px;" title="Paid leave: {pl_tot:.1f}h + Carried over: {co_tot:.1f}h">🏖️ {pl_tot:.1f}h (+{co_tot:.1f}h)</span>'
-                        else:
-                            pl_info = f'<span class="muted" style="font-size:10px; margin-left:6px;" title="Paid leave: {pl_tot:.1f}h">🏖️ {pl_tot:.1f}h</span>'
+                    pl_info = _render_staff_leave_badge(s, a, mas_by_staff)
                     staff_items.append(f"""
                     <div style="display:flex; justify-content:space-between; align-items:center; font-size:11px; background:#f1f5f9; padding:4px 8px; border-radius:4px; margin-top:4px;">
                       <span>👤 <b>{escape(s['full_name_vi'])}</b> ({escape(s['joining_date'] or '')} → {escape(s['tentative_leaving_date'] or 'Present')}){pl_info}</span>
@@ -1037,7 +1110,10 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
                   <b>{escape(a["annex_name"] or "")}</b> {tag}
                   {staff_list_html}
                 </td>
-                <td>{escape(a["start_date"] or "")} → {escape(a["end_date"] or "")}</td>
+                <td>
+                  {f'<div style="font-size:10px; color:#475569; margin-bottom:2px;" title="Signing Date (Ngày ký)">✍️ Signed: <b>{escape(a["signed_date"])}</b></div>' if ("signed_date" in a.keys() and a["signed_date"]) else ''}
+                  <div>{escape(a["start_date"] or "")} → {escape(a["end_date"] or "")}</div>
+                </td>
                 <td style="text-align:right; font-family:monospace;">{val_display}</td>
                 <td>
                   <div class="actions" style="gap:6px; flex-wrap:nowrap; display:flex; align-items:center;">
@@ -1075,6 +1151,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
             for s_idx, s in enumerate(staff_for_contract, 1):
                 m_rate = f"{s['monthly_rate']:,.2f} VND" if s['monthly_rate'] is not None else "-"
                 d_rate = f"{s['manday_rate']:,.2f} VND" if s['manday_rate'] is not None else "-"
+                pl_info = _render_staff_leave_badge(s, contract_row, mas_by_staff)
                 actions = f"""
                   <a href="/contract/edit-staff-link?id={s['link_id']}" style="text-decoration:none;"><button type="button" class="btn-secondary" style="font-size:11px; padding: 4px 8px; margin-top:2px;">Edit</button></a>
                   <form class="inline" method="POST" action="/contract/remove-staff-link" onsubmit="return confirm('Remove staff from contract?');" style="margin:0; display:inline-block;">
@@ -1086,7 +1163,7 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
                 staff_trs.append(f"""
                 <tr>
                   <td>{s_idx}</td>
-                  <td><b>{escape(s['full_name_vi'])}</b><div class='muted'>{escape(s['position'] or '')}</div></td>
+                  <td><b>{escape(s['full_name_vi'])}</b> {pl_info}<div class='muted'>{escape(s['position'] or '')}</div></td>
                   <td>{escape(s['joining_date'] or '')} → {escape(s['tentative_leaving_date'] or 'Present')}</td>
                   <td style="text-align:right;">{m_rate}</td>
                   <td style="text-align:right;">{d_rate}</td>
@@ -1207,6 +1284,11 @@ def page_contract_form(mode: str, contract_row, annex_rows, error_msg: str | Non
             <div class="label">Total Contract Value (VND)</div>
             <input type="number" name="contract_value" value="{escape(gv("contract_value"))}" style="width:100%;" placeholder="{placeholder_val}">
             {f'<div class="muted" style="margin-top:4px; font-size:11px;">Default (Annexes sum): <b>{int(round(annex_sum)):,} VND</b></div>' if annex_sum > 0 else ''}
+          </div>
+
+          <div>
+            <div class="label">Signing Date (Ngày ký)</div>
+            <input type="date" name="signed_date" value="{escape(gv("signed_date"))}" style="width:100%;">
           </div>
 
           <div>
@@ -1387,6 +1469,10 @@ def page_annex_form(mode: str, annex_row, contract_id: int, error_msg: str | Non
             <input type="number" step="1" name="value" value="{escape(gv("value"))}" style="width:100%;" placeholder="e.g. 500000000">
           </div>
           <div>
+            <div class="label">Signing Date (Ngày ký)</div>
+            <input type="date" name="signed_date" value="{escape(gv("signed_date"))}" style="width:100%;">
+          </div>
+          <div>
             <div class="label">Start Date (Annex)</div>
             <input type="date" name="start_date" value="{escape(gv("start_date"))}" style="width:100%;">
           </div>
@@ -1445,6 +1531,7 @@ def handle_contract_create_post(handler):
     recurring_period = (form.get("recurring_period", ["MONTHLY"])[0] or "MONTHLY").strip()
     is_usage_based = 1 if (form.get("is_usage_based", ["0"])[0] or "0").strip() == "1" else 0
     contract_value_raw = (form.get("contract_value", [""])[0] or "").strip()
+    signed_date = (form.get("signed_date", [""])[0] or "").strip() or None
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
 
@@ -1506,13 +1593,13 @@ def handle_contract_create_post(handler):
             INSERT INTO contracts (
               buyer_vendor_id, seller_vendor_id,
               framework_no, framework_name, contract_summary, contract_value,
-              start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period,
+              signed_date, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period,
               is_usage_based,
               renewal_type, renewal_notice_days, renewal_period_months, renewal_note,
               is_active, deleted_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_summary, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, is_usage_based, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), now_iso()))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_summary, contract_value, signed_date, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, is_usage_based, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), now_iso()))
         new_id = cur.lastrowid
         log_action(cur, "CREATE_CONTRACT", "contracts", new_id, f"Created new contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type}, Renewal: {renewal_type})")
         conn.commit()
@@ -1540,6 +1627,7 @@ def handle_contract_update_post(handler):
     recurring_period = (form.get("recurring_period", ["MONTHLY"])[0] or "MONTHLY").strip()
     is_usage_based = 1 if (form.get("is_usage_based", ["0"])[0] or "0").strip() == "1" else 0
     contract_value_raw = (form.get("contract_value", [""])[0] or "").strip()
+    signed_date = (form.get("signed_date", [""])[0] or "").strip() or None
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
 
@@ -1624,6 +1712,7 @@ def handle_contract_update_post(handler):
                 framework_name=?,
                 contract_summary=?,
                 contract_value=?,
+                signed_date=?,
                 start_date=?,
                 end_date=?,
                 contract_type=?,
@@ -1637,7 +1726,7 @@ def handle_contract_update_post(handler):
                 renewal_note=?,
                 updated_at=?
             WHERE id=?
-        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_summary, contract_value, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, is_usage_based, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), int(cid)))
+        """, (int(buyer_id), int(seller_id), framework_no, framework_name, contract_summary, contract_value, signed_date, start_date, end_date, contract_type, billing_type, recurring_fee, recurring_period, is_usage_based, renewal_type, renewal_notice_days, renewal_period_months, renewal_note, now_iso(), int(cid)))
         log_action(cur, "UPDATE_CONTRACT", "contracts", int(cid), f"Updated contract '{framework_no}' - {framework_name} ({contract_type}/{billing_type}, Renewal: {renewal_type})")
         conn.commit()
     finally:
@@ -1758,6 +1847,7 @@ def handle_annex_create_post(handler):
     recurring_fee_raw = (form.get("recurring_fee", [""])[0] or "").strip()
     recurring_period = (form.get("recurring_period", ["MONTHLY"])[0] or "MONTHLY").strip()
     is_usage_based = 1 if (form.get("is_usage_based", ["0"])[0] or "0").strip() == "1" else 0
+    signed_date = (form.get("signed_date", [""])[0] or "").strip() or None
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
     value_raw = (form.get("value", [""])[0] or "").strip()
@@ -1796,12 +1886,12 @@ def handle_annex_create_post(handler):
 
         cur.execute("""
             INSERT INTO contract_annexes (
-              contract_id, annex_name, start_date, end_date, value, billing_type, recurring_fee, recurring_period,
+              contract_id, annex_name, signed_date, start_date, end_date, value, billing_type, recurring_fee, recurring_period,
               is_usage_based,
               is_active, deleted_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
-        """, (int(contract_id), annex_name, start_date, end_date, value, billing_type, recurring_fee, recurring_period, is_usage_based, now_iso(), now_iso()))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, NULL, ?, ?)
+        """, (int(contract_id), annex_name, signed_date, start_date, end_date, value, billing_type, recurring_fee, recurring_period, is_usage_based, now_iso(), now_iso()))
         new_annex_id = cur.lastrowid
         log_action(cur, "CREATE_ANNEX", "contract_annexes", new_annex_id, f"Created new annex '{annex_name}' ({billing_type}) for framework contract '{c_name}'")
         conn.commit()
@@ -1820,6 +1910,7 @@ def handle_annex_update_post(handler):
     recurring_fee_raw = (form.get("recurring_fee", [""])[0] or "").strip()
     recurring_period = (form.get("recurring_period", ["MONTHLY"])[0] or "MONTHLY").strip()
     is_usage_based = 1 if (form.get("is_usage_based", ["0"])[0] or "0").strip() == "1" else 0
+    signed_date = (form.get("signed_date", [""])[0] or "").strip() or None
     start_date = (form.get("start_date", [""])[0] or "").strip() or None
     end_date = (form.get("end_date", [""])[0] or "").strip() or None
     value_raw = (form.get("value", [""])[0] or "").strip()
@@ -1856,6 +1947,7 @@ def handle_annex_update_post(handler):
         cur.execute("""
             UPDATE contract_annexes
             SET annex_name=?,
+                signed_date=?,
                 start_date=?,
                 end_date=?,
                 value=?,
@@ -1865,7 +1957,7 @@ def handle_annex_update_post(handler):
                 is_usage_based=?,
                 updated_at=?
             WHERE id=?
-        """, (annex_name, start_date, end_date, value, billing_type, recurring_fee, recurring_period, is_usage_based, now_iso(), int(aid)))
+        """, (annex_name, signed_date, start_date, end_date, value, billing_type, recurring_fee, recurring_period, is_usage_based, now_iso(), int(aid)))
         log_action(cur, "UPDATE_ANNEX", "contract_annexes", int(aid), f"Updated annex '{annex_name}' ({billing_type}) for framework contract '{c_name}'")
         conn.commit()
     finally:

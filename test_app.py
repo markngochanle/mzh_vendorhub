@@ -378,6 +378,135 @@ class TestContracts(BaseTestCase):
         self.assertIn('"hours": 16.0', html)
         self.assertIn("setCarriedOver", html)
 
+    def test_contract_and_annex_signed_date(self):
+        # 1. Create contract with signed_date
+        body = f"buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&framework_no=MHB/SIGN/2026&signed_date=2026-01-10&start_date=2026-02-01&end_date=2026-12-31".encode()
+        handler = MockHandler(body=body, headers={"content-length": str(len(body))})
+        contracts.handle_contract_create_post(handler)
+        self.assertEqual(handler.response_status, 302)
+
+        c = self.conn.execute("SELECT * FROM contracts WHERE framework_no='MHB/SIGN/2026'").fetchone()
+        self.assertIsNotNone(c)
+        self.assertEqual(c["signed_date"], "2026-01-10")
+
+        # 2. Check contract list and edit form render signed_date
+        html_list = contracts.page_contracts_list("MHB/SIGN/2026", "active", return_to="/")
+        self.assertIn("✍️ Signed: <b>2026-01-10</b>", html_list)
+
+        html_edit = contracts.page_contract_form("edit", c, [], None)
+        self.assertIn('name="signed_date" value="2026-01-10"', html_edit)
+
+        # 3. Update contract signed_date
+        body_update = f"id={c['id']}&buyer_vendor_id={self.buyer_id}&seller_vendor_id={self.seller_id}&framework_no=MHB/SIGN/2026&signed_date=2026-01-15&start_date=2026-02-01&end_date=2026-12-31".encode()
+        handler_up = MockHandler(body=body_update, headers={"content-length": str(len(body_update))})
+        contracts.handle_contract_update_post(handler_up)
+        self.assertEqual(handler_up.response_status, 302)
+        c_up = self.conn.execute("SELECT * FROM contracts WHERE id=?", (c['id'],)).fetchone()
+        self.assertEqual(c_up["signed_date"], "2026-01-15")
+
+        # 4. Create annex with signed_date
+        body_annex = f"contract_id={c['id']}&annex_name=Annex_SignTest&signed_date=2026-01-20&start_date=2026-02-01&end_date=2026-06-30&value=500000000".encode()
+        handler_an = MockHandler(body=body_annex, headers={"content-length": str(len(body_annex))})
+        contracts.handle_annex_create_post(handler_an)
+        self.assertEqual(handler_an.response_status, 302)
+
+        annex = self.conn.execute("SELECT * FROM contract_annexes WHERE contract_id=? AND annex_name='Annex_SignTest'", (c['id'],)).fetchone()
+        self.assertIsNotNone(annex)
+        self.assertEqual(annex["signed_date"], "2026-01-20")
+
+        # 5. Check contract edit view with annex and annex edit form render signed_date
+        html_contract_with_annex = contracts.page_contract_form("edit", c_up, [annex], None)
+        self.assertIn("✍️ Signed: <b>2026-01-20</b>", html_contract_with_annex)
+
+        html_annex_edit = contracts.page_annex_form("edit", annex, c['id'], None)
+        self.assertIn('name="signed_date" value="2026-01-20"', html_annex_edit)
+
+        # 6. Update annex signed_date
+        body_annex_up = f"id={annex['id']}&contract_id={c['id']}&annex_name=Annex_SignTest_Up&signed_date=2026-01-25&start_date=2026-02-01&end_date=2026-06-30&value=600000000".encode()
+        handler_an_up = MockHandler(body=body_annex_up, headers={"content-length": str(len(body_annex_up))})
+        contracts.handle_annex_update_post(handler_an_up)
+        self.assertEqual(handler_an_up.response_status, 302)
+
+        annex_up = self.conn.execute("SELECT * FROM contract_annexes WHERE id=?", (annex['id'],)).fetchone()
+        self.assertEqual(annex_up["signed_date"], "2026-01-25")
+
+    def test_annex_staff_leave_days_display(self):
+        cur = self.conn.cursor()
+        # 1. Create contract & annex
+        cur.execute("""
+            INSERT INTO contracts (framework_no, framework_name, buyer_vendor_id, seller_vendor_id, start_date, end_date, contract_value, is_active)
+            VALUES ('CTR-LEAVE-01', 'Leave Test Contract', ?, ?, '2026-05-01', '2026-12-31', 1000000000, 1)
+        """, (self.buyer_id, self.seller_id))
+        contract_id = cur.lastrowid
+
+        cur.execute("""
+            INSERT INTO contract_annexes (contract_id, annex_name, start_date, end_date, value, is_active)
+            VALUES (?, 'Annex Leave 01', '2026-05-01', '2026-09-30', 500000000, 1)
+        """, (contract_id,))
+        annex_id = cur.lastrowid
+
+        # 2. Allocate staff to annex with 16h granted (2d) + 8h carried over (1d) = 24h total (3d)
+        cur.execute("""
+            INSERT INTO contract_staff_links (contract_id, annex_id, staff_id, joining_date, tentative_leaving_date, monthly_rate, paid_leave_total_hours, carried_over_leave_hours)
+            VALUES (?, ?, ?, '2026-05-01', '2026-09-30', 30000000, 16.0, 8.0)
+        """, (contract_id, annex_id, self.staff_id))
+
+        # 3. Insert attendance: 0.5d in May, 1.0d in June, and 2.0d in October (outside annex period)
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-05', 21, 20.5, 0.5, 0, 1428571, 30000000, 1)
+        """, (self.staff_id,))
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-06', 22, 21.0, 1.0, 0, 1363636, 30000000, 1)
+        """, (self.staff_id,))
+        cur.execute("""
+            INSERT INTO monthly_attendance_summary (staff_id, month, standard_days, actual_days, paid_leave_days, ot_converted_hours, daily_rate, total_amount, locked)
+            VALUES (?, '2026-10', 22, 20.0, 2.0, 0, 1363636, 30000000, 1)
+        """, (self.staff_id,))
+        self.conn.commit()
+
+        # 4. Render contract edit form
+        c_row = self.conn.execute("SELECT * FROM contracts WHERE id = ?", (contract_id,)).fetchone()
+        a_row = self.conn.execute("SELECT * FROM contract_annexes WHERE id = ?", (annex_id,)).fetchone()
+        html = contracts.page_contract_form("edit", c_row, [a_row], None)
+
+        # 5. Verify format: 🏖️ [Đã nghỉ] / [Được cấp] ([Giờ annex cấp]h) (+[Chuyển tiếp] / [Giờ chuyển tiếp]h)
+        self.assertIn("🏖️ 1.5d / 2d (16.0h) (+1d / 8.0h)", html)
+        self.assertIn("Taken in this annex: 1.5d (12.0h)", html)
+
+        # 6. Test second staff without carry-over (e.g. 0d taken / 2d (16.0h) granted)
+        cur.execute("""
+            INSERT INTO contract_staff (full_name_vi, vendor_id, position, paid_leave_total_hours)
+            VALUES ('Trần Thị Bình', ?, 'Tester', 16.0)
+        """, (self.seller_id,))
+        s2_id = cur.lastrowid
+        cur.execute("""
+            INSERT INTO contract_staff_links (contract_id, annex_id, staff_id, joining_date, tentative_leaving_date, monthly_rate, paid_leave_total_hours, carried_over_leave_hours)
+            VALUES (?, ?, ?, '2026-05-01', '2026-09-30', 25000000, 16.0, 0.0)
+        """, (contract_id, annex_id, s2_id))
+        self.conn.commit()
+
+        html2 = contracts.page_contract_form("edit", c_row, [a_row], None)
+        self.assertIn("🏖️ 0d / 2d (16.0h)", html2)
+
+        # 7. Test staff allocated directly to contract without annex
+        cur.execute("""
+            INSERT INTO contracts (framework_no, framework_name, buyer_vendor_id, seller_vendor_id, start_date, end_date, contract_value, is_active)
+            VALUES ('CTR-DIRECT-01', 'Direct Contract', ?, ?, '2026-01-01', '2026-12-31', 500000000, 1)
+        """, (self.buyer_id, self.seller_id))
+        c_direct_id = cur.lastrowid
+        cur.execute("""
+            INSERT INTO contract_staff_links (contract_id, annex_id, staff_id, joining_date, tentative_leaving_date, monthly_rate, paid_leave_total_hours, carried_over_leave_hours)
+            VALUES (?, NULL, ?, '2026-01-01', '2026-12-31', 25000000, 80.0, 0.0)
+        """, (c_direct_id, s2_id))
+        self.conn.commit()
+
+        c_direct_row = self.conn.execute("SELECT * FROM contracts WHERE id = ?", (c_direct_id,)).fetchone()
+        html_direct = contracts.page_contract_form("edit", c_direct_row, [], None)
+        self.assertIn("🏖️ 0d / 10d (80.0h)", html_direct)
+
+
 
 # ==================== 4. Test Staff / Shifts ====================
 class TestStaff(BaseTestCase):

@@ -157,6 +157,7 @@ def init_db():
                 framework_no   TEXT,
                 framework_name TEXT,
 
+                signed_date TEXT NULL, -- YYYY-MM-DD
                 start_date TEXT NULL, -- YYYY-MM-DD
                 end_date   TEXT NULL, -- YYYY-MM-DD
 
@@ -180,6 +181,7 @@ def init_db():
                 contract_id INTEGER NOT NULL,
                 annex_name TEXT,
 
+                signed_date TEXT NULL, -- YYYY-MM-DD
                 start_date TEXT NULL,
                 end_date   TEXT NULL,
 
@@ -327,6 +329,7 @@ def init_db():
         # -------- Fixed Price & Contract Classification Migrations --------
         ensure_column(conn, "contracts", "contract_type", "TEXT NOT NULL DEFAULT 'FRAMEWORK'")
         ensure_column(conn, "contracts", "billing_type", "TEXT NOT NULL DEFAULT 'TM'")
+        ensure_column(conn, "contracts", "signed_date", "TEXT NULL")
         ensure_column(conn, "contracts", "recurring_fee", "REAL NULL")
         ensure_column(conn, "contracts", "recurring_period", "TEXT NOT NULL DEFAULT 'MONTHLY'")
         ensure_column(conn, "contracts", "renewal_type", "TEXT NOT NULL DEFAULT 'MANUAL'")
@@ -335,6 +338,7 @@ def init_db():
         ensure_column(conn, "contracts", "renewal_note", "TEXT NULL")
         ensure_column(conn, "contracts", "last_renewed_at", "TEXT NULL")
         ensure_column(conn, "contracts", "contract_summary", "TEXT NULL")
+        ensure_column(conn, "contract_annexes", "signed_date", "TEXT NULL")
         ensure_column(conn, "contract_annexes", "billing_type", "TEXT NOT NULL DEFAULT 'TM'")
         ensure_column(conn, "contract_annexes", "recurring_fee", "REAL NULL")
         ensure_column(conn, "contract_annexes", "recurring_period", "TEXT NOT NULL DEFAULT 'MONTHLY'")
