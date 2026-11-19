@@ -17,6 +17,7 @@ from performance.benchmark_engine import (
 from performance.config import SLA_THRESHOLDS, REPORTS_DIR
 from performance.scenarios import (
     SCENARIO_REGISTRY,
+    get_full_coverage_generator,
     get_read_heavy_generator,
     get_heavy_reports_generator,
     get_write_mixed_generator,
@@ -57,9 +58,15 @@ class TestDirectHandler(unittest.TestCase):
 
 class TestScenarios(unittest.TestCase):
     def test_scenario_registry(self):
+        self.assertIn("full_coverage", SCENARIO_REGISTRY)
         self.assertIn("read_heavy", SCENARIO_REGISTRY)
         self.assertIn("heavy_reports", SCENARIO_REGISTRY)
         self.assertIn("write_mixed", SCENARIO_REGISTRY)
+
+        gen_full = get_full_coverage_generator()
+        target_f = gen_full()
+        self.assertIn("path", target_f)
+        self.assertEqual(target_f.get("method"), "GET")
 
         gen_read = get_read_heavy_generator()
         target = gen_read()
