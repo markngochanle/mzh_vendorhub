@@ -8,3 +8,7 @@ vendor_management.db
 app.log
 .DS_Store
 playwright/screenshots/
+performance_reports/*.html
+performance_reports/*.json
+performance_reports/*.log
+

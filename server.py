@@ -47,6 +47,12 @@ from dashboard import page_dashboard
 from audit import page_audit_logs
 from playwright_runner import page_playwright_runner, handle_run_tests_post, handle_get_test_log
 from unittest_runner import page_unittest_runner, handle_run_unittests_post, handle_get_unittest_log
+from performance_runner import (
+    page_performance_runner,
+    handle_run_performance_post,
+    handle_get_performance_log,
+    page_view_performance_report,
+)
 
 from vendors import (
     page_vendors_list,
@@ -236,6 +242,18 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/unit-tests/log":
                 handle_get_unittest_log(self)
+                return
+
+            if path == "/performance-tests":
+                page_performance_runner(self)
+                return
+
+            if path == "/api/performance-tests/log":
+                handle_get_performance_log(self)
+                return
+
+            if path == "/performance/report":
+                page_view_performance_report(self)
                 return
 
             if path == "/":
@@ -700,6 +718,10 @@ class Handler(BaseHTTPRequestHandler):
 
             if path == "/api/unit-tests/run":
                 handle_run_unittests_post(self)
+                return
+
+            if path == "/api/performance-tests/run":
+                handle_run_performance_post(self)
                 return
 
             if path == "/invoice/force-match":
