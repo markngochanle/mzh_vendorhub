@@ -129,6 +129,7 @@ def page_security_runner(handler):
 
     <script>
       let activeSecInterval = null;
+      const NL = String.fromCharCode(10);
 
       function clearSecurityConsole() {{
         document.getElementById('sec-terminal-box').innerText = '';
@@ -164,7 +165,7 @@ def page_security_runner(handler):
 
         updateAllRuleBadges('Đang quét...');
 
-        term.innerText = 'Khởi tạo phiên kiểm định bảo mật hệ thống (Profile: ' + profile + ')...\n';
+        term.innerText = '>>> Khởi tạo phiên kiểm định bảo mật hệ thống (Profile: ' + profile + ')...' + NL;
 
         const formData = new URLSearchParams();
         formData.append('profile', profile);
@@ -208,30 +209,41 @@ def page_security_runner(handler):
               resetSecUI();
               updateAllRuleBadges('Hoàn tất');
 
-              term.innerText += '\\n------------------------------------------------------------\\n';
-              term.innerText += '🎉 PHIÊN KIỂM ĐỊNH AN NINH ĐÃ HOÀN TẤT THÀNH CÔNG!\\n';
+              term.innerText += NL + '------------------------------------------------------------' + NL;
+              term.innerText += '🎉 PHIÊN KIỂM ĐỊNH AN NINH ĐÃ HOÀN TẤT THÀNH CÔNG!' + NL;
+              if (data.latest_report) {{
+                term.innerText += '👉 BÁO CÁO MỚI NHẤT: /security/report?name=' + data.latest_report + NL;
+              }}
               term.scrollTop = term.scrollHeight;
-
-              setTimeout(() => {{
-                window.location.reload();
-              }}, 1500);
             }}
           }})
           .catch(err => {{
             console.error('Lỗi khi lấy log an ninh:', err);
           }});
-        }}, 800);
+        }}, 600);
       }}
 
       function resetSecUI() {{
         const btn = document.getElementById('btn-run-security');
-        btn.disabled = false;
-        btn.innerText = '▶ Bắt Đầu Quét Bảo Mật 100%';
+        if (btn) {{
+          btn.disabled = false;
+          btn.innerText = '▶ Bắt Đầu Quét Bảo Mật 100%';
+        }}
         const statusEl = document.getElementById('scanner-process-status');
-        statusEl.innerText = 'Sẵn sàng';
-        statusEl.style.background = '#f1f5f9';
-        statusEl.style.color = '#475569';
+        if (statusEl) {{
+          statusEl.innerText = 'Sẵn sàng';
+          statusEl.style.background = '#f1f5f9';
+          statusEl.style.color = '#475569';
+        }}
       }}
+
+      // Attach backup event listener once DOM is ready
+      document.addEventListener('DOMContentLoaded', () => {{
+        const btn = document.getElementById('btn-run-security');
+        if (btn) {{
+          btn.onclick = runSecurityScan;
+        }}
+      }});
     </script>
     """
     send_html(handler, layout("Kiểm Định Bảo Mật Hệ Thống", body_html))
@@ -264,11 +276,13 @@ def handle_run_security_post(handler):
     args = [sys.executable, "run_security_checks.py", "--profile", profile]
 
     try:
+        runner_log = REPORTS_DIR / "security_runner_proc.log"
+        proc_out = open(runner_log, "w", encoding="utf-8")
         current_process = subprocess.Popen(
             args,
             cwd=str(REPORTS_DIR.parent),
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
+            stdout=proc_out,
+            stderr=proc_out,
             text=True
         )
         send_json(handler, {"status": "started", "profile": profile})
@@ -291,9 +305,17 @@ def handle_get_security_log(handler):
         except Exception:
             pass
 
+    latest_report = ""
+    if REPORTS_DIR.exists():
+        html_files = sorted(REPORTS_DIR.glob("sec_report_*.html"), key=lambda f: f.stat().st_mtime, reverse=True)
+        if html_files:
+            latest_report = html_files[0].name
+
     send_json(handler, {
         "running": running,
         "log": log_content,
+        "latest_report": latest_report,
+        "exit_code": current_process.poll() if current_process else None
     })
 
 
