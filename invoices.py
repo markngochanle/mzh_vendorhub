@@ -765,7 +765,8 @@ def page_invoices_list(filters: dict, *, return_to: str):
 
         where_sql = ("WHERE " + " AND ".join(where)) if where else ""
 
-        rows = conn.execute(f"""
+        list_query = (
+            """
             SELECT
               id,
               service_year, service_month, service_day,
@@ -775,13 +776,17 @@ def page_invoices_list(filters: dict, *, return_to: str):
               buyer_name, buyer_mst, buyer_address,
               tg_tcthue, tg_tthue, tg_tttbso,
               sent_to_mgs, force_match
-            FROM invoices
-            {where_sql}
+            FROM invoices """
+            + where_sql
+            + """
             ORDER BY sent_to_mgs ASC, service_year DESC, service_month DESC, service_day DESC, seller_name ASC, id DESC
             LIMIT ?
-        """, params + [LIST_LIMIT]).fetchall()
+        """
+        )
+        rows = conn.execute(list_query, params + [LIST_LIMIT]).fetchall()
 
-        count_row = conn.execute(f"SELECT COUNT(*) AS c FROM invoices {where_sql}", params).fetchone()
+        count_query = "SELECT COUNT(*) AS c FROM invoices " + where_sql
+        count_row = conn.execute(count_query, params).fetchone()
         total = int(count_row["c"]) if count_row else 0
 
         # Build list rows with reconciliation status
