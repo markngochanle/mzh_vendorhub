@@ -1,0 +1,1118 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Báo Cáo Kiểm Định Bảo Mật Hệ Thống - Mizuho VMS</title>
+  <style>
+    :root {
+      --primary: #1e3a8a;
+      --primary-light: #3b82f6;
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --border: #e2e8f0;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --success: #16a34a;
+      --warning: #ca8a04;
+      --danger: #dc2626;
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text-main);
+      margin: 0;
+      padding: 24px;
+      line-height: 1.5;
+    }
+    .container {
+      max-width: 1280px;
+      margin: 0 auto;
+    }
+    .header {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    .badge {
+      display: inline-block;
+      padding: 3px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .kpi-card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 18px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    .kpi-val {
+      font-size: 28px;
+      font-weight: 800;
+      margin-top: 6px;
+      letter-spacing: -0.5px;
+    }
+    .card {
+      background: white;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 24px;
+      margin-bottom: 24px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.02);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    th {
+      background: #f8fafc;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+      padding: 12px;
+      border-bottom: 1px solid var(--border);
+    }
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 14px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-weight: 600;
+      text-decoration: none;
+      cursor: pointer;
+      border: 1px solid transparent;
+    }
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+    .btn-secondary {
+      background: white;
+      border-color: var(--border);
+      color: var(--text-main);
+    }
+  </style>
+  <script src="/static/js/chart.umd.min.js"></script>
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <div>
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 6px;">
+          <h1 style="margin: 0; font-size: 22px; color: var(--primary);">🛡️ Báo Cáo Kiểm Định An Ninh & Bảo Mật Toàn Diện</h1>
+          <span class="badge" style="background: #fee2e2; color: #dc2626; font-size: 13px; padding: 4px 10px;">
+            F (Kém - Nguy cơ rủi ro cao)
+          </span>
+        </div>
+        <div style="font-size: 13px; color: var(--text-muted);">
+          Hệ thống: Mizuho Vendor Management System | Kiểm định: OWASP Top 10 | Độ bao phủ: 100% Endpoints & Source Code
+        </div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+          Thời gian thực hiện: <strong>2026-11-20 01:40:40</strong> | Thời lượng quét: <strong>0.73s</strong> | Chế độ: <strong>standard</strong>
+        </div>
+      </div>
+      <div style="display: flex; gap: 10px;">
+        <a href="/security-checks" class="btn btn-secondary">&larr; Quay lại Bộ Kiểm Tra</a>
+        <a href="/security-reports" class="btn btn-secondary">📑 Danh Mục Báo Cáo</a>
+        <button class="btn btn-primary" onclick="window.print()">🖨️ In Báo Cáo (PDF)</button>
+      </div>
+    </div>
+
+    <!-- KPI Grid -->
+    <div class="kpi-grid">
+      <div class="kpi-card" style="border-left: 4px solid #dc2626;">
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Điểm Số An Ninh</div>
+        <div class="kpi-val" style="color: #dc2626;">30.0 <span style="font-size: 16px; font-weight: normal; color: var(--text-muted);">/ 100.0</span></div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Xếp hạng: F (Kém - Nguy cơ rủi ro cao)</div>
+      </div>
+
+      <div class="kpi-card" style="border-left: 4px solid var(--primary);">
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Tổng Số Hạng Mục Kiểm Định</div>
+        <div class="kpi-val" style="color: var(--primary);">779</div>
+        <div style="font-size: 12px; color: #16a34a; margin-top: 4px;">Đạt: 686 (88.1%) | Cần xử lý: 93</div>
+      </div>
+
+      <div class="kpi-card" style="border-left: 4px solid var(--primary-light);">
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Độ Bao Phủ Hệ Thống</div>
+        <div class="kpi-val" style="color: var(--primary-light);">100%</div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">42 Endpoints | 19 File nguồn Python</div>
+      </div>
+
+      <div class="kpi-card" style="border-left: 4px solid #16a34a;">
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Phát Hiện Rủi Ro</div>
+        <div class="kpi-val" style="color: #dc2626;">
+          14 <span style="font-size: 14px; font-weight: normal; color: var(--text-muted);">vấn đề</span>
+        </div>
+        <div style="font-size: 11px; margin-top: 4px;">
+          <span style="color: #dc2626; font-weight: bold;">0 Nghiêm trọng</span> &bull; 
+          <span style="color: #ea580c; font-weight: bold;">4 Cao</span> &bull; 
+          <span style="color: #ca8a04; font-weight: bold;">10 Trung bình</span> &bull; 
+          <span style="color: #2563eb;">0 Thấp</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Charts Section -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(480px, 1fr)); gap: 20px; margin-bottom: 24px;">
+      <div class="card" style="margin-bottom: 0;">
+        <h3 style="margin: 0 0 16px 0; font-size: 15px; color: var(--text-main);">📊 Phân Bổ Phát Hiện Theo Mức Độ Nghiêm Trọng</h3>
+        <div style="height: 250px; display: flex; justify-content: center; align-items: center;">
+          <canvas id="severityChart"></canvas>
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom: 0;">
+        <h3 style="margin: 0 0 16px 0; font-size: 15px; color: var(--text-main);">🎯 Mức Độ Tuân Thủ 10 Hạng Mục OWASP Top 10 (Thang điểm 100)</h3>
+        <div style="height: 250px; display: flex; justify-content: center; align-items: center;">
+          <canvas id="owaspChart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Executive Recommendations -->
+    <div class="card">
+      <h3 style="margin: 0 0 14px 0; font-size: 16px; color: var(--primary);">
+        💡 Khuyến Nghị Tối Ưu Hóa & Gia Cố Bảo Mật Hệ Thống
+      </h3>
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-left: 4px solid #2563eb; border-radius: 6px; padding: 14px;">
+          <div style="font-weight: 700; font-size: 14px; color: #1e40af; margin-bottom: 4px;">1. Bổ sung các Header Bảo Mật HTTP</div>
+          <div style="font-size: 12px; color: var(--text-muted);">
+            Thêm <code>X-Content-Type-Options: nosniff</code> và <code>X-Frame-Options: SAMEORIGIN</code> vào hàm <code>send_html</code> trong <code>common.py</code> để chống lại tấn công MIME-sniffing và Clickjacking.
+          </div>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-left: 4px solid #16a34a; border-radius: 6px; padding: 14px;">
+          <div style="font-weight: 700; font-size: 14px; color: #15803d; margin-bottom: 4px;">2. Duy trì Tham Số Hóa Truy Vấn 100%</div>
+          <div style="font-size: 12px; color: var(--text-muted);">
+            Tuyệt đối tuân thủ sử dụng dấu hỏi <code>?</code> và tuple trong các truy vấn <code>conn.execute()</code>, loại bỏ hoàn toàn việc ghép chuỗi để triệt tiêu nguy cơ SQL Injection.
+          </div>
+        </div>
+
+        <div style="background: #f8fafc; border: 1px solid var(--border); border-left: 4px solid #ca8a04; border-radius: 6px; padding: 14px;">
+          <div style="font-weight: 700; font-size: 14px; color: #854d0e; margin-bottom: 4px;">3. Tăng cường Kiểm Soát Lỗi Ngoại Lệ</div>
+          <div style="font-size: 12px; color: var(--text-muted);">
+            Bắt toàn bộ ngoại lệ <code>ValueError</code> khi phân tích tham số ID hoặc ngày tháng để trả về thông báo lỗi thân thiện (400 Bad Request), không làm rò rỉ Python Traceback ra màn hình.
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Detailed Findings Table -->
+    <div class="card">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+        <h3 style="margin: 0; font-size: 16px; color: var(--text-main);">
+          📑 Danh Sách Chi Tiết Các Phát Hiện & Đề Xuất Khắc Phục (14)
+        </h3>
+      </div>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 40px;">#</th>
+              <th style="width: 120px;">Mức Độ</th>
+              <th style="width: 150px;">Quy Tắc</th>
+              <th>Chi Tiết Phát Hiện, Bằng Chứng & Hướng Dẫn Khắc Phục</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">1</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #ffedd5; color: #9a3412; font-weight: 700; font-size: 11px;">
+                  CAO
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-01-SQLI
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Truy vấn SQL sử dụng f-string tiềm ẩn nguy cơ chèn mã (vendors.py:72)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Truy vấn SQL được khởi tạo bằng f-string thay vì sử dụng tham số hóa (parameterized query với dấu ?). Nếu các biến được nội suy chứa dữ liệu từ người dùng, kẻ tấn công có thể chèn mã SQL.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> vendors.py:72<br>
+                  <strong>Bằng chứng:</strong> count_row = conn.execute(f&quot;SELECT COUNT(*) AS c FROM vendors {where_sql}&quot;, params).fetchone()
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Thay thế toàn bộ biểu thức f-string bằng câu truy vấn chuẩn sử dụng dấu ? và truyền giá trị qua tham số tuple: conn.execute(&#x27;SELECT ... WHERE col = ?&#x27;, (val,)).
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">2</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #ffedd5; color: #9a3412; font-weight: 700; font-size: 11px;">
+                  CAO
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-01-SQLI
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Truy vấn SQL sử dụng f-string tiềm ẩn nguy cơ chèn mã (audit.py:39)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Truy vấn SQL được khởi tạo bằng f-string thay vì sử dụng tham số hóa (parameterized query với dấu ?). Nếu các biến được nội suy chứa dữ liệu từ người dùng, kẻ tấn công có thể chèn mã SQL.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> audit.py:39<br>
+                  <strong>Bằng chứng:</strong> total_count = conn.execute(f&quot;SELECT COUNT(*) FROM audit_logs {where_str}&quot;, params).fetchone()[0]
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Thay thế toàn bộ biểu thức f-string bằng câu truy vấn chuẩn sử dụng dấu ? và truyền giá trị qua tham số tuple: conn.execute(&#x27;SELECT ... WHERE col = ?&#x27;, (val,)).
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">3</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #ffedd5; color: #9a3412; font-weight: 700; font-size: 11px;">
+                  CAO
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-01-SQLI
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Truy vấn SQL sử dụng f-string tiềm ẩn nguy cơ chèn mã (attendance.py:4102)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Truy vấn SQL được khởi tạo bằng f-string thay vì sử dụng tham số hóa (parameterized query với dấu ?). Nếu các biến được nội suy chứa dữ liệu từ người dùng, kẻ tấn công có thể chèn mã SQL.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> attendance.py:4102<br>
+                  <strong>Bằng chứng:</strong> inv_rows = conn.execute(f&quot;SELECT * FROM invoices WHERE {&#x27; AND &#x27;.join(inv_where)} ORDER BY id DESC&quot;, inv_params).fetchall()
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Thay thế toàn bộ biểu thức f-string bằng câu truy vấn chuẩn sử dụng dấu ? và truyền giá trị qua tham số tuple: conn.execute(&#x27;SELECT ... WHERE col = ?&#x27;, (val,)).
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">4</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #ffedd5; color: #9a3412; font-weight: 700; font-size: 11px;">
+                  CAO
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-01-SQLI
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Truy vấn SQL sử dụng f-string tiềm ẩn nguy cơ chèn mã (invoices.py:784)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Truy vấn SQL được khởi tạo bằng f-string thay vì sử dụng tham số hóa (parameterized query với dấu ?). Nếu các biến được nội suy chứa dữ liệu từ người dùng, kẻ tấn công có thể chèn mã SQL.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> invoices.py:784<br>
+                  <strong>Bằng chứng:</strong> count_row = conn.execute(f&quot;SELECT COUNT(*) AS c FROM invoices {where_sql}&quot;, params).fetchone()
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Thay thế toàn bộ biểu thức f-string bằng câu truy vấn chuẩn sử dụng dấu ? và truyền giá trị qua tham số tuple: conn.execute(&#x27;SELECT ... WHERE col = ?&#x27;, (val,)).
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">5</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #fef9c3; color: #854d0e; font-weight: 700; font-size: 11px;">
+                  TRUNG BÌNH
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-08-AUDIT-LOG
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Thao tác hủy/xóa chưa ghi nhận đầy đủ vào nhật ký kiểm toán (/delete-invoice)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Thao tác tại endpoint /delete-invoice làm thay đổi hoặc xóa trạng thái bản ghi trong CSDL nhưng không gọi log_audit() để lưu vết.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> /delete-invoice<br>
+                  <strong>Bằng chứng:</strong> Route: /delete-invoice thiếu lời gọi log_audit(...)
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Bổ sung lời gọi log_audit(action=&#x27;DELETE&#x27;, entity=..., entity_id=..., details=...) trong khối xử lý của /delete-invoice.
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">6</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #fef9c3; color: #854d0e; font-weight: 700; font-size: 11px;">
+                  TRUNG BÌNH
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-08-AUDIT-LOG
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Thao tác hủy/xóa chưa ghi nhận đầy đủ vào nhật ký kiểm toán (/contract/delete)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Thao tác tại endpoint /contract/delete làm thay đổi hoặc xóa trạng thái bản ghi trong CSDL nhưng không gọi log_audit() để lưu vết.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> /contract/delete<br>
+                  <strong>Bằng chứng:</strong> Route: /contract/delete thiếu lời gọi log_audit(...)
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Bổ sung lời gọi log_audit(action=&#x27;DELETE&#x27;, entity=..., entity_id=..., details=...) trong khối xử lý của /contract/delete.
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">7</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #fef9c3; color: #854d0e; font-weight: 700; font-size: 11px;">
+                  TRUNG BÌNH
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-08-AUDIT-LOG
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Thao tác hủy/xóa chưa ghi nhận đầy đủ vào nhật ký kiểm toán (/vendor/deactivate)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Thao tác tại endpoint /vendor/deactivate làm thay đổi hoặc xóa trạng thái bản ghi trong CSDL nhưng không gọi log_audit() để lưu vết.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> /vendor/deactivate<br>
+                  <strong>Bằng chứng:</strong> Route: /vendor/deactivate thiếu lời gọi log_audit(...)
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Bổ sung lời gọi log_audit(action=&#x27;DELETE&#x27;, entity=..., entity_id=..., details=...) trong khối xử lý của /vendor/deactivate.
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">8</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #fef9c3; color: #854d0e; font-weight: 700; font-size: 11px;">
+                  TRUNG BÌNH
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-08-AUDIT-LOG
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Thao tác hủy/xóa chưa ghi nhận đầy đủ vào nhật ký kiểm toán (/project/delete)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Thao tác tại endpoint /project/delete làm thay đổi hoặc xóa trạng thái bản ghi trong CSDL nhưng không gọi log_audit() để lưu vết.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> /project/delete<br>
+                  <strong>Bằng chứng:</strong> Route: /project/delete thiếu lời gọi log_audit(...)
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Bổ sung lời gọi log_audit(action=&#x27;DELETE&#x27;, entity=..., entity_id=..., details=...) trong khối xử lý của /project/delete.
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">9</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #fef9c3; color: #854d0e; font-weight: 700; font-size: 11px;">
+                  TRUNG BÌNH
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-08-AUDIT-LOG
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Thao tác hủy/xóa chưa ghi nhận đầy đủ vào nhật ký kiểm toán (/annex/delete)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Thao tác tại endpoint /annex/delete làm thay đổi hoặc xóa trạng thái bản ghi trong CSDL nhưng không gọi log_audit() để lưu vết.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> /annex/delete<br>
+                  <strong>Bằng chứng:</strong> Route: /annex/delete thiếu lời gọi log_audit(...)
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Bổ sung lời gọi log_audit(action=&#x27;DELETE&#x27;, entity=..., entity_id=..., details=...) trong khối xử lý của /annex/delete.
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">10</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #fef9c3; color: #854d0e; font-weight: 700; font-size: 11px;">
+                  TRUNG BÌNH
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-04-HEADERS
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Thiếu các tiêu đề bảo mật HTTP phòng thủ tại (/dashboard)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Endpoint /dashboard phản hồi nhưng thiếu các tiêu đề bảo mật chuẩn: x-content-type-options, x-frame-options. Điều này khiến trình duyệt có thể bị tấn công MIME-sniffing hoặc Clickjacking qua iframe.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> /dashboard<br>
+                  <strong>Bằng chứng:</strong> Headers hiện tại: [&#x27;content-type&#x27;, &#x27;content-length&#x27;]
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Bổ sung tiêu đề an toàn trong hàm send_html (common.py): X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, Referrer-Policy: strict-origin-when-cross-origin.
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">11</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #fef9c3; color: #854d0e; font-weight: 700; font-size: 11px;">
+                  TRUNG BÌNH
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-04-HEADERS
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Thiếu các tiêu đề bảo mật HTTP phòng thủ tại (/)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Endpoint / phản hồi nhưng thiếu các tiêu đề bảo mật chuẩn: x-content-type-options, x-frame-options. Điều này khiến trình duyệt có thể bị tấn công MIME-sniffing hoặc Clickjacking qua iframe.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> /<br>
+                  <strong>Bằng chứng:</strong> Headers hiện tại: [&#x27;content-type&#x27;, &#x27;content-length&#x27;]
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Bổ sung tiêu đề an toàn trong hàm send_html (common.py): X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, Referrer-Policy: strict-origin-when-cross-origin.
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">12</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #fef9c3; color: #854d0e; font-weight: 700; font-size: 11px;">
+                  TRUNG BÌNH
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-04-HEADERS
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Thiếu các tiêu đề bảo mật HTTP phòng thủ tại (/contracts)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Endpoint /contracts phản hồi nhưng thiếu các tiêu đề bảo mật chuẩn: x-content-type-options, x-frame-options. Điều này khiến trình duyệt có thể bị tấn công MIME-sniffing hoặc Clickjacking qua iframe.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> /contracts<br>
+                  <strong>Bằng chứng:</strong> Headers hiện tại: [&#x27;content-type&#x27;, &#x27;content-length&#x27;]
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Bổ sung tiêu đề an toàn trong hàm send_html (common.py): X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, Referrer-Policy: strict-origin-when-cross-origin.
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">13</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #fef9c3; color: #854d0e; font-weight: 700; font-size: 11px;">
+                  TRUNG BÌNH
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-04-HEADERS
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Thiếu các tiêu đề bảo mật HTTP phòng thủ tại (/staff)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Endpoint /staff phản hồi nhưng thiếu các tiêu đề bảo mật chuẩn: x-content-type-options, x-frame-options. Điều này khiến trình duyệt có thể bị tấn công MIME-sniffing hoặc Clickjacking qua iframe.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> /staff<br>
+                  <strong>Bằng chứng:</strong> Headers hiện tại: [&#x27;content-type&#x27;, &#x27;content-length&#x27;]
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Bổ sung tiêu đề an toàn trong hàm send_html (common.py): X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, Referrer-Policy: strict-origin-when-cross-origin.
+                </div>
+              </td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border);">
+              <td style="padding: 12px; font-weight: 600; font-size: 12px; color: var(--text-muted);">14</td>
+              <td style="padding: 12px;">
+                <span class="badge" style="background: #fef9c3; color: #854d0e; font-weight: 700; font-size: 11px;">
+                  TRUNG BÌNH
+                </span>
+              </td>
+              <td style="padding: 12px; font-family: monospace; font-size: 12px; font-weight: 600; color: var(--primary);">
+                SEC-04-HEADERS
+              </td>
+              <td style="padding: 12px;">
+                <div style="font-weight: 700; font-size: 13px; color: var(--text-main); margin-bottom: 4px;">Thiếu các tiêu đề bảo mật HTTP phòng thủ tại (/attendance)</div>
+                <div style="font-size: 12px; color: var(--text-muted);">Endpoint /attendance phản hồi nhưng thiếu các tiêu đề bảo mật chuẩn: x-content-type-options, x-frame-options. Điều này khiến trình duyệt có thể bị tấn công MIME-sniffing hoặc Clickjacking qua iframe.</div>
+                <div style="margin-top: 6px; padding: 6px 10px; background: #f8fafc; border-left: 3px solid var(--primary); font-family: monospace; font-size: 11px; color: #334155; word-break: break-all;">
+                  <strong>Vị trí:</strong> /attendance<br>
+                  <strong>Bằng chứng:</strong> Headers hiện tại: [&#x27;content-type&#x27;, &#x27;content-length&#x27;]
+                </div>
+                <div style="margin-top: 6px; font-size: 12px; color: #15803d; background: #f0fdf4; padding: 6px 10px; border-radius: 4px;">
+                  <strong>💡 Khắc phục:</strong> Bổ sung tiêu đề an toàn trong hàm send_html (common.py): X-Content-Type-Options: nosniff, X-Frame-Options: SAMEORIGIN, Referrer-Policy: strict-origin-when-cross-origin.
+                </div>
+              </td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- 100% Endpoint Matrix -->
+    <div class="card">
+      <h3 style="margin: 0 0 14px 0; font-size: 16px; color: var(--text-main);">
+        🌐 Ma Trận Kiểm Định 100% Endpoints & Màn Hình Hệ Thống (42 Endpoints)
+      </h3>
+      <div style="overflow-x: auto;">
+        <table>
+          <thead>
+            <tr>
+              <th>Màn Hình Chức Năng</th>
+              <th>Đường Dẫn URL</th>
+              <th>Phân Hệ</th>
+              <th style="text-align: center;">HTTP Headers</th>
+              <th style="text-align: center;">Chống SQLi</th>
+              <th style="text-align: center;">Chống XSS</th>
+              <th style="text-align: center;">Không Lộ Lỗi</th>
+              <th style="text-align: center;">Trạng Thái</th>
+            </tr>
+          </thead>
+          <tbody>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Executive Dashboard</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/dashboard</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Dashboard</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Dashboard Năm Tài Chính 2026</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/dashboard?fy=2026</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Dashboard</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Dashboard Năm Tài Chính 2025</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/dashboard?fy=2025</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Dashboard</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Nhật Ký Kiểm Toán Hệ Thống</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/audit-logs</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Audit</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Danh Sách Hóa Đơn</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Invoices</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Lọc Hóa Đơn Theo Tháng</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/?month=2026-06</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Invoices</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Chi Tiết Hóa Đơn</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/invoice?id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Invoices</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Tạo Mới Hóa Đơn</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/invoice/new</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Invoices</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Chỉnh Sửa Hóa Đơn</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/edit-invoice?id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Invoices</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Dữ Liệu Thô Hóa Đơn</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/raw?id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Invoices</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Danh Sách Nhà Cung Cấp</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/vendors</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Vendors</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Tạo Mới Nhà Cung Cấp</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/vendor/new</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Vendors</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Sửa Nhà Cung Cấp</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/vendor/edit?id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Vendors</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Danh Sách Hợp Đồng</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/contracts</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Contracts</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Lọc Hợp Đồng Hiệu Lực</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/contracts?status=active</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Contracts</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Bảng Tham Chiếu Chi Phí</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/contracts/references</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Contracts</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Tạo Mới Hợp Đồng</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/contract/new</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Contracts</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Sửa Hợp Đồng</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/contract/edit?id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Contracts</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Gán Nhân Sự Vào Hợp Đồng</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/contract/assign-staff?contract_id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Contracts</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Sửa Phân Bổ Nhân Sự</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/contract/edit-staff-link?id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Contracts</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Tạo Mới Phụ Lục</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/annex/new?contract_id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Contracts</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Sửa Phụ Lục</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/annex/edit?id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Contracts</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Danh Sách Nhân Sự &amp; Phép</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/staff</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Staff</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Thêm Mới Nhân Sự</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/staff/new</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Staff</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Sửa Nhân Sự</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/staff/edit?id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Staff</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Cấu Hình Ca Làm Việc &amp; Phụ Cấp</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/staff/shifts</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Staff</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Ma Trận Chấm Công Hàng Ngày</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/attendance</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Attendance</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Bảng Tổng Hợp Công Tháng</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/attendance/monthly</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Attendance</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Xem Bảng Timesheet</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/attendance/timesheet</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Attendance</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Nghiệm Thu Dịch Vụ Vendor</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/attendance/acceptance</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Attendance</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Báo Cáo Chuyên Cần &amp; Đi Muộn</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/attendance/punctuality</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Attendance</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Tổng Quan Thanh Toán</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/payments</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Payments</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Dashboard Thanh Toán</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/payments/dashboard</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Payments</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Thanh Toán Hợp Đồng Trọn Gói</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/payments/fixed-price</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Payments</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Thanh Toán Định Kỳ Hàng Tháng</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/payments/recurring</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Payments</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Chi Trả Thu Nhập Chấm Công</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/attendance/payout</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Payments</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Danh Mục Dự Án</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/projects</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Projects</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Ma Trận Phân Bổ Dự Án</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/projects/assign</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Projects</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Form Sửa Dự Án</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/project/edit?id=1</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Projects</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">API Nhân Sự Khả Dụng</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/api/projects/available-staff?month=2026-06</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Projects</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Trình Xem Báo Cáo Hiệu Năng</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/performance/report</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Reports</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+            <tr style="border-bottom: 1px solid var(--border); font-size: 12px;">
+              <td style="padding: 10px 12px; font-weight: 600;">Thư Viện Đồ Thị Chart.js</td>
+              <td style="padding: 10px 12px; font-family: monospace; color: var(--primary);">/static/js/chart.umd.min.js</td>
+              <td style="padding: 10px 12px;"><span class="badge" style="background: #f1f5f9; color: #475569;">Static</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #dc2626; font-weight: bold;'>⚠️ Lỗi</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span style='color: #16a34a; font-weight: bold;'>✅ Đạt</span></td>
+              <td style="padding: 10px 12px; text-align: center;"><span class='badge' style='background:#fef9c3; color:#854d0e;'>CẢNH BÁO</span></td>
+            </tr>
+            
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Severity Doughnut Chart
+    const ctxSev = document.getElementById('severityChart');
+    if (ctxSev) {
+      new Chart(ctxSev, {
+        type: 'doughnut',
+        data: {
+          labels: ['Nghiêm Trọng', 'Cao', 'Trung Bình', 'Thấp', 'Thông Tin'],
+          datasets: [{
+            data: [0, 4, 10, 0, 0],
+            backgroundColor: ['#dc2626', '#ea580c', '#ca8a04', '#2563eb', '#64748b'],
+            borderWidth: 2,
+            borderColor: '#ffffff'
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: { position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } }
+          }
+        }
+      });
+    }
+
+    // OWASP Horizontal Bar Chart
+    const ctxOwasp = document.getElementById('owaspChart');
+    if (ctxOwasp) {
+      new Chart(ctxOwasp, {
+        type: 'bar',
+        data: {
+          labels: ["A01:2021 Kiểm Soát Truy Cập & Phân Quyền", "A02:2021 Mã Hóa & Bảo Vệ Dữ Liệu Nhạy Cảm", "A03:2021 Chống Chèn Mã Độc (Injection)", "A04:2021 Thiết Kế An Toàn & Ràng Buộc Nghiệp Vụ", "A05:2021 Cấu Hình Bảo Mật & HTTP Headers", "A06:2021 Thành Phần Phần Mềm & Thư Viện", "A07:2021 Xác Thực & Quản Lý Định Danh", "A08:2021 Toàn Vẹn Dữ Liệu & Mã Nguồn", "A09:2021 Ghi Nhật Ký Kiểm Toán & Giám Sát", "A10:2021 Chống Duyệt Thư Mục & Giả Mạo Yêu Cầu"],
+          datasets: [{
+            label: 'Điểm Tuân Thủ (/100)',
+            data: [100.0, 100.0, 40.0, 100.0, 75.0, 100.0, 100.0, 100.0, 75.0, 100.0],
+            backgroundColor: function(context) {
+              const val = context.raw;
+              if (val >= 85) return '#16a34a';
+              if (val >= 60) return '#ca8a04';
+              return '#dc2626';
+            },
+            borderRadius: 4
+          }]
+        },
+        options: {
+          indexAxis: 'y',
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            x: { min: 0, max: 100, grid: { color: '#f1f5f9' } },
+            y: { grid: { display: false }, ticks: { font: { size: 10 } } }
+          },
+          plugins: {
+            legend: { display: false }
+          }
+        }
+      });
+    }
+  </script>
+</body>
+</html>
