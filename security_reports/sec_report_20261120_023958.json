@@ -1,0 +1,577 @@
+{
+  "meta": {
+    "generated_at": "2026-11-20 02:39:58",
+    "duration_sec": 0.78,
+    "profile": "standard",
+    "security_score": 100.0,
+    "security_grade": "A+ (Xuất sắc - Bảo mật tối ưu)",
+    "total_endpoints_scanned": 42,
+    "total_files_analyzed": 19
+  },
+  "statistics": {
+    "total_checks": 782,
+    "passed_checks": 776,
+    "failed_checks": 6,
+    "pass_rate_pct": 99.2
+  },
+  "findings_by_severity": {
+    "NGHIÊM TRỌNG": 0,
+    "CAO": 0,
+    "TRUNG BÌNH": 0,
+    "THẤP": 0,
+    "THÔNG TIN": 0
+  },
+  "owasp_compliance": {
+    "A01": {
+      "id": "A01:2021",
+      "name": "Kiểm Soát Truy Cập & Phân Quyền",
+      "description": "Ngăn chặn truy cập trái phép, leo thang đặc quyền (IDOR) và thực thi sai phương thức HTTP.",
+      "score": 100.0,
+      "findings_count": 0,
+      "status": "PASS"
+    },
+    "A02": {
+      "id": "A02:2021",
+      "name": "Mã Hóa & Bảo Vệ Dữ Liệu Nhạy Cảm",
+      "description": "Bảo vệ thông tin cá nhân, hạn mức tài chính và ngăn lộ mật khẩu/bí mật trong mã nguồn.",
+      "score": 100.0,
+      "findings_count": 0,
+      "status": "PASS"
+    },
+    "A03": {
+      "id": "A03:2021",
+      "name": "Chống Chèn Mã Độc (Injection)",
+      "description": "Ngăn chặn các cuộc tấn công SQL Injection và ép kiểu tham số an toàn trong truy vấn CSDL.",
+      "score": 100.0,
+      "findings_count": 0,
+      "status": "PASS"
+    },
+    "A04": {
+      "id": "A04:2021",
+      "name": "Thiết Kế An Toàn & Ràng Buộc Nghiệp Vụ",
+      "description": "Kiểm soát tính toàn vẹn của logic nghiệp vụ, đối soát dữ liệu và xử lý giá trị biên.",
+      "score": 100.0,
+      "findings_count": 0,
+      "status": "PASS"
+    },
+    "A05": {
+      "id": "A05:2021",
+      "name": "Cấu Hình Bảo Mật & HTTP Headers",
+      "description": "Kiểm tra cấu hình máy chủ, các tiêu đề bảo vệ trình duyệt (X-Frame, X-Content-Type, CSP, Referrer).",
+      "score": 100.0,
+      "findings_count": 0,
+      "status": "PASS"
+    },
+    "A06": {
+      "id": "A06:2021",
+      "name": "Thành Phần Phần Mềm & Thư Viện",
+      "description": "Kiểm tra phiên bản thư viện nội bộ (Chart.js), tài nguyên tĩnh và phụ thuộc không an toàn.",
+      "score": 100.0,
+      "findings_count": 0,
+      "status": "PASS"
+    },
+    "A07": {
+      "id": "A07:2021",
+      "name": "Xác Thực & Quản Lý Định Danh",
+      "description": "Kiểm tra phiên làm việc, cookie bảo mật và kiểm soát truy cập trang quản trị.",
+      "score": 100.0,
+      "findings_count": 0,
+      "status": "PASS"
+    },
+    "A08": {
+      "id": "A08:2021",
+      "name": "Toàn Vẹn Dữ Liệu & Mã Nguồn",
+      "description": "Ngăn ngừa giải tuần tự hóa độc hại (deserialization), chèn mã động (eval/exec).",
+      "score": 100.0,
+      "findings_count": 0,
+      "status": "PASS"
+    },
+    "A09": {
+      "id": "A09:2021",
+      "name": "Ghi Nhật Ký Kiểm Toán & Giám Sát",
+      "description": "Đảm bảo mọi thao tác thêm/sửa/xóa/khóa dữ liệu đều được lưu vết đầy đủ trong Audit Logs.",
+      "score": 100.0,
+      "findings_count": 0,
+      "status": "PASS"
+    },
+    "A10": {
+      "id": "A10:2021",
+      "name": "Chống Duyệt Thư Mục & Giả Mạo Yêu Cầu",
+      "description": "Ngăn chặn Path Traversal khi đọc/tải tệp báo cáo và giả mạo yêu cầu chéo trang (CSRF).",
+      "score": 100.0,
+      "findings_count": 0,
+      "status": "PASS"
+    }
+  },
+  "findings": [],
+  "database_audit": {
+    "foreign_keys_enabled": false,
+    "integrity_check_passed": true,
+    "db_size_kb": 1124.0,
+    "tables_count": 18
+  },
+  "endpoint_matrix": [
+    {
+      "path": "/dashboard",
+      "name": "Executive Dashboard",
+      "category": "Dashboard",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/dashboard?fy=2026",
+      "name": "Dashboard Năm Tài Chính 2026",
+      "category": "Dashboard",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/dashboard?fy=2025",
+      "name": "Dashboard Năm Tài Chính 2025",
+      "category": "Dashboard",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/audit-logs",
+      "name": "Nhật Ký Kiểm Toán Hệ Thống",
+      "category": "Audit",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/",
+      "name": "Danh Sách Hóa Đơn",
+      "category": "Invoices",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/?month=2026-06",
+      "name": "Lọc Hóa Đơn Theo Tháng",
+      "category": "Invoices",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/invoice?id=1",
+      "name": "Chi Tiết Hóa Đơn",
+      "category": "Invoices",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/invoice/new",
+      "name": "Form Tạo Mới Hóa Đơn",
+      "category": "Invoices",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/edit-invoice?id=1",
+      "name": "Form Chỉnh Sửa Hóa Đơn",
+      "category": "Invoices",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/raw?id=1",
+      "name": "Dữ Liệu Thô Hóa Đơn",
+      "category": "Invoices",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/vendors",
+      "name": "Danh Sách Nhà Cung Cấp",
+      "category": "Vendors",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/vendor/new",
+      "name": "Form Tạo Mới Nhà Cung Cấp",
+      "category": "Vendors",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/vendor/edit?id=1",
+      "name": "Form Sửa Nhà Cung Cấp",
+      "category": "Vendors",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/contracts",
+      "name": "Danh Sách Hợp Đồng",
+      "category": "Contracts",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/contracts?status=active",
+      "name": "Lọc Hợp Đồng Hiệu Lực",
+      "category": "Contracts",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/contracts/references",
+      "name": "Bảng Tham Chiếu Chi Phí",
+      "category": "Contracts",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/contract/new",
+      "name": "Form Tạo Mới Hợp Đồng",
+      "category": "Contracts",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/contract/edit?id=1",
+      "name": "Form Sửa Hợp Đồng",
+      "category": "Contracts",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/contract/assign-staff?contract_id=1",
+      "name": "Gán Nhân Sự Vào Hợp Đồng",
+      "category": "Contracts",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/contract/edit-staff-link?id=1",
+      "name": "Sửa Phân Bổ Nhân Sự",
+      "category": "Contracts",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/annex/new?contract_id=1",
+      "name": "Form Tạo Mới Phụ Lục",
+      "category": "Contracts",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/annex/edit?id=1",
+      "name": "Form Sửa Phụ Lục",
+      "category": "Contracts",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/staff",
+      "name": "Danh Sách Nhân Sự & Phép",
+      "category": "Staff",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/staff/new",
+      "name": "Form Thêm Mới Nhân Sự",
+      "category": "Staff",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/staff/edit?id=1",
+      "name": "Form Sửa Nhân Sự",
+      "category": "Staff",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/staff/shifts",
+      "name": "Cấu Hình Ca Làm Việc & Phụ Cấp",
+      "category": "Staff",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/attendance",
+      "name": "Ma Trận Chấm Công Hàng Ngày",
+      "category": "Attendance",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/attendance/monthly",
+      "name": "Bảng Tổng Hợp Công Tháng",
+      "category": "Attendance",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/attendance/timesheet",
+      "name": "Xem Bảng Timesheet",
+      "category": "Attendance",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/attendance/acceptance",
+      "name": "Nghiệm Thu Dịch Vụ Vendor",
+      "category": "Attendance",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/attendance/punctuality",
+      "name": "Báo Cáo Chuyên Cần & Đi Muộn",
+      "category": "Attendance",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/payments",
+      "name": "Tổng Quan Thanh Toán",
+      "category": "Payments",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/payments/dashboard",
+      "name": "Dashboard Thanh Toán",
+      "category": "Payments",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/payments/fixed-price",
+      "name": "Thanh Toán Hợp Đồng Trọn Gói",
+      "category": "Payments",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/payments/recurring",
+      "name": "Thanh Toán Định Kỳ Hàng Tháng",
+      "category": "Payments",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/attendance/payout",
+      "name": "Chi Trả Thu Nhập Chấm Công",
+      "category": "Payments",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/projects",
+      "name": "Danh Mục Dự Án",
+      "category": "Projects",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/projects/assign",
+      "name": "Ma Trận Phân Bổ Dự Án",
+      "category": "Projects",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/project/edit?id=1",
+      "name": "Form Sửa Dự Án",
+      "category": "Projects",
+      "status": "PASS",
+      "headers_passed": true,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/api/projects/available-staff?month=2026-06",
+      "name": "API Nhân Sự Khả Dụng",
+      "category": "Projects",
+      "status": "WARNING",
+      "headers_passed": false,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/performance/report",
+      "name": "Trình Xem Báo Cáo Hiệu Năng",
+      "category": "Reports",
+      "status": "WARNING",
+      "headers_passed": false,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    },
+    {
+      "path": "/static/js/chart.umd.min.js",
+      "name": "Thư Viện Đồ Thị Chart.js",
+      "category": "Static",
+      "status": "WARNING",
+      "headers_passed": false,
+      "sqli_passed": true,
+      "xss_passed": true,
+      "traceback_passed": true,
+      "idor_passed": true
+    }
+  ]
+}

@@ -27,6 +27,7 @@ from security.config import (
     SEVERITY_INFO,
     SEVERITY_DEDUCTIONS,
     SECURITY_GRADES,
+    GATEKEEPER_THRESHOLDS,
 )
 from security.rules import Finding, RULES_METADATA
 
@@ -43,6 +44,10 @@ class ScanResult:
     total_checks_failed: int
     security_score: float
     security_grade: str
+    code_hygiene_score: float = 100.0
+    architecture_score: float = 0.0
+    gatekeeper_status: str = "PASSED"
+    gatekeeper_reason: str = ""
     findings: List[Finding] = field(default_factory=list)
     findings_by_severity: Dict[str, int] = field(default_factory=dict)
     owasp_compliance: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -113,6 +118,9 @@ class SecurityScannerEngine:
 
         # Audit logging verification in server.py
         self._audit_logging_compliance()
+
+        # Architectural security verification (OWASP ASVS v4.0: Auth, RBAC, CSRF, Session, RateLimit, TLS)
+        self._audit_architectural_controls()
 
         self.log(f"  ✅ Đã phân tích tĩnh {len(py_files)} tệp mã nguồn cốt lõi.")
         return len(py_files)
@@ -266,6 +274,139 @@ class SecurityScannerEngine:
                         remediation=f"Bổ sung lời gọi log_audit(action='DELETE', entity=..., entity_id=..., details=...) trong khối xử lý của {route}."
                     )
                     self.record_check(False)
+
+    def _audit_architectural_controls(self):
+        """
+        Audits core architectural security requirements according to OWASP ASVS v4.0:
+        1. Authentication Gateway (ASVS V1.4, V2.1)
+        2. Role-Based Access Control / Segregation of Duties (ASVS V4.1)
+        3. Anti-CSRF Token on state mutations (ASVS V4.2)
+        4. Session & Cookie Management (ASVS V3.1 - V3.4)
+        5. Request Rate Limiting / Abuse Prevention (ASVS V1.11)
+        6. Transport Layer Security (HTTPS/HSTS) (ASVS V9.1, V9.2)
+        """
+        self.log("🛡️ Đang kiểm định các rào chắn kiến trúc an ninh cốt lõi (OWASP ASVS v4.0)...")
+        server_path = BASE_DIR / "server.py"
+        server_code = server_path.read_text(encoding="utf-8", errors="ignore") if server_path.exists() else ""
+        common_path = BASE_DIR / "common.py"
+        common_code = common_path.read_text(encoding="utf-8", errors="ignore") if common_path.exists() else ""
+
+        # 1. AUTHENTICATION GATEWAY (OWASP A01:2021 / A07:2021 & ASVS V2)
+        has_auth = any(
+            k in server_code
+            for k in ("login_required", "require_auth", "check_auth", "session_user", "get_current_user", "is_authenticated")
+        )
+        if not has_auth:
+            self.add_finding(
+                rule_id="SEC-11-AUTH-GATEWAY",
+                title="Hệ thống hoàn toàn thiếu cổng Xác thực người dùng (Missing Authentication Gateway)",
+                category_id="A01",
+                severity=SEVERITY_CRITICAL,
+                component="server.py (Toàn bộ 42 Endpoints)",
+                description="Theo chuẩn OWASP A01:2021 & ASVS V1.4, V2.1: Mọi endpoint nhạy cảm (quản lý hợp đồng, hóa đơn, thanh toán, nhân sự, nhật ký kiểm toán) đều mở tự do cho bất kỳ ai kết nối mạng nội bộ mà không yêu cầu đăng nhập hay xác thực danh tính.",
+                evidence="Toàn bộ request gửi tới /contracts, /invoices, /dashboard, /audit-logs đều được xử lý trực tiếp không qua kiểm tra phiên/token xác thực.",
+                remediation="Thiết lập cổng xác thực tập trung (Authentication Middleware / Login Gateway) tại server.py. Bắt buộc kiểm tra session cookie hợp lệ hoặc chuyển hướng sang /login trước khi cho phép vào các trang nghiệp vụ."
+            )
+            self.record_check(False)
+        else:
+            self.record_check(True)
+
+        # 2. ROLE-BASED ACCESS CONTROL (OWASP A01:2021 & ASVS V4)
+        has_rbac = any(
+            k in server_code
+            for k in ("check_permission", "user_role", "require_role", "has_permission", "ROLE_ADMIN", "user['role']")
+        )
+        if not has_rbac:
+            self.add_finding(
+                rule_id="SEC-12-RBAC-CONTROL",
+                title="Thiếu phân quyền theo vai trò người dùng (Missing Role-Based Access Control - RBAC)",
+                category_id="A01",
+                severity=SEVERITY_HIGH,
+                component="server.py (Toàn bộ thao tác CRUD)",
+                description="Theo chuẩn OWASP A01:2021 & ASVS V4.1: Hệ thống chưa thực thi phân tách nhiệm vụ (Segregation of Duties). Bất kỳ người dùng nào truy cập cũng đều có toàn quyền thực hiện các thao tác xóa hóa đơn, hủy hợp đồng, sửa đơn giá nhân sự.",
+                evidence="Không tìm thấy bảng quản lý vai trò (Roles/Permissions) hoặc lệnh kiểm tra quyền người dùng trong các route xử lý.",
+                remediation="Xây dựng ma trận phân quyền (Admin, Project Manager, Accountant, Staff, Viewer) và áp dụng nguyên tắc đặc quyền tối thiểu (Least Privilege) trước các thao tác thay đổi dữ liệu."
+            )
+            self.record_check(False)
+        else:
+            self.record_check(True)
+
+        # 3. ANTI-CSRF TOKEN DEFENSE (OWASP A01:2021 / A10:2021 & ASVS V4.2)
+        has_csrf_token = any(
+            k in server_code
+            for k in ("csrf_token", "verify_csrf", "validate_csrf", "check_csrf")
+        )
+        if not has_csrf_token:
+            self.add_finding(
+                rule_id="SEC-13-CSRF-TOKEN",
+                title="Biểu mẫu POST thiếu token chống giả mạo yêu cầu chéo trang (Missing Anti-CSRF Token)",
+                category_id="A10",
+                severity=SEVERITY_HIGH,
+                component="server.py & Form POST Handlers",
+                description="Theo chuẩn OWASP A01:2021, A10:2021 & ASVS V4.2: Dù hệ thống đã bắt buộc phương thức POST cho các hành động thay đổi dữ liệu, nhưng các biểu mẫu chưa có Anti-CSRF Token hoặc cơ chế xác thực Origin nghiêm ngặt, có nguy cơ bị lừa thực thi thao tác ngoài ý muốn.",
+                evidence="Các form POST trong invoices.py, contracts.py, attendance.py không chứa trường ẩn csrf_token và không xác thực token khi nhận request.",
+                remediation="Bổ sung cơ chế sinh token CSRF ngẫu nhiên lưu trong phiên làm việc, kèm trường ẩn <input type='hidden' name='csrf_token' value='...'> trong mọi biểu mẫu POST và kiểm tra token tại máy chủ."
+            )
+            self.record_check(False)
+        else:
+            self.record_check(True)
+
+        # 4. SESSION & COOKIE HYGIENE (OWASP A07:2021 & ASVS V3)
+        has_session_mgmt = any(
+            k in (server_code + common_code)
+            for k in ("session_id", "Set-Cookie", "sessions[", "session_store")
+        )
+        if not has_session_mgmt:
+            self.add_finding(
+                rule_id="SEC-14-SESSION-HYGIENE",
+                title="Chưa có cơ chế quản lý phiên làm việc & thuộc tính Cookie an toàn (Missing Session Management)",
+                category_id="A07",
+                severity=SEVERITY_MEDIUM,
+                component="server.py / common.py",
+                description="Theo chuẩn OWASP A07:2021 & ASVS V3.1 - V3.4: Ứng dụng chưa có phiên làm việc có định danh an toàn (Session ID), thiếu các cờ bảo vệ cookie HttpOnly, SameSite=Lax/Strict, Secure và chính sách thu hồi phiên (Inactivity Timeout).",
+                evidence="Máy chủ không phát hành tiêu đề Set-Cookie với cờ bảo mật HttpOnly và SameSite.",
+                remediation="Triển khai kho lưu trữ phiên làm việc (Session Store) với ID ngẫu nhiên khó đoán (cryptographically secure), gắn cờ HttpOnly; SameSite=Lax; Secure và thiết lập thời gian hết hạn phiên làm việc."
+            )
+            self.record_check(False)
+        else:
+            self.record_check(True)
+
+        # 5. RATE LIMITING & ABUSE PREVENTION (OWASP A04:2021 & ASVS V1.11)
+        has_rate_limit = any(
+            k in (server_code + common_code)
+            for k in ("rate_limit", "limiter", "rate_limiter", "request_counter")
+        )
+        if not has_rate_limit:
+            self.add_finding(
+                rule_id="SEC-15-RATE-LIMITING",
+                title="Thiếu cơ chế giới hạn tần suất yêu cầu chống lạm dụng tải (Missing Rate Limiting)",
+                category_id="A04",
+                severity=SEVERITY_MEDIUM,
+                component="server.py (Toàn bộ Endpoints)",
+                description="Theo chuẩn OWASP A04:2021 & ASVS V1.11: Chưa có cơ chế giới hạn tần suất yêu cầu (Rate Limiting) trên các endpoint tải tệp XML hóa đơn hoặc xuất báo cáo tài chính nặng, có nguy cơ bị tấn công làm cạn kiệt tài nguyên máy chủ.",
+                evidence="Không tìm thấy cấu hình giới hạn số lượng yêu cầu theo địa chỉ IP hoặc Token trong server.py.",
+                remediation="Tích hợp middleware Rate Limiting theo thuật toán Token Bucket hoặc Sliding Window (ví dụ: tối đa 60 requests/phút đối với người dùng thông thường)."
+            )
+            self.record_check(False)
+        else:
+            self.record_check(True)
+
+        # 6. TRANSPORT LAYER SECURITY & HSTS (OWASP A02:2021 & ASVS V9)
+        has_hsts = "strict-transport-security" in (server_code + common_code).lower()
+        if not has_hsts:
+            self.add_finding(
+                rule_id="SEC-16-TRANSPORT-SECURITY",
+                title="Thiếu tiêu đề bảo mật kênh truyền HSTS (Missing Strict-Transport-Security Header)",
+                category_id="A02",
+                severity=SEVERITY_MEDIUM,
+                component="common.py / server.py",
+                description="Theo chuẩn OWASP A02:2021 & ASVS V9.1, V9.2: Dữ liệu tài chính, thuế và chi phí nhân sự chưa được ràng buộc giao thức bảo mật HTTPS/TLS thông qua tiêu đề HSTS, tiềm ẩn nguy cơ bị nghe lén (Eavesdropping/MitM) trên mạng nội bộ.",
+                evidence="Tiêu đề phản hồi HTTP không chứa 'Strict-Transport-Security: max-age=...'",
+                remediation="Cấu hình máy chủ reverse proxy (Nginx) hoặc HTTP handler bổ sung tiêu đề 'Strict-Transport-Security: max-age=31536000; includeSubDomains' khi triển khai môi trường sản xuất."
+            )
+            self.record_check(False)
+        else:
+            self.record_check(True)
 
     # =========================================================================
     # 2. DYNAMIC ENDPOINT SECURITY ANALYSIS (100% of 40 Endpoints)
@@ -657,7 +798,7 @@ class SecurityScannerEngine:
         # 3. Database audit
         db_audit = self.audit_database()
 
-        # 4. Calculate score
+        # 4. Calculate score with Dual-Pillar & Gatekeeper Model
         findings_by_sev = {
             SEVERITY_CRITICAL: 0,
             SEVERITY_HIGH: 0,
@@ -671,8 +812,56 @@ class SecurityScannerEngine:
             findings_by_sev[f.severity] = findings_by_sev.get(f.severity, 0) + 1
             total_deduction += SEVERITY_DEDUCTIONS.get(f.severity, 0.0)
 
+        # Trụ cột 1: Điểm vệ sinh mã nguồn (Code Hygiene Score)
+        # Đo lường chất lượng mã nguồn thực tế: SQL tham số hóa, phòng chống XSS, path traversal, security headers, logging
+        arch_rule_ids = {
+            "SEC-11-AUTH-GATEWAY",
+            "SEC-12-RBAC-CONTROL",
+            "SEC-13-CSRF-TOKEN",
+            "SEC-14-SESSION-HYGIENE",
+            "SEC-15-RATE-LIMITING",
+            "SEC-16-TRANSPORT-SECURITY",
+        }
+        code_findings = [f for f in self.findings if f.rule_id not in arch_rule_ids]
+        code_deduction = sum(SEVERITY_DEDUCTIONS.get(f.severity, 0.0) for f in code_findings)
+        code_hygiene_score = max(0.0, round(100.0 - code_deduction, 1))
+
+        # Trụ cột 2: Điểm rào chắn kiến trúc (Architectural Controls Score)
+        # Đo lường sự sẵn sàng theo chuẩn OWASP ASVS v4.0: Cổng Auth, RBAC, CSRF, Session, Rate Limit, TLS
+        arch_findings = [f for f in self.findings if f.rule_id in arch_rule_ids]
+        arch_deduction = sum(SEVERITY_DEDUCTIONS.get(f.severity, 0.0) for f in arch_findings)
+        architecture_score = max(0.0, round(100.0 - arch_deduction, 1))
+
+        # Điểm gộp thuần túy (Raw Combined Score)
         raw_score = max(0.0, 100.0 - total_deduction)
-        security_score = round(raw_score, 1)
+
+        # Nguyên tắc Cổng An Ninh Thực Tế (Security Gatekeeper - NIST SP 800-115 & OWASP ASVS v4.0)
+        gatekeeper_status = "PASSED"
+        gatekeeper_reason = "Tất cả các cổng kiểm soát an ninh cốt lõi đều đạt chuẩn."
+        capped_score = raw_score
+
+        if findings_by_sev[SEVERITY_CRITICAL] > 0:
+            capped_score = min(raw_score, GATEKEEPER_THRESHOLDS["CRITICAL_CAP"])
+            gatekeeper_status = "BLOCKED_CRITICAL"
+            gatekeeper_reason = (
+                f"BỊ CHẶN BỞI CỔNG AN NINH CỐT LÕI (OWASP ASVS v4.0): "
+                f"Hệ thống phát hiện {findings_by_sev[SEVERITY_CRITICAL]} lỗ hổng NGHIÊM TRỌNG "
+                f"(hoàn toàn chưa có cổng Xác thực Authentication Gateway). "
+                f"Điểm số an ninh thực tế bị khóa trần tại {GATEKEEPER_THRESHOLDS['CRITICAL_CAP']}/100.0 (Hạng F - Kém / Nguy cơ cao)."
+            )
+        elif findings_by_sev[SEVERITY_HIGH] > 0:
+            capped_score = min(raw_score, GATEKEEPER_THRESHOLDS["HIGH_CAP"])
+            gatekeeper_status = "BLOCKED_HIGH"
+            gatekeeper_reason = (
+                f"CẢNH BÁO CỔNG AN NINH: Hệ thống còn {findings_by_sev[SEVERITY_HIGH]} phát hiện mức CAO "
+                f"(thiếu phân quyền RBAC và token CSRF). Điểm số bị giới hạn tối đa tại {GATEKEEPER_THRESHOLDS['HIGH_CAP']}/100.0."
+            )
+        elif findings_by_sev[SEVERITY_MEDIUM] > 0:
+            capped_score = min(raw_score, GATEKEEPER_THRESHOLDS["MEDIUM_CAP"])
+            gatekeeper_status = "PASSED_WITH_WARNING"
+            gatekeeper_reason = f"Đạt yêu cầu cơ bản nhưng cần hoàn thiện {findings_by_sev[SEVERITY_MEDIUM]} khuyến nghị mức Trung bình."
+
+        security_score = round(capped_score, 1)
 
         # Grade
         security_grade = "F (Kém - Nguy cơ rủi ro cao)"
@@ -691,6 +880,8 @@ class SecurityScannerEngine:
 
             cat_deduction = (crit_count * 30.0) + (high_count * 15.0) + (med_count * 5.0)
             cat_score = max(0.0, round(100.0 - cat_deduction, 1))
+            if crit_count > 0:
+                cat_score = min(cat_score, 40.0)
 
             owasp_compliance[cat_id] = {
                 "id": cat_info["id"],
@@ -706,7 +897,11 @@ class SecurityScannerEngine:
 
         self.log("=" * 70)
         self.log(f"🏁 HOÀN TẤT KIỂM ĐỊNH BẢO MẬT TRONG {duration_sec} GIÂY")
-        self.log(f"Điểm số an ninh: {security_score}/100.0 | Xếp hạng: {security_grade}")
+        self.log(f"Điểm số an ninh thực tế: {security_score}/100.0 | Xếp hạng: {security_grade}")
+        self.log(f"Điểm vệ sinh mã nguồn: {code_hygiene_score}/100.0 | Điểm rào chắn kiến trúc: {architecture_score}/100.0")
+        if gatekeeper_status != "PASSED":
+            self.log(f"🚨 TRẠNG THÁI CỔNG AN NINH: {gatekeeper_status}")
+            self.log(f"   Lý do: {gatekeeper_reason}")
         self.log(f"Tổng số kiểm tra: {self.total_checks_run} (Đạt: {self.total_checks_passed}, Cảnh báo/Lỗi: {self.total_checks_failed})")
         self.log(f"Phát hiện: {findings_by_sev[SEVERITY_CRITICAL]} Nghiêm trọng, {findings_by_sev[SEVERITY_HIGH]} Cao, {findings_by_sev[SEVERITY_MEDIUM]} Trung bình, {findings_by_sev[SEVERITY_LOW]} Thấp")
 
@@ -721,6 +916,10 @@ class SecurityScannerEngine:
             total_checks_failed=self.total_checks_failed,
             security_score=security_score,
             security_grade=security_grade,
+            code_hygiene_score=code_hygiene_score,
+            architecture_score=architecture_score,
+            gatekeeper_status=gatekeeper_status,
+            gatekeeper_reason=gatekeeper_reason,
             findings=self.findings,
             findings_by_severity=findings_by_sev,
             owasp_compliance=owasp_compliance,

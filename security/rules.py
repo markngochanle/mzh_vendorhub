@@ -89,4 +89,40 @@ RULES_METADATA = {
         "description": "Kiểm tra phản ứng của hệ thống khi truy cập các ID không tồn tại, ID âm hoặc giá trị biên cực đại để đảm bảo trả về mã trạng thái hợp lý (400/404) thay vì lỗi máy chủ 500.",
         "default_severity": SEVERITY_LOW,
     },
+    "SEC-11-AUTH-GATEWAY": {
+        "name": "Cổng Xác Thực & Kiểm Soát Truy Cập Điểm Cuối (Authentication Gateway & Endpoint Protection)",
+        "category": "A01",
+        "description": "Theo chuẩn OWASP A01:2021 & ASVS V1.4, V2.1: Mọi endpoint nhạy cảm (quản lý hợp đồng, hóa đơn, thanh toán, nhân sự) bắt buộc phải được bảo vệ bởi cổng xác thực (Authentication). Việc hệ thống mở tự do cho mọi truy cập không xác thực là rủi ro nghiêm trọng nhất.",
+        "default_severity": SEVERITY_CRITICAL,
+    },
+    "SEC-12-RBAC-CONTROL": {
+        "name": "Phân Quyền Theo Vai Trò & Tối Thiểu Đặc Quyền (Role-Based Access Control - RBAC)",
+        "category": "A01",
+        "description": "Theo chuẩn OWASP A01:2021 & ASVS V4.1: Hệ thống phải thực thi phân tách nhiệm vụ (Segregation of Duties) giữa các vai trò (Admin, Project Manager, Accountant, Staff, Viewer). Không cho phép mọi người dùng ẩn danh đều có toàn quyền thực hiện các thao tác phá hủy (xóa/hủy/khóa).",
+        "default_severity": SEVERITY_HIGH,
+    },
+    "SEC-13-CSRF-TOKEN": {
+        "name": "Bảo Vệ Biểu Mẫu Thay Đổi Dữ Liệu Chống Tấn Công CSRF (Anti-CSRF Token Defense)",
+        "category": "A10",
+        "description": "Theo chuẩn OWASP A01:2021, A10:2021 & ASVS V4.2: Các biểu mẫu POST làm thay đổi trạng thái bản ghi bắt buộc phải kèm Anti-CSRF Token hoặc kiểm tra SameSite Cookie + Origin Header để ngăn ngừa tấn công giả mạo yêu cầu từ trang ngoài.",
+        "default_severity": SEVERITY_HIGH,
+    },
+    "SEC-14-SESSION-HYGIENE": {
+        "name": "Quản Lý Phiên Làm Việc & Thuộc Tính Cookie (Session & Cookie Hygiene)",
+        "category": "A07",
+        "description": "Theo chuẩn OWASP A07:2021 & ASVS V3.1 - V3.4: Kiểm tra cơ chế quản lý phiên làm việc tập trung, cờ bảo mật cookie (HttpOnly, SameSite=Lax/Strict, Secure) và chính sách hết hạn phiên làm việc (Session Inactivity Timeout).",
+        "default_severity": SEVERITY_MEDIUM,
+    },
+    "SEC-15-RATE-LIMITING": {
+        "name": "Giới Hạn Tần Suất Yêu Cầu & Chống Lạm Dụng (Rate Limiting & Abuse Prevention)",
+        "category": "A04",
+        "description": "Theo chuẩn OWASP A04:2021 & ASVS V1.11: Kiểm tra cơ chế giới hạn tần suất yêu cầu (Rate Limiting) trên các endpoint nhạy cảm (tải file XML, tra cứu báo cáo tài chính nặng) để ngăn ngừa tấn công từ chối dịch vụ hoặc cào dữ liệu hàng loạt.",
+        "default_severity": SEVERITY_MEDIUM,
+    },
+    "SEC-16-TRANSPORT-SECURITY": {
+        "name": "An Toàn Kênh Truyền Thông Tin Nhạy Cảm (Transport Layer Security - TLS & HSTS)",
+        "category": "A02",
+        "description": "Theo chuẩn OWASP A02:2021 & ASVS V9.1, V9.2: Dữ liệu tài chính, lương nhân sự và thuế phải được truyền tải trên giao thức bảo mật HTTPS/TLS kèm theo tiêu đề Strict-Transport-Security (HSTS).",
+        "default_severity": SEVERITY_MEDIUM,
+    },
 }

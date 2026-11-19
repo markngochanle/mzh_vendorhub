@@ -35,6 +35,14 @@ SEVERITY_DEDUCTIONS = {
     SEVERITY_INFO: 0.0,
 }
 
+# Tiêu chuẩn Cổng An Ninh Thực Tế (Security Gatekeeper - NIST SP 800-115 & OWASP ASVS v4.0)
+# Nếu hệ thống tồn tại lỗ hổng cốt lõi, điểm số tối đa bị khóa trần (Cap) không thể vượt qua ngưỡng rủi ro
+GATEKEEPER_THRESHOLDS = {
+    "CRITICAL_CAP": 40.0,  # Còn lỗi Nghiêm Trọng (ví dụ: Không có Xác thực): Điểm tối đa 40.0 (Hạng F)
+    "HIGH_CAP": 65.0,      # Còn lỗi Cao (ví dụ: Thiếu RBAC, Thiếu CSRF Token): Điểm tối đa 65.0 (Hạng C)
+    "MEDIUM_CAP": 82.0,    # Còn lỗi Trung bình (ví dụ: Thiếu Session Hygiene, Rate Limit): Điểm tối đa 82.0 (Hạng B)
+}
+
 # Thang điểm đánh giá xếp hạng an ninh
 SECURITY_GRADES = [
     (95.0, "A+ (Xuất sắc - Bảo mật tối ưu)"),
@@ -44,57 +52,57 @@ SECURITY_GRADES = [
     (0.0, "F (Kém - Nguy cơ rủi ro cao)"),
 ]
 
-# 10 Hạng mục tiêu chuẩn an ninh ứng dụng web (OWASP Top 10:2021)
+# 10 Hạng mục tiêu chuẩn an ninh ứng dụng web (OWASP Top 10:2021 & OWASP ASVS 4.0)
 OWASP_CATEGORIES = {
     "A01": {
         "id": "A01:2021",
-        "name": "Kiểm Soát Truy Cập & Phân Quyền",
-        "description": "Ngăn chặn truy cập trái phép, leo thang đặc quyền (IDOR) và thực thi sai phương thức HTTP.",
+        "name": "Kiểm Soát Truy Cập & Phân Quyền (Access Control & RBAC)",
+        "description": "Yêu cầu cổng xác thực người dùng, ma trận phân quyền (RBAC), tối thiểu đặc quyền và chống IDOR.",
     },
     "A02": {
         "id": "A02:2021",
-        "name": "Mã Hóa & Bảo Vệ Dữ Liệu Nhạy Cảm",
-        "description": "Bảo vệ thông tin cá nhân, hạn mức tài chính và ngăn lộ mật khẩu/bí mật trong mã nguồn.",
+        "name": "Mã Hóa & An Toàn Kênh Truyền (Cryptographic Failures)",
+        "description": "Bảo vệ thông tin cá nhân/tài chính, mã hóa kênh truyền (HTTPS/HSTS) và ngăn lộ bí mật/mật khẩu trong code.",
     },
     "A03": {
         "id": "A03:2021",
-        "name": "Chống Chèn Mã Độc (Injection)",
+        "name": "Chống Chèn Mã Độc (Injection - SQLi/XSS)",
         "description": "Ngăn chặn các cuộc tấn công SQL Injection và ép kiểu tham số an toàn trong truy vấn CSDL.",
     },
     "A04": {
         "id": "A04:2021",
-        "name": "Thiết Kế An Toàn & Ràng Buộc Nghiệp Vụ",
-        "description": "Kiểm soát tính toàn vẹn của logic nghiệp vụ, đối soát dữ liệu và xử lý giá trị biên.",
+        "name": "Thiết Kế An Toàn & Chống Lạm Dụng (Insecure Design & Rate Limiting)",
+        "description": "Kiểm soát tính toàn vẹn nghiệp vụ, cơ chế giới hạn tần suất yêu cầu (Rate Limiting) và xử lý ngoại lệ.",
     },
     "A05": {
         "id": "A05:2021",
-        "name": "Cấu Hình Bảo Mật & HTTP Headers",
+        "name": "Cấu Hình Bảo Mật & HTTP Headers (Security Misconfiguration)",
         "description": "Kiểm tra cấu hình máy chủ, các tiêu đề bảo vệ trình duyệt (X-Frame, X-Content-Type, CSP, Referrer).",
     },
     "A06": {
         "id": "A06:2021",
-        "name": "Thành Phần Phần Mềm & Thư Viện",
+        "name": "Thành Phần Phần Mềm & Thư Viện (Vulnerable Components)",
         "description": "Kiểm tra phiên bản thư viện nội bộ (Chart.js), tài nguyên tĩnh và phụ thuộc không an toàn.",
     },
     "A07": {
         "id": "A07:2021",
-        "name": "Xác Thực & Quản Lý Định Danh",
-        "description": "Kiểm tra phiên làm việc, cookie bảo mật và kiểm soát truy cập trang quản trị.",
+        "name": "Xác Thực & Quản Lý Phiên (Identification & Authentication)",
+        "description": "Kiểm tra cơ chế đăng nhập, quản lý phiên làm việc, cookie bảo mật (HttpOnly, SameSite) và hết hạn phiên.",
     },
     "A08": {
         "id": "A08:2021",
-        "name": "Toàn Vẹn Dữ Liệu & Mã Nguồn",
+        "name": "Toàn Vẹn Dữ Liệu & Mã Nguồn (Software & Data Integrity)",
         "description": "Ngăn ngừa giải tuần tự hóa độc hại (deserialization), chèn mã động (eval/exec).",
     },
     "A09": {
         "id": "A09:2021",
-        "name": "Ghi Nhật Ký Kiểm Toán & Giám Sát",
+        "name": "Ghi Nhật Ký Kiểm Toán & Giám Sát (Security Logging & Monitoring)",
         "description": "Đảm bảo mọi thao tác thêm/sửa/xóa/khóa dữ liệu đều được lưu vết đầy đủ trong Audit Logs.",
     },
     "A10": {
         "id": "A10:2021",
-        "name": "Chống Duyệt Thư Mục & Giả Mạo Yêu Cầu",
-        "description": "Ngăn chặn Path Traversal khi đọc/tải tệp báo cáo và giả mạo yêu cầu chéo trang (CSRF).",
+        "name": "Giả Mạo Yêu Cầu & Duyệt Tệp (SSRF, CSRF & Path Traversal)",
+        "description": "Bảo vệ chống tấn công CSRF trên các form POST và ngăn chặn Path Traversal khi tải tệp.",
     },
 }
 

@@ -45,6 +45,10 @@ class SecurityReporter:
                 "profile": r.profile_name,
                 "security_score": r.security_score,
                 "security_grade": r.security_grade,
+                "code_hygiene_score": getattr(r, "code_hygiene_score", 100.0),
+                "architecture_score": getattr(r, "architecture_score", 0.0),
+                "gatekeeper_status": getattr(r, "gatekeeper_status", "PASSED"),
+                "gatekeeper_reason": getattr(r, "gatekeeper_reason", ""),
                 "total_endpoints_scanned": r.total_endpoints_scanned,
                 "total_files_analyzed": r.total_files_analyzed,
             },
@@ -103,6 +107,49 @@ class SecurityReporter:
         else:
             score_color = "#dc2626"
             score_bg = "#fee2e2"
+
+        # Gatekeeper alert banner
+        gatekeeper_html = ""
+        gk_status = getattr(r, "gatekeeper_status", "PASSED")
+        gk_reason = getattr(r, "gatekeeper_reason", "")
+        code_score = getattr(r, "code_hygiene_score", 100.0)
+        arch_score = getattr(r, "architecture_score", 0.0)
+
+        if gk_status == "BLOCKED_CRITICAL":
+            gatekeeper_html = f"""
+            <div style="background: #fef2f2; border: 2px solid #ef4444; border-radius: 8px; padding: 18px 24px; margin-bottom: 24px; box-shadow: 0 4px 6px -1px rgba(220,38,38,0.1);">
+              <div style="display: flex; align-items: flex-start; gap: 14px;">
+                <span style="font-size: 32px; line-height: 1;">🚨</span>
+                <div>
+                  <div style="font-size: 16px; font-weight: 800; color: #991b1b; margin-bottom: 6px; letter-spacing: -0.3px;">
+                    CẢNH BÁO CỔNG AN NINH CỐT LÕI (SECURITY GATEKEEPER - OWASP ASVS v4.0)
+                  </div>
+                  <div style="font-size: 13px; color: #7f1d1d; line-height: 1.6;">
+                    {escape(gk_reason)}
+                  </div>
+                  <div style="margin-top: 10px; font-size: 12px; color: #b91c1c; font-weight: 600; background: #fee2e2; padding: 6px 12px; border-radius: 4px; display: inline-block;">
+                    ⚠️ Theo chuẩn kiểm toán quốc tế (OWASP ASVS / NIST SP 800-115), một hệ thống thiếu lớp Xác thực (Auth Gateway) và Phân quyền (RBAC) không thể được xếp hạng An toàn dù mã nguồn đã sạch lỗi SQLi và Headers.
+                  </div>
+                </div>
+              </div>
+            </div>
+            """
+        elif gk_status == "BLOCKED_HIGH":
+            gatekeeper_html = f"""
+            <div style="background: #fffbeb; border: 2px solid #f59e0b; border-radius: 8px; padding: 18px 24px; margin-bottom: 24px;">
+              <div style="display: flex; align-items: flex-start; gap: 14px;">
+                <span style="font-size: 32px; line-height: 1;">⚠️</span>
+                <div>
+                  <div style="font-size: 16px; font-weight: 800; color: #92400e; margin-bottom: 6px;">
+                    CẢNH BÁO CỔNG AN NINH: THIẾU RÀO CHẮN BẢO VỆ PHÂN QUYỀN
+                  </div>
+                  <div style="font-size: 13px; color: #78350f; line-height: 1.6;">
+                    {escape(gk_reason)}
+                  </div>
+                </div>
+              </div>
+            </div>
+            """
 
         # Findings table rows
         findings_rows = []
@@ -304,24 +351,27 @@ class SecurityReporter:
       </div>
     </div>
 
-    <!-- KPI Grid -->
+    <!-- Security Gatekeeper Alert (If Any Core Rule Failed) -->
+    {gatekeeper_html}
+
+    <!-- KPI Grid (Dual-Pillar Framework: Real Posture vs Code Hygiene vs Architecture) -->
     <div class="kpi-grid">
       <div class="kpi-card" style="border-left: 4px solid {score_color};">
-        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Điểm Số An Ninh</div>
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Điểm An Ninh Thực Tế (Capped)</div>
         <div class="kpi-val" style="color: {score_color};">{r.security_score} <span style="font-size: 16px; font-weight: normal; color: var(--text-muted);">/ 100.0</span></div>
-        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Xếp hạng: {r.security_grade}</div>
+        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">Xếp hạng: <strong>{r.security_grade}</strong></div>
       </div>
 
-      <div class="kpi-card" style="border-left: 4px solid var(--primary);">
-        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Tổng Số Hạng Mục Kiểm Định</div>
-        <div class="kpi-val" style="color: var(--primary);">{r.total_checks_run}</div>
-        <div style="font-size: 12px; color: #16a34a; margin-top: 4px;">Đạt: {r.total_checks_passed} ({pass_rate_pct}%) | Cần xử lý: {r.total_checks_failed}</div>
+      <div class="kpi-card" style="border-left: 4px solid #16a34a;">
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Điểm Vệ Sinh Mã Nguồn</div>
+        <div class="kpi-val" style="color: #16a34a;">{code_score} <span style="font-size: 16px; font-weight: normal; color: var(--text-muted);">/ 100.0</span></div>
+        <div style="font-size: 12px; color: #15803d; margin-top: 4px;">✅ Sạch SQLi, Headers, No Traceback, Log</div>
       </div>
 
-      <div class="kpi-card" style="border-left: 4px solid var(--primary-light);">
-        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Độ Bao Phủ Hệ Thống</div>
-        <div class="kpi-val" style="color: var(--primary-light);">100%</div>
-        <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">{r.total_endpoints_scanned} Endpoints | {r.total_files_analyzed} File nguồn Python</div>
+      <div class="kpi-card" style="border-left: 4px solid {'#dc2626' if arch_score < 60 else '#ca8a04'};">
+        <div style="font-size: 12px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Rào Chắn Kiến Trúc (ASVS)</div>
+        <div class="kpi-val" style="color: {'#dc2626' if arch_score < 60 else '#ca8a04'};">{arch_score} <span style="font-size: 16px; font-weight: normal; color: var(--text-muted);">/ 100.0</span></div>
+        <div style="font-size: 12px; color: {'#b91c1c' if arch_score < 60 else '#854d0e'}; margin-top: 4px;">🚨 Thiếu Auth Gateway, RBAC, CSRF</div>
       </div>
 
       <div class="kpi-card" style="border-left: 4px solid {SEVERITY_COLORS[SEVERITY_CRITICAL]['badge'] if crit > 0 else '#16a34a'};">
@@ -358,27 +408,34 @@ class SecurityReporter:
     <!-- Executive Recommendations -->
     <div class="card">
       <h3 style="margin: 0 0 14px 0; font-size: 16px; color: var(--primary);">
-        💡 Khuyến Nghị Tối Ưu Hóa & Gia Cố Bảo Mật Hệ Thống
+        💡 Lộ Trình Khắc Phục Rủi Ro Cốt Lõi Theo Tiêu Chuẩn Quốc Tế (OWASP ASVS v4.0)
       </h3>
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
+        <div style="background: #fef2f2; border: 1px solid #fecaca; border-left: 4px solid #dc2626; border-radius: 6px; padding: 14px;">
+          <div style="font-weight: 700; font-size: 14px; color: #991b1b; margin-bottom: 4px;">1. Xây dựng Cổng Xác Thực (Authentication Gateway)</div>
+          <div style="font-size: 12px; color: #7f1d1d;">
+            Tạo middleware kiểm tra phiên đăng nhập tại <code>server.py</code> trước khi định tuyến. Chuyển hướng toàn bộ người dùng chưa đăng nhập về <code>/login</code> để bảo vệ 42 endpoints dữ liệu tài chính/hợp đồng.
+          </div>
+        </div>
+
+        <div style="background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #ea580c; border-radius: 6px; padding: 14px;">
+          <div style="font-weight: 700; font-size: 14px; color: #9a3412; margin-bottom: 4px;">2. Thiết lập Ma Trận Phân Quyền (RBAC)</div>
+          <div style="font-size: 12px; color: #7c2d12;">
+            Phân tách nhiệm vụ (Segregation of Duties) rõ ràng: chỉ vai trò <code>ADMIN</code>/<code>MANAGER</code> mới được xóa hợp đồng hoặc đối tác, <code>ACCOUNTANT</code> phụ trách hóa đơn, hạn chế tối đa đặc quyền người dùng thông thường.
+          </div>
+        </div>
+
+        <div style="background: #fffbeb; border: 1px solid #fde68a; border-left: 4px solid #ca8a04; border-radius: 6px; padding: 14px;">
+          <div style="font-weight: 700; font-size: 14px; color: #854d0e; margin-bottom: 4px;">3. Bổ sung Anti-CSRF Token cho Form POST</div>
+          <div style="font-size: 12px; color: #713f12;">
+            Sinh chuỗi token ngẫu nhiên gắn vào session, chèn trường ẩn <code>&lt;input type="hidden" name="csrf_token"&gt;</code> vào các biểu mẫu thay đổi dữ liệu và xác thực tại máy chủ để chống tấn công giả mạo yêu cầu.
+          </div>
+        </div>
+
         <div style="background: #f8fafc; border: 1px solid var(--border); border-left: 4px solid #2563eb; border-radius: 6px; padding: 14px;">
-          <div style="font-weight: 700; font-size: 14px; color: #1e40af; margin-bottom: 4px;">1. Bổ sung các Header Bảo Mật HTTP</div>
+          <div style="font-weight: 700; font-size: 14px; color: #1e40af; margin-bottom: 4px;">4. Bảo Vệ Kênh Truyền (HTTPS & HSTS) & Phiên</div>
           <div style="font-size: 12px; color: var(--text-muted);">
-            Thêm <code>X-Content-Type-Options: nosniff</code> và <code>X-Frame-Options: SAMEORIGIN</code> vào hàm <code>send_html</code> trong <code>common.py</code> để chống lại tấn công MIME-sniffing và Clickjacking.
-          </div>
-        </div>
-
-        <div style="background: #f8fafc; border: 1px solid var(--border); border-left: 4px solid #16a34a; border-radius: 6px; padding: 14px;">
-          <div style="font-weight: 700; font-size: 14px; color: #15803d; margin-bottom: 4px;">2. Duy trì Tham Số Hóa Truy Vấn 100%</div>
-          <div style="font-size: 12px; color: var(--text-muted);">
-            Tuyệt đối tuân thủ sử dụng dấu hỏi <code>?</code> và tuple trong các truy vấn <code>conn.execute()</code>, loại bỏ hoàn toàn việc ghép chuỗi để triệt tiêu nguy cơ SQL Injection.
-          </div>
-        </div>
-
-        <div style="background: #f8fafc; border: 1px solid var(--border); border-left: 4px solid #ca8a04; border-radius: 6px; padding: 14px;">
-          <div style="font-weight: 700; font-size: 14px; color: #854d0e; margin-bottom: 4px;">3. Tăng cường Kiểm Soát Lỗi Ngoại Lệ</div>
-          <div style="font-size: 12px; color: var(--text-muted);">
-            Bắt toàn bộ ngoại lệ <code>ValueError</code> khi phân tích tham số ID hoặc ngày tháng để trả về thông báo lỗi thân thiện (400 Bad Request), không làm rò rỉ Python Traceback ra màn hình.
+            Triển khai chứng chỉ TLS/HTTPS khi đưa lên môi trường sản xuất, kích hoạt tiêu đề <code>Strict-Transport-Security: max-age=31536000</code> và gắn cờ <code>HttpOnly; SameSite=Lax; Secure</code> cho session cookie.
           </div>
         </div>
       </div>
