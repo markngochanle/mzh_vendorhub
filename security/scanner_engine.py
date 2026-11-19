@@ -247,12 +247,12 @@ class SecurityScannerEngine:
         ]
 
         for route in destructive_routes:
-            # Check if route block contains log_audit or audit
-            pattern = re.compile(rf'if path == "{re.escape(route)}":[\s\S]*?(?=if path ==|$)', re.MULTILINE)
+            # Check if route block contains log_audit or audit or log_action
+            pattern = re.compile(rf'if path == "{re.escape(route)}":([\s\S]+?)(?=\n\s*(?:elif|if)\s+path\s*==|\Z)')
             m = pattern.search(code)
             if m:
-                block = m.group(0)
-                if "log_audit" in block or "audit" in block:
+                block = m.group(1)
+                if any(k in block for k in ("log_audit", "audit", "log_action")):
                     self.record_check(True)
                 else:
                     self.add_finding(
